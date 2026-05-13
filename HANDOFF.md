@@ -6,6 +6,24 @@
 
 ---
 
+## Post-Sprint-02 polish (PR `fix/install-embedded-context`)
+
+When a merchant opens the embedded app via the Shopify Admin sidebar (`admin.shopify.com/store/<shop>/apps/<app>`), Shopify passes `?host=` (a base64-encoded admin URL) but **not** `?shop=`. The Sprint 02 install button only read `?shop=`, so it rendered disabled and App Bridge threw `missing required configuration fields: shop`, producing cross-origin postMessage failures between `app.lapsed.ai` and `admin.shopify.com`.
+
+The fix lives in three layers:
+
+1. **`host-decode.ts`** — a pure helper (`shopFromHost`, `shopFromParams`) that decodes `?host=` by base64-decoding the value, extracting the shop slug from the `/store/<shop>` path segment, and reconstructing `<shop>.myshopify.com`. `shopFromParams` applies the priority chain: `?shop=` → `?host=` → null.
+
+2. **`_install-button.tsx`** — now calls `shopFromParams` in the `useEffect` that reads URL params. When only `?host=` is present the shop is derived from it and passed as `?shop=` on the top-window redirect to `/api/shopify/install`, so the OAuth flow receives the correct merchant identity.
+
+3. **`page.tsx` (server component)** — the fastest path: if `?host=` is present but `?shop=` is not, the server derives the shop from `shopFromHost` and immediately issues a `redirect()` to `/api/shopify/install?shop=<derived>&host=<host>` before the page renders at all, bypassing the install button entirely for the embedded-from-Admin flow.
+
+The `install-button` fallback (disabled state, "Open from Shopify Admin to install") is now truly a last resort — it fires only when neither `?shop=` nor a decodeable `?host=` is present, which in practice means someone navigated to the install page directly from a browser with no params.
+
+11 unit tests added in `apps/web/__tests__/host-decode.test.ts` covering: standard host, host with trailing slash, host with no shop segment (null), empty/invalid base64 (null), and the full `shopFromParams` priority chain including `?shop=` taking precedence over `?host=`.
+
+---
+
 ## Post-Sprint-02 polish (PR `fix/app-bridge-loading`)
 
 The embedded app inside Shopify Admin was failing with `App Bridge must be included as the first <script> tag … Do not use async, defer or type=module`. Sprint 02's root layout loaded App Bridge via Next's `<Script strategy="beforeInteractive">`, which React 19 / Next 15 silently rewrote with `async=""`. The fix replaces the `<Script>` import with a literal JSX `<script>` element inside a real `<head>` element in `apps/web/app/layout.tsx`, immediately after a `<meta name="shopify-api-key">` tag. That bypasses React's auto-async behaviour (verified by curl-grep — the rendered tag has no `async` attribute). The shop-api-key meta now reads from a new `NEXT_PUBLIC_SHOPIFY_API_KEY` env var (same value as `SHOPIFY_API_KEY`; the API key is public, only the secret is sensitive). `NEXT_PUBLIC_SHOPIFY_API_KEY` was added to `.env.local`, mirrored via the `mirrorOf` field in `scripts/push-vercel-env.mjs`, and pushed to dev/preview/production on Vercel. The install button on `/app/auth/install` was converted to a client component that reads `?shop=…&host=…` from the iframe URL and does a `window.top.location.href = …` redirect to break out of the Shopify Admin iframe before hitting Shopify's OAuth consent page (which refuses to load embedded). When `?shop` is absent the button disables itself with copy "Open from Shopify Admin to install" rather than dead-clicking. The contrast bug — the primary `bg-ink-900 text-cream-50` button rendered as black-on-black in some iframe hosts due to `color: inherit` overrides — is solved by swapping the install CTA to `bg-lavender-400 text-ink-900 hover:bg-lavender-500` (the Vellum lavender-on-ink accent variant). One known residual: Next's framework chunks still appear in `<head>` *before* the App Bridge script, so App Bridge isn't literally the first `<script>` in the DOM — only the async/defer half of its check is solved. If Shopify's runtime turns out to enforce the "first script" half strictly, the next move is a Next middleware that prepends the App Bridge tag at HTTP-response time (App Router has no `_document.tsx` equivalent that could place it ahead of React's resource-hoisted chunks).

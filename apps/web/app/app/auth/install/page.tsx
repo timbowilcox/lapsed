@@ -1,6 +1,8 @@
+import { redirect } from "next/navigation";
 import { Card, Tag } from "@lapsed/ui";
 import { Lock, Send, BarChart3 } from "lucide-react";
 import { InstallButton } from "./_install-button";
+import { shopFromHost } from "./host-decode";
 
 const requiredScopes = [
   { scope: "read_customers", description: "Identify lapsed customers from your customer list" },
@@ -18,7 +20,28 @@ const optionalScopes = [
   "read_price_rules",
 ];
 
-export default function InstallPage() {
+type PageSearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+export default async function InstallPage({
+  searchParams,
+}: {
+  searchParams: PageSearchParams;
+}) {
+  const params = await searchParams;
+  const host = typeof params.host === "string" ? params.host : undefined;
+  const shopParam = typeof params.shop === "string" ? params.shop : undefined;
+
+  // Embedded-from-admin path: Shopify passes ?host= but not ?shop=.
+  // Derive the shop server-side and redirect straight to the install
+  // endpoint — skips the install-button page entirely for this flow.
+  if (host && !shopParam) {
+    const derivedShop = shopFromHost(host);
+    if (derivedShop) {
+      redirect(
+        `/api/shopify/install?shop=${encodeURIComponent(derivedShop)}&host=${encodeURIComponent(host)}`
+      );
+    }
+  }
   return (
     <div className="min-h-screen bg-cream-100">
       <header className="border-b border-border px-32 py-16">
