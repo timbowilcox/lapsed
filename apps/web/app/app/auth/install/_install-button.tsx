@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@lapsed/ui";
 import { ShoppingBag } from "lucide-react";
+import { shopFromParams } from "./host-decode";
 
 /**
  * Install CTA on the public install screen. The screen is typically
@@ -20,6 +21,11 @@ import { ShoppingBag } from "lucide-react";
  * App Bridge's Redirect API is not applicable here: there is no
  * merchant session yet, so App Bridge has nothing to bind to.
  *
+ * Shop resolution priority (see host-decode.ts):
+ *   ?shop= → use directly (standard install-link flow)
+ *   ?host= → base64-decode to derive shop domain (Admin sidebar flow)
+ *   neither → button disabled
+ *
  * Styling note: the button uses the lavender accent on ink-black ring
  * rather than the default primary (ink-on-cream). The default has had
  * a contrast regression in iframe contexts where some hosts apply
@@ -33,13 +39,14 @@ export function InstallButton() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    setShop(params.get("shop"));
+    setShop(shopFromParams(params));
     setHost(params.get("host"));
   }, []);
 
   const handleInstall = () => {
+    if (!shop) return;
     const target = new URL("/api/shopify/install", window.location.origin);
-    if (shop) target.searchParams.set("shop", shop);
+    target.searchParams.set("shop", shop);
     if (host) target.searchParams.set("host", host);
     const dest = target.toString();
     // Break out of the Shopify Admin iframe before navigating to
