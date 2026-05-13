@@ -1,7 +1,41 @@
+# env
 .env.local
 .env*.local
+
+# node
 node_modules
+.pnpm-store
+
+# build
 .next
 .vercel
-.DS_Store
+.turbo
+dist
+build
+out
+storybook-static
+
+# coverage / test
+coverage
+playwright-report
+test-results
+.nyc_output
+
+# tsc
+*.tsbuildinfo
+
+# logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

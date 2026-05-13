@@ -1,0 +1,102 @@
+:root {
+  /* ── Lavender (brand accent) ───────────────────────────────────────────── */
+  --lavender-50: #F5F1FF;
+  --lavender-100: #E8DFFC;
+  --lavender-200: #D4C5F8;
+  --lavender-400: #B8A6F4;
+  --lavender-500: #9C85EE;
+  --lavender-700: #6B52C9;
+
+  /* ── Cream (surface — warm white system) ───────────────────────────────── */
+  --cream-50: #FCFAF5;
+  --cream-100: #F8F5EE;
+  --cream-200: #F2EDE2;
+  --cream-300: #E8E1D2;
+  --cream-400: #D6CCB7;
+
+  /* ── Ink (text + primary buttons) ──────────────────────────────────────── */
+  --ink-900: #0A0A0B;
+  --ink-700: #2E2C2A;
+  --ink-500: #5F5C57;
+  --ink-300: #94918A;
+
+  /* ── Status (semantic only — never decorative) ─────────────────────────── */
+  --success-500: #2D8A4E;
+  --success-100: #DDF0E2;
+  --warning-500: #C8941E;
+  --warning-100: #F8ECCD;
+  --danger-500: #C04848;
+  --danger-100: #F4DCDC;
+
+  /* ── Border ────────────────────────────────────────────────────────────── */
+  --border: #ECE6D6;
+  --border-strong: #D8D0BC;
+
+  /* ── Radius ────────────────────────────────────────────────────────────── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ── Fonts ─────────────────────────────────────────────────────────────── */
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+
+  /* ── Focus ring (the only shadow allowed) ──────────────────────────────── */
+  --focus-ring: 0 0 0 3px rgba(156, 133, 238, 0.25);
+}
+
+/* ── Base resets / app-wide foundations ──────────────────────────────────── */
+html,
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--ink-900);
+  background: var(--cream-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* ── Pulse animation (live-revenue dot only) ─────────────────────────────── */
+@keyframes lapsed-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* ── Page-load reveal ─────────────────────────────────────────────────────── */
+@keyframes lapsed-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}

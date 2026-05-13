@@ -1,0 +1,20 @@
+{
+  "name": "@lapsed/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.js",
+  "files": ["index.js", "eslint.js", "prettier.js", "tsconfig.base.json"],
+  "exports": {
+    "./eslint": "./eslint.js",
+    "./prettier": "./prettier.js"
+  },
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.1.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.1.0"
+  }
+}
