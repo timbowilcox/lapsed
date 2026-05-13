@@ -38,7 +38,15 @@ export function serverEnv(): ServerEnv {
   return cached;
 }
 
-/** Public env values that may be read from client components. */
+/**
+ * Public env values that may be read from client components. Next
+ * inlines `process.env.NEXT_PUBLIC_*` at build time, so these are
+ * embedded into the client JS bundle and safe to read in browser code.
+ *
+ * NEXT_PUBLIC_SHOPIFY_API_KEY mirrors SHOPIFY_API_KEY (it's the same
+ * value — the API key is public; only the secret is sensitive). Used
+ * by the App Bridge meta tag in the root layout.
+ */
 export const publicEnv = {
   shopifyApiKey: process.env.NEXT_PUBLIC_SHOPIFY_API_KEY ?? "",
 } as const;

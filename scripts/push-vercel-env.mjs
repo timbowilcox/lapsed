@@ -17,6 +17,7 @@ const PROJECT_NAME = "lapsed-web";
 // Keep in sync with apps/web/app/lib/env.ts and scripts/vercel-env-check.mjs.
 const EXPECTED = [
   { key: "SHOPIFY_API_KEY", type: "encrypted" },
+  { key: "NEXT_PUBLIC_SHOPIFY_API_KEY", type: "plain", mirrorOf: "SHOPIFY_API_KEY" },
   { key: "SHOPIFY_API_SECRET", type: "encrypted" },
   { key: "SHOPIFY_SCOPES", type: "plain" },
   { key: "SHOPIFY_OPTIONAL_SCOPES", type: "plain" },
@@ -78,7 +79,11 @@ for (const e of existing.envs) {
 }
 
 for (const spec of EXPECTED) {
-  const value = pickEnv(spec.key) ?? spec.default ?? null;
+  // `mirrorOf` lets a NEXT_PUBLIC_* key inherit its value from the
+  // canonical (non-public) env var, so we don't duplicate values in
+  // .env.local.
+  const sourceKey = spec.mirrorOf ?? spec.key;
+  const value = pickEnv(spec.key) ?? pickEnv(sourceKey) ?? spec.default ?? null;
   if (!value) {
     console.warn(`  skipping ${spec.key} — not present in .env.local`);
     continue;

@@ -1,5 +1,6 @@
-import { Button, Card, Tag } from "@lapsed/ui";
-import { ShoppingBag, Lock, Send, BarChart3 } from "lucide-react";
+import { Card, Tag } from "@lapsed/ui";
+import { Lock, Send, BarChart3 } from "lucide-react";
+import { InstallButton } from "./_install-button";
 
 const requiredScopes = [
   { scope: "read_customers", description: "Identify lapsed customers from your customer list" },
@@ -78,9 +79,7 @@ export default function InstallPage() {
         </Card>
 
         <div className="flex flex-col items-center gap-8">
-          <Button size="lg">
-            <ShoppingBag strokeWidth={1.75} size={18} /> Install on Shopify
-          </Button>
+          <InstallButton />
           <a
             href="/app"
             className="inline-flex items-center gap-4 text-meta text-ink-500 hover:text-ink-900"
