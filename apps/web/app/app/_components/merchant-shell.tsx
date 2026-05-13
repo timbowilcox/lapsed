@@ -3,7 +3,12 @@
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
 import { AppShell, type SidebarNavSection } from "@lapsed/ui";
-import { merchant, campaigns, conversations } from "@lapsed/fixtures";
+import {
+  merchant as fixtureMerchant,
+  campaigns,
+  conversations,
+} from "@lapsed/fixtures";
+import { useMerchant } from "./merchant-context";
 
 const campaignsCount = campaigns.filter((c) => c.status !== "draft").length;
 const conversationsCount = conversations.filter((c) => c.status === "active").length;
@@ -16,7 +21,7 @@ const sections: SidebarNavSection[] = [
         href: "/app/lapsed",
         icon: "Users",
         label: "Lapsed customers",
-        count: merchant.totalLapsedCount.toLocaleString(),
+        count: fixtureMerchant.totalLapsedCount.toLocaleString(),
       },
       { href: "/app/campaigns", icon: "Send", label: "Campaigns", count: campaignsCount },
       {
@@ -56,17 +61,22 @@ export function MerchantShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const session = useMerchant();
   const activeHref = resolveActive(pathname);
+
+  const shopInitials = session?.shopInitials ?? fixtureMerchant.shopInitials;
+  const shopName = session?.shopName ?? fixtureMerchant.shopName;
+  const planLabel = session?.planLabel ?? fixtureMerchant.planLabel;
 
   return (
     <AppShell
       sections={sections}
       activeHref={activeHref}
       pageTitle={pageTitle}
-      shopInitials={merchant.shopInitials}
-      shopName={merchant.shopName}
-      planLabel={merchant.planLabel}
-      userInitials={merchant.ownerInitials}
+      shopInitials={shopInitials}
+      shopName={shopName}
+      planLabel={planLabel}
+      userInitials={fixtureMerchant.ownerInitials}
       hasNotifications
     >
       {children}

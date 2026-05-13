@@ -1,3 +1,27 @@
-// @lapsed/shopify — Shopify API client + webhook handlers.
-// Scaffolded in Sprint 01. OAuth + webhooks land in Sprint 02.
-export const SHOPIFY_VERSION = "0.1.0-scaffold";
+export { computeOAuthHmac, verifyOAuthHmac } from "./hmac";
+export {
+  signStateToken,
+  verifyStateToken,
+  STATE_TOKEN_COOKIE,
+  STATE_TTL_MS,
+  type VerifyStateResult,
+} from "./state-token";
+export {
+  isValidShopDomain,
+  buildAuthorizeUrl,
+  verifyOAuthCallback,
+  exchangeCodeForToken,
+  type CallbackVerificationResult,
+  type ShopifyAccessTokenResponse,
+} from "./oauth";
+export {
+  verifyShopifySessionToken,
+  getShopDomainFromSession,
+  type ShopifySessionClaims,
+  type VerifySessionResult,
+} from "./session";
+export {
+  mintSessionCookie,
+  SESSION_COOKIE,
+  SESSION_TTL_SECONDS,
+} from "./session-cookie";

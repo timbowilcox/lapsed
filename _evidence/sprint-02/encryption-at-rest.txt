@@ -1,0 +1,10 @@
+=== Encryption-at-rest evidence ===
+shop_domain:         encryption-verify-1778684765116.myshopify.com
+plaintext was:       shpat_evidence_token_does_not_appear_in_db
+plaintext hex was:   73687061745f65766964656e63655f746f6b656e5f646f65735f6e6f745f6170706561725f696e5f6462
+stored bytes len:    70
+stored hex (first 96): 438a3287755c2dc92c47673ef931c32eac5a0036583ee5b0147738c875e799d61cb9dcecfb19d2068bd1169a048abaaa…
+plaintext leak?      false
+structure:           iv(12) || authTag(16) || ciphertext(42)
+
+  ✓ ciphertext does not contain plaintext — encryption-at-rest verified

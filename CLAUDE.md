@@ -27,7 +27,7 @@ This file is the harness initializer for the lapsed.ai codebase. Read it first i
 | Component dev | Storybook 8 | Every custom component has a story |
 | SMS | Twilio | Telnyx as future fallback |
 | Email (fallback) | Resend | Sprint 06 only |
-| LLM | Anthropic API | `claude-sonnet-4-6` default, `claude-opus-4-7` for scoring |
+| LLM | Anthropic API | `claude-sonnet-4-6` default, `claude-haiku-4-5-20251001` for batch scoring |
 | Payments | Stripe | Subscriptions + metered usage |
 | Background jobs | Supabase Edge Functions + `pg_cron` | No external queue in v1 |
 | Testing | Vitest (unit), Playwright (integration + E2E) | See "Self-verification" |

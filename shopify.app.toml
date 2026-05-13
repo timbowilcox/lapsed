@@ -1,0 +1,48 @@
+# Lapsed Shopify app config — see https://shopify.dev/docs/apps/tools/cli/configuration
+# Generated from .env.local for Sprint 02. Source of truth for the app's
+# install behaviour; `shopify app config push` syncs this to the Partner
+# Dashboard (do not edit there directly).
+
+client_id = "d7c8736233049f6489c57c82ceb0f569"
+name = "Lapsed"
+handle = "lapsed"
+application_url = "https://app.lapsed.ai"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "lapsed-test.myshopify.com"
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-04"
+
+[access_scopes]
+# Required scopes — requested at install time. Keep this list minimal to
+# maximise install conversion. Anything added here forces every existing
+# merchant to re-authorise.
+scopes = "read_customers,read_orders,read_products,write_discounts,write_pixels"
+
+# Optional scopes — declared here so they're known to Shopify, but
+# requested dynamically when the feature that needs them runs for the
+# first time. Free to add; never moves up to `scopes` without an explicit
+# decision.
+optional_scopes = [
+  "read_inventory",
+  "read_checkouts",
+  "write_draft_orders",
+  "read_locations",
+  "read_price_rules",
+]
+
+[access]
+admin.direct_api_mode = "online"
+admin.embedded_app_direct_api_access = true
+
+[auth]
+redirect_urls = [
+  "https://app.lapsed.ai/api/shopify/callback",
+]
+
+[pos]
+embedded = false
