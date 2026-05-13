@@ -11,7 +11,7 @@
  * SUPABASE_JWT_SECRET, SUPABASE_DB_URL in .env.local.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client as PgClient } from "pg";
@@ -25,21 +25,29 @@ interface Env {
   dbUrl: string;
 }
 
-function loadEnv(): Env {
-  const envPath = join(__dirname, "..", "..", "..", ".env.local");
-  const txt = readFileSync(envPath, "utf8");
-  function pick(k: string): string {
+/**
+ * Resolve Supabase credentials. Prefers process.env (CI path), falls
+ * back to .env.local (developer machine). Returns null when no
+ * credentials are available — tests `it.skipIf` on that.
+ */
+function loadEnv(): Env | null {
+  function pick(k: string, txt: string | null): string | undefined {
+    if (process.env[k]) return process.env[k]!;
+    if (!txt) return undefined;
     const m = txt.match(new RegExp(`^${k}=(.+)$`, "m"));
-    if (!m) throw new Error(`${k} missing from .env.local`);
-    return m[1]!.trim();
+    return m ? m[1]!.trim() : undefined;
   }
-  return {
-    url: pick("NEXT_PUBLIC_SUPABASE_URL"),
-    publishableKey: pick("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
-    jwtSecret: pick("SUPABASE_JWT_SECRET"),
-    dbUrl: pick("SUPABASE_DB_URL"),
-  };
+  const envPath = join(__dirname, "..", "..", "..", ".env.local");
+  const txt = existsSync(envPath) ? readFileSync(envPath, "utf8") : null;
+  const url = pick("NEXT_PUBLIC_SUPABASE_URL", txt);
+  const publishableKey = pick("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", txt);
+  const jwtSecret = pick("SUPABASE_JWT_SECRET", txt);
+  const dbUrl = pick("SUPABASE_DB_URL", txt);
+  if (!url || !publishableKey || !jwtSecret || !dbUrl) return null;
+  return { url, publishableKey, jwtSecret, dbUrl };
 }
+
+const SUPABASE_AVAILABLE = loadEnv() !== null;
 
 const SHOP_A = `rls-test-a-${Date.now()}.myshopify.com`;
 const SHOP_B = `rls-test-b-${Date.now()}.myshopify.com`;
@@ -48,7 +56,8 @@ const ENCRYPTION_KEY = randomBytes(32);
 let env: Env;
 
 beforeAll(async () => {
-  env = loadEnv();
+  if (!SUPABASE_AVAILABLE) return;
+  env = loadEnv()!;
   const pg = new PgClient({ connectionString: env.dbUrl });
   await pg.connect();
   try {
@@ -66,6 +75,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (!SUPABASE_AVAILABLE) return;
   const pg = new PgClient({ connectionString: env.dbUrl });
   await pg.connect();
   try {
@@ -78,7 +88,7 @@ afterAll(async () => {
   }
 });
 
-describe("RLS — merchants_self_read", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — merchants_self_read", () => {
   it("merchant A sees their own row", async () => {
     const jwt = await mintMerchantJwt({ shopDomain: SHOP_A, jwtSecret: env.jwtSecret });
     const client = createMerchantClient({
