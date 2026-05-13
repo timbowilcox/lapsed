@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>lapsed. — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  :root {
+    --lavender-50:  #F5F1FF;
+    --lavender-100: #E8DFFC;
+    --lavender-200: #D4C5F8;
+    --lavender-400: #B8A6F4;
+    --lavender-500: #9C85EE;
+    --lavender-700: #6B52C9;
+
+    --cream-50:  #FCFAF5;
+    --cream-100: #F8F5EE;
+    --cream-200: #F2EDE2;
+    --cream-300: #E8E1D2;
+    --cream-400: #D6CCB7;
+
+    --ink-900: #0A0A0B;
+    --ink-700: #2E2C2A;
+    --ink-500: #5F5C57;
+    --ink-300: #94918A;
+
+    --success-500: #2D8A4E;
+    --success-100: #DDF0E2;
+    --warning-500: #C8941E;
+    --warning-100: #F8ECCD;
+    --danger-500:  #C04848;
+    --danger-100:  #F4DCDC;
+
+    --border: #ECE6D6;
+    --border-strong: #D8D0BC;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+
+    --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-serif: 'Instrument Serif', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    color: var(--ink-900);
+    background: var(--cream-100);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+
+  /* ============ SIDEBAR ============ */
+  .sidebar {
+    background: var(--lavender-400);
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+
+  .wordmark {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--ink-900);
+    padding: 8px 12px 32px 12px;
+    line-height: 1;
+  }
+  .wordmark .dot { color: var(--ink-900); }
+
+  .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    color: var(--ink-900);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    opacity: 0.78;
+    transition: all 0.15s ease;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.25); opacity: 1; }
+  .nav-item.active {
+    background: var(--ink-900);
+    color: var(--cream-50);
+    opacity: 1;
+  }
+  .nav-item .badge {
+    margin-left: auto;
+    background: var(--lavender-100);
+    color: var(--lavender-700);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    line-height: 1.4;
+  }
+  .nav-item.active .badge { background: var(--lavender-400); color: var(--ink-900); }
+  .nav-item svg { width: 18px; height: 18px; stroke-width: 1.75; }
+
+  .nav-section-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-700);
+    opacity: 0.6;
+    padding: 16px 12px 8px 12px;
+  }
+
+  .shop-switcher {
+    margin-top: 16px;
+    background: rgba(10,10,11,0.08);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .shop-switcher:hover { background: rgba(10,10,11,0.12); }
+  .shop-avatar {
+    width: 32px; height: 32px;
+    background: var(--ink-900);
+    color: var(--cream-50);
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 13px;
+    flex-shrink: 0;
+  }
+  .shop-info { flex: 1; min-width: 0; }
+  .shop-name { font-size: 13px; font-weight: 600; color: var(--ink-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .shop-plan { font-size: 11px; color: var(--ink-700); opacity: 0.75; }
+  .shop-switcher svg { width: 14px; height: 14px; color: var(--ink-900); opacity: 0.6; }
+
+  /* ============ MAIN ============ */
+  .main { display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 64px;
+    padding: 0 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--cream-100);
+  }
+  .page-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .topbar-actions { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 36px; height: 36px;
+    border: none; background: transparent;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--ink-700);
+    position: relative;
+    transition: background 0.15s ease;
+  }
+  .icon-btn:hover { background: var(--cream-200); }
+  .icon-btn svg { width: 18px; height: 18px; stroke-width: 1.75; }
+  .icon-btn .dot {
+    position: absolute; top: 7px; right: 8px;
+    width: 7px; height: 7px;
+    background: var(--danger-500);
+    border-radius: 50%;
+    border: 2px solid var(--cream-100);
+  }
+  .avatar-btn {
+    width: 32px; height: 32px;
+    background: var(--ink-900); color: var(--cream-50);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 12px;
+    cursor: pointer;
+    margin-left: 4px;
+  }
+
+  .content {
+    padding: 32px;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  /* ============ HERO ============ */
+  .hero {
+    background: var(--cream-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px 32px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 32px;
+  }
+  .hero-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-500);
+    letter-spacing: 0.01em;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .hero-label .pulse {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--success-500);
+    position: relative;
+  }
+  .hero-label .pulse::after {
+    content: '';
+    position: absolute; inset: -3px;
+    border-radius: 50%;
+    background: var(--success-500);
+    opacity: 0.3;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.6); opacity: 0; }
+  }
+  .hero-value {
+    font-family: var(--font-serif);
+    font-size: 64px;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-weight: 400;
+    color: var(--ink-900);
+    margin-bottom: 6px;
+  }
+  .hero-value .currency { font-size: 36px; color: var(--ink-500); vertical-align: top; line-height: 1.2; }
+  .hero-meta { font-size: 13px; color: var(--ink-500); }
+  .hero-meta .up { color: var(--success-500); font-weight: 500; }
+
+  .hero-chart {
+    width: 280px; height: 80px;
+    position: relative;
+  }
+  .hero-chart svg { width: 100%; height: 100%; overflow: visible; }
+
+  /* ============ METRICS ============ */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .metric {
+    background: var(--cream-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px 22px;
+  }
+  .metric-label {
+    font-size: 13px;
+    color: var(--ink-500);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .metric-value {
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+  .metric-trend { font-size: 12px; color: var(--ink-500); }
+  .metric-trend.up { color: var(--success-500); }
+  .metric-trend.down { color: var(--danger-500); }
+
+  /* ============ TWO COLUMN ============ */
+  .grid-2col {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 16px;
+  }
+
+  .panel {
+    background: var(--cream-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 18px 22px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-title { font-size: 15px; font-weight: 600; }
+  .panel-link {
+    font-size: 13px; color: var(--ink-500); font-weight: 500;
+    text-decoration: none;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .panel-link:hover { color: var(--ink-900); }
+  .panel-link svg { width: 14px; height: 14px; }
+
+  /* ============ CAMPAIGNS ============ */
+  .campaign-row {
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 16px;
+    align-items: center;
+  }
+  .campaign-row:last-child { border-bottom: none; }
+  .campaign-row:hover { background: var(--cream-100); cursor: pointer; }
+
+  .campaign-name { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+  .campaign-meta { font-size: 12px; color: var(--ink-500); }
+  .campaign-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+  .campaign-status .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+  .status-live { background: var(--success-100); color: var(--success-500); }
+  .status-live .status-dot { background: var(--success-500); }
+  .status-draft { background: var(--cream-200); color: var(--ink-700); }
+  .status-draft .status-dot { background: var(--ink-300); }
+  .status-paused { background: var(--warning-100); color: var(--warning-500); }
+  .status-paused .status-dot { background: var(--warning-500); }
+
+  .campaign-revenue {
+    font-size: 14px; font-weight: 600; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .campaign-revenue-label { font-size: 11px; color: var(--ink-500); font-weight: 400; }
+
+  /* ============ CONVERSATIONS ============ */
+  .conv-row {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .conv-row:last-child { border-bottom: none; }
+  .conv-row:hover { background: var(--cream-100); cursor: pointer; }
+
+  .conv-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--lavender-100);
+    color: var(--lavender-700);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 11px;
+    flex-shrink: 0;
+  }
+  .conv-body { flex: 1; min-width: 0; }
+  .conv-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  .conv-name { font-size: 13px; font-weight: 600; }
+  .conv-time { font-size: 11px; color: var(--ink-300); flex-shrink: 0; }
+  .conv-preview {
+    font-size: 12px; color: var(--ink-500);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+  }
+  .conv-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tag-converted { background: var(--success-100); color: var(--success-500); }
+  .tag-active { background: var(--lavender-100); color: var(--lavender-700); }
+  .tag-stalled { background: var(--cream-200); color: var(--ink-500); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="wordmark">lapsed<span class="dot">.</span></div>
+
+    <nav class="nav">
+      <a class="nav-item active" href="#"><i data-lucide="layout-dashboard"></i> Dashboard</a>
+      <a class="nav-item" href="#"><i data-lucide="users"></i> Lapsed customers <span class="badge">2,847</span></a>
+      <a class="nav-item" href="#"><i data-lucide="send"></i> Campaigns <span class="badge">3</span></a>
+      <a class="nav-item" href="#"><i data-lucide="message-circle"></i> Conversations <span class="badge">14</span></a>
+      <a class="nav-item" href="#"><i data-lucide="trending-up"></i> Attribution</a>
+
+      <div class="nav-section-label">Account</div>
+      <a class="nav-item" href="#"><i data-lucide="credit-card"></i> Billing</a>
+      <a class="nav-item" href="#"><i data-lucide="settings"></i> Settings</a>
+    </nav>
+
+    <div class="shop-switcher">
+      <div class="shop-avatar">BG</div>
+      <div class="shop-info">
+        <div class="shop-name">Bondi Goods</div>
+        <div class="shop-plan">Growth · 25k msgs</div>
+      </div>
+      <i data-lucide="chevrons-up-down"></i>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <header class="topbar">
+      <h1 class="page-title">Dashboard</h1>
+      <div class="topbar-actions">
+        <button class="icon-btn" aria-label="Help"><i data-lucide="help-circle"></i></button>
+        <button class="icon-btn" aria-label="Notifications">
+          <i data-lucide="bell"></i>
+          <span class="dot"></span>
+        </button>
+        <div class="avatar-btn">TW</div>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- HERO -->
+      <section class="hero">
+        <div>
+          <div class="hero-label">
+            <span class="pulse"></span>
+            Recovered revenue · last 30 days
+          </div>
+          <div class="hero-value"><span class="currency">$</span>47,283</div>
+          <div class="hero-meta"><span class="up">↑ 23%</span> vs previous period · 142 orders</div>
+        </div>
+        <div class="hero-chart">
+          <svg viewBox="0 0 280 80" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#9C85EE" stop-opacity="0.35" />
+                <stop offset="100%" stop-color="#9C85EE" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <path d="M0,60 L20,55 L40,58 L60,48 L80,52 L100,42 L120,45 L140,38 L160,40 L180,30 L200,33 L220,22 L240,25 L260,15 L280,18 L280,80 L0,80 Z" fill="url(#g)" />
+            <path d="M0,60 L20,55 L40,58 L60,48 L80,52 L100,42 L120,45 L140,38 L160,40 L180,30 L200,33 L220,22 L240,25 L260,15 L280,18" fill="none" stroke="#6B52C9" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
+        </div>
+      </section>
+
+      <!-- METRICS -->
+      <section class="metrics">
+        <div class="metric">
+          <div class="metric-label">Active campaigns</div>
+          <div class="metric-value">3</div>
+          <div class="metric-trend">2 live · 1 paused</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Lapsed cohort</div>
+          <div class="metric-value">2,847</div>
+          <div class="metric-trend up">↑ 184 this week</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Reactivation rate</div>
+          <div class="metric-value">4.2%</div>
+          <div class="metric-trend up">↑ 0.8pp vs avg</div>
+        </div>
+      </section>
+
+      <!-- TWO COLUMN -->
+      <section class="grid-2col">
+
+        <!-- CAMPAIGNS -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Campaigns</div>
+            <a class="panel-link" href="#">View all <i data-lucide="arrow-right"></i></a>
+          </div>
+
+          <div class="campaign-row">
+            <div>
+              <div class="campaign-name">Summer dormant — 60 day cohort</div>
+              <div class="campaign-meta">812 customers · launched 8 days ago</div>
+            </div>
+            <span class="campaign-status status-live">
+              <span class="status-dot"></span> Live
+            </span>
+            <div>
+              <div class="campaign-revenue">$23,140</div>
+              <div class="campaign-revenue-label">recovered</div>
+            </div>
+          </div>
+
+          <div class="campaign-row">
+            <div>
+              <div class="campaign-name">VIP win-back — 90+ days</div>
+              <div class="campaign-meta">214 customers · launched 3 weeks ago</div>
+            </div>
+            <span class="campaign-status status-live">
+              <span class="status-dot"></span> Live
+            </span>
+            <div>
+              <div class="campaign-revenue">$18,290</div>
+              <div class="campaign-revenue-label">recovered</div>
+            </div>
+          </div>
+
+          <div class="campaign-row">
+            <div>
+              <div class="campaign-name">Replenishment — supplements</div>
+              <div class="campaign-meta">446 customers · scheduled tomorrow</div>
+            </div>
+            <span class="campaign-status status-draft">
+              <span class="status-dot"></span> Draft
+            </span>
+            <div>
+              <div class="campaign-revenue">—</div>
+              <div class="campaign-revenue-label">pending</div>
+            </div>
+          </div>
+
+          <div class="campaign-row">
+            <div>
+              <div class="campaign-name">Holiday returners</div>
+              <div class="campaign-meta">1,189 customers · paused yesterday</div>
+            </div>
+            <span class="campaign-status status-paused">
+              <span class="status-dot"></span> Paused
+            </span>
+            <div>
+              <div class="campaign-revenue">$5,853</div>
+              <div class="campaign-revenue-label">recovered</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONVERSATIONS -->
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Active conversations</div>
+            <a class="panel-link" href="#">View all <i data-lucide="arrow-right"></i></a>
+          </div>
+
+          <div class="conv-row">
+            <div class="conv-avatar">JR</div>
+            <div class="conv-body">
+              <div class="conv-header">
+                <span class="conv-name">Jess R.</span>
+                <span class="conv-time">2m ago</span>
+              </div>
+              <div class="conv-preview">"yeah I'd actually love to try the new one"</div>
+              <span class="conv-tag tag-converted">Converted · $124</span>
+            </div>
+          </div>
+
+          <div class="conv-row">
+            <div class="conv-avatar">MK</div>
+            <div class="conv-body">
+              <div class="conv-header">
+                <span class="conv-name">Marcus K.</span>
+                <span class="conv-time">12m ago</span>
+              </div>
+              <div class="conv-preview">"is shipping still free over $80?"</div>
+              <span class="conv-tag tag-active">AI replying</span>
+            </div>
+          </div>
+
+          <div class="conv-row">
+            <div class="conv-avatar">SP</div>
+            <div class="conv-body">
+              <div class="conv-header">
+                <span class="conv-name">Sarah P.</span>
+                <span class="conv-time">38m ago</span>
+              </div>
+              <div class="conv-preview">"maybe later, send me a reminder next month"</div>
+              <span class="conv-tag tag-stalled">Re-scheduled</span>
+            </div>
+          </div>
+
+          <div class="conv-row">
+            <div class="conv-avatar">AH</div>
+            <div class="conv-body">
+              <div class="conv-header">
+                <span class="conv-name">Adam H.</span>
+                <span class="conv-time">1h ago</span>
+              </div>
+              <div class="conv-preview">"do you have the rose gold in stock?"</div>
+              <span class="conv-tag tag-active">AI replying</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  lucide.createIcons();
+</script>
+</body>
+</html>
