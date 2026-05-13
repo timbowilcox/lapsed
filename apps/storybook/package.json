@@ -1,0 +1,36 @@
+{
+  "name": "@lapsed/storybook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "storybook dev -p 6006 --no-open",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build": "storybook build --output-dir storybook-static",
+    "lint": "echo \"storybook lint via packages/ui\" && exit 0",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no storybook unit tests\" && exit 0",
+    "clean": "rm -rf .turbo storybook-static node_modules/.cache"
+  },
+  "dependencies": {
+    "@lapsed/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@lapsed/config": "workspace:*",
+    "@storybook/addon-essentials": "^8.4.0",
+    "@storybook/addon-themes": "^8.4.0",
+    "@storybook/react": "^8.4.0",
+    "@storybook/react-vite": "^8.4.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "storybook": "^8.4.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.11"
+  }
+}

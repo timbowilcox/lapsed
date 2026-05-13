@@ -1,0 +1,113 @@
+import {
+  Card,
+  Panel,
+  PanelHeader,
+  PanelBody,
+  Badge,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@lapsed/ui";
+import { attribution } from "@lapsed/fixtures";
+import { MerchantShell } from "../_components/merchant-shell";
+import { AttributionChart } from "./_attribution-chart";
+
+export default function AttributionPage() {
+  return (
+    <MerchantShell pageTitle="Attribution">
+      <div className="mb-24">
+        <h2 className="mb-4 text-h1 text-ink-900">Recovered revenue</h2>
+        <p className="text-meta text-ink-500">
+          Revenue from orders attributable to a campaign-driven conversation, reconciled against
+          Shopify orders.
+        </p>
+      </div>
+
+      <div className="mb-16 grid grid-cols-4 gap-12">
+        <Card className="p-20">
+          <div className="text-label text-ink-500">Total recovered</div>
+          <div className="mt-8 font-serif text-h1 text-ink-900 tabular-nums">
+            ${attribution.totalRecoveredRevenue.toLocaleString()}
+          </div>
+        </Card>
+        <Card className="p-20">
+          <div className="text-label text-ink-500">Recovered orders</div>
+          <div className="mt-8 text-display text-ink-900 tabular-nums">
+            {attribution.totalRecoveredOrders}
+          </div>
+        </Card>
+        <Card className="p-20">
+          <div className="text-label text-ink-500">vs previous 30 days</div>
+          <div className="mt-8 text-display text-success-500 tabular-nums">
+            ↑ {attribution.vsPreviousPeriodPct}%
+          </div>
+        </Card>
+        <Card className="p-20">
+          <div className="text-label text-ink-500">Average order</div>
+          <div className="mt-8 text-display text-ink-900 tabular-nums">
+            $
+            {Math.round(
+              attribution.totalRecoveredRevenue / attribution.totalRecoveredOrders,
+            ).toLocaleString()}
+          </div>
+        </Card>
+      </div>
+
+      <Panel className="mb-16">
+        <PanelHeader title="Recovered revenue — last 30 days" />
+        <PanelBody>
+          <div className="p-22">
+            <AttributionChart byDay={attribution.byDay} />
+          </div>
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelHeader title="By campaign" />
+        <PanelBody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Campaign</TableHead>
+                <TableHead>Recovered revenue</TableHead>
+                <TableHead>Orders</TableHead>
+                <TableHead>Reconciliation</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {attribution.byCampaign.map((b) => (
+                <TableRow key={b.campaignId}>
+                  <TableCell>{b.campaignName}</TableCell>
+                  <TableCell className="tabular-nums">
+                    ${b.recoveredRevenue.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{b.recoveredOrders}</TableCell>
+                  <TableCell>
+                    <Badge
+                      tone={
+                        b.reconciliationStatus === "reconciled"
+                          ? "live"
+                          : b.reconciliationStatus === "pending"
+                            ? "paused"
+                            : "error"
+                      }
+                    >
+                      {b.reconciliationStatus === "reconciled"
+                        ? "Reconciled"
+                        : b.reconciliationStatus === "pending"
+                          ? "Pending"
+                          : "Discrepancy"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </PanelBody>
+      </Panel>
+    </MerchantShell>
+  );
+}
