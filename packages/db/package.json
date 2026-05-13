@@ -5,16 +5,29 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./encryption": "./src/encryption.ts",
+    "./types": "./src/types.ts"
+  },
   "scripts": {
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"__tests__/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"no db tests yet\" && exit 0",
+    "test": "vitest run",
+    "db:push": "supabase db push --db-url \"$SUPABASE_DB_URL\" --include-all --yes",
+    "db:types": "node scripts/gen-types.mjs",
     "clean": "rm -rf .turbo node_modules/.cache"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.46.1",
+    "jose": "^5.9.6",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@lapsed/config": "workspace:*",
+    "@types/pg": "^8.11.10",
     "eslint": "^8.57.1",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
   }
 }

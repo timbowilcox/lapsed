@@ -1,7 +1,7 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["@lapsed/ui", "@lapsed/fixtures"],
+  transpilePackages: ["@lapsed/ui", "@lapsed/fixtures", "@lapsed/shopify", "@lapsed/db"],
 };
 
 export default nextConfig;

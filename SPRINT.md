@@ -1,180 +1,218 @@
-# Sprint 01 — Design System + Clickable v1 UI (No Backend)
+# Sprint 02 — Repo Backend Foundation + Shopify OAuth + Merchant Auth
 
 Date: 2026-05-13
-Repo: lapsed-ai
-Branch: `sprint-01/design-system`
+Repo: lapsed
+Branch: `sprint-02/shopify-auth`
 
 ## Scope
 
-Implement the Vellum design system in code and produce a fully clickable v1 UI with zero backend. Every route listed in the `DESIGN-SYSTEM.md` page inventory must render with seed fixtures and be navigable end-to-end. Storybook is published with stories for every custom component. The Vercel preview deploy is reachable and a Playwright tour passes through every route.
+Wire the first backend layer behind the design system from Sprint 01. By end of sprint, a Shopify merchant can install the lapsed.ai dev app on a real Shopify store, complete OAuth, and land on the merchant dashboard with their actual shop domain visible in the `ShopSwitcher` instead of the seed-fixture "Bondi Goods" label.
 
-This sprint touches no external services beyond Vercel and GitHub. It does not require any of the credentials in `PREREQUISITES.md` sections 3–9. It is designed to run autonomously without supervision.
+This is the first sprint that touches real external services in mutation-mode: Shopify OAuth, Supabase schema, encrypted token persistence, Vercel env var configuration. Use sandbox/dev modes throughout; never reach production credentials.
 
-The closed loop for Sprint 01 is "design system is implemented, all v1 screens exist as click-through prototypes, every component has a story, every route has a Playwright test."
+The closed loop for Sprint 02 is "merchant can install, authenticate, and reach the dashboard with their real shop identity displayed." Order ingestion, scoring, conversations, billing — all out of scope for this sprint.
+
+## Prerequisites (verify before starting)
+
+These items from VERIFICATION.md must be resolved or this sprint cannot complete:
+
+- [ ] `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET` populated in `.env.local` (from the Lapsed app's API access page in Shopify Partners)
+- [ ] `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` starts with `sb_publishable_` (not `eyJ...` legacy JWT)
+- [ ] `SUPABASE_SECRET_KEY` starts with `sb_secret_`
+- [ ] `SUPABASE_DB_URL` connection string with the actual password substituted
+- [ ] `psql` installed locally (`scoop install postgresql`)
+- [ ] Sprint 01 merged to `main` and deployed; Vercel projects (`lapsed-web`, `lapsed-marketing`, `lapsed-storybook`) all linked with correct Root Directories
+
+If any of these are unmet, stop and surface the gaps in `HANDOFF.md` before doing any code work.
 
 ## Acceptance Criteria
 
-### Repo foundation
+### Database schema
 
-- [ ] Turborepo monorepo initialised at repo root with `pnpm` workspaces matching the package layout in `CLAUDE.md` (`apps/web`, `apps/marketing`, `apps/storybook`, `packages/ui`, `packages/core`, `packages/db`, `packages/shopify`, `packages/conversation`, `packages/sms`, `packages/billing`, `packages/fixtures`). Only `apps/web`, `apps/marketing`, `apps/storybook`, `packages/ui`, and `packages/fixtures` need real content this sprint; others are empty scaffolds.
-- [ ] Next.js 16 App Router project in `apps/web` boots locally with `pnpm dev` on port 3000 with zero errors and zero warnings.
-- [ ] Marketing site in `apps/marketing` boots on port 3001.
-- [ ] Storybook in `apps/storybook` boots on port 6006.
-- [ ] TypeScript configured `strict: true` across all packages with zero `any` introduced anywhere. Shared `tsconfig.base.json` at repo root.
-- [ ] ESLint + Prettier configured with shared config in `packages/config`.
-- [ ] CI/CD: GitHub Actions runs `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm test:e2e` on every PR. All green on the sprint branch.
-- [ ] Vercel projects linked: `lapsed-web` deploys `apps/web`, `lapsed-marketing` deploys `apps/marketing`, `lapsed-storybook` deploys `apps/storybook`. Preview URLs in `HANDOFF.md`.
+- [ ] Initial migration committed at `packages/db/supabase/migrations/0001_init.sql` creates the `merchants` table with columns: `id uuid pk default gen_random_uuid()`, `shopify_shop_domain text unique not null`, `shopify_access_token bytea not null` (ciphertext, never plaintext), `shopify_scope text not null`, `installed_at timestamptz not null default now()`, `uninstalled_at timestamptz`, `plan text not null default 'starter'`, `created_at timestamptz not null default now()`, `updated_at timestamptz not null default now()`
+- [ ] Migration applied to remote Supabase project — verified by querying `information_schema.tables` for the `merchants` table existence
+- [ ] If `supabase db push` fails due to the known CLI access-control bug, fall back to applying the migration via `psql "$SUPABASE_DB_URL"` directly — record which path was used in HANDOFF.md
+- [ ] RLS enabled on `merchants` with a policy that allows row read only when the request carries an authenticated session token bound to that merchant's shop domain; the policy uses a custom claim `shop_domain` set during session token verification
+- [ ] TypeScript types generated by `pnpm db:types` (Supabase CLI's `gen types`) and committed to `packages/db/src/types.ts`; consumed by `packages/shopify` and `apps/web`
+- [ ] Updated_at trigger on `merchants` (standard `moddatetime` pattern via Supabase's pre-installed extension)
 
-### Design tokens
+### Token encryption
 
-- [ ] `packages/ui/src/tokens.css` exports every color, spacing, radius, and font token from `DESIGN-SYSTEM.md` as CSS custom properties, with names matching the spec exactly
-- [ ] `packages/ui/tailwind.config.ts` exposes all tokens as Tailwind theme values (colors, fontFamily, fontSize with line-height + tracking + weight, borderRadius, spacing)
-- [ ] Geist and Instrument Serif loaded via `next/font/google` in `apps/web` and `apps/marketing` root layouts
-- [ ] Lucide React installed and a base `<Icon name="..." />` wrapper component exists in `packages/ui` with stroke-width 1.75 applied by default
-- [ ] Storybook displays a "Foundations" section with stories for: Color palette, Typography scale, Spacing scale, Radius, Iconography. Each visualises the tokens.
+- [ ] Shopify access tokens encrypted at rest. Default approach: Supabase Vault if the `vault.secrets` extension is available; fall back to `pgp_sym_encrypt` with a key stored as a Vercel environment variable (`TOKEN_ENCRYPTION_KEY`, 32 bytes, base64-encoded)
+- [ ] The chosen approach is documented in `packages/db/README.md` along with the rotation procedure
+- [ ] Verification: a direct SQL select on `merchants.shopify_access_token` returns ciphertext, not plaintext. Screenshot the query result in HANDOFF.md.
+- [ ] A server-side helper in `packages/db/src/encryption.ts` exposes `encryptToken(plaintext)` and `decryptToken(ciphertext)` functions. Both are pure (no env reads inside the functions; the key is injected at call sites or via a single initialisation function).
 
-### Component library
+### Shopify app config
 
-For every component in the `DESIGN-SYSTEM.md` shadcn mapping table and the custom composed components list, the following must be true:
+- [ ] `shopify.app.toml` exists at the repo root, generated by `shopify app config link --client-id $SHOPIFY_API_KEY` and committed
+- [ ] The `scopes` field matches `.env.local`'s `SHOPIFY_SCOPES` exactly: `read_customers,read_orders,read_products,write_discounts,write_pixels`
+- [ ] The `optional_scopes` field matches `SHOPIFY_OPTIONAL_SCOPES`: `read_inventory,read_checkouts,write_draft_orders,read_locations,read_price_rules`
+- [ ] `application_url` set to the production-style URL `https://app.lapsed.ai`; Shopify CLI overrides this during `shopify app dev` with the Cloudflare tunnel URL
+- [ ] `redirect_urls` includes `https://app.lapsed.ai/api/shopify/callback`
+- [ ] Webhooks API version set to `2026-04`
+- [ ] `shopify app config push` runs cleanly with no diff against the Partner Dashboard
 
-- [ ] Component implemented in `packages/ui/src/components/<kebab-name>.tsx`
-- [ ] Vellum overrides applied per the spec (no default shadcn styling visible)
-- [ ] Storybook story exists at `packages/ui/src/components/<kebab-name>.stories.tsx` with at least one default story and stories for each variant or state listed in the spec
-- [ ] Component is exported from `packages/ui/src/index.ts`
-- [ ] No component uses any hardcoded color, font, or radius — all values come from tokens
+### Shopify OAuth flow
 
-Custom composed components specifically required (no shadcn equivalent):
+- [ ] `apps/web/app/api/shopify/install/route.ts` initiates OAuth: generates a signed state token (10-minute expiry, stored as a signed cookie not a server-side store), constructs the Shopify authorize URL with `client_id`, `scope`, `redirect_uri`, `state`, redirects the browser
+- [ ] `apps/web/app/api/shopify/callback/route.ts` handles the OAuth callback: verifies HMAC signature on every callback, verifies the state cookie matches and hasn't expired, exchanges the authorisation code for an access token via Shopify's `oauth/access_token` endpoint, encrypts the access token, upserts the `merchants` row (insert on first install, update on reinstall), redirects to `/app`
+- [ ] HMAC verification negative test in `packages/shopify/__tests__/oauth.test.ts`: a tampered callback (one byte changed in any query param) is rejected
+- [ ] State token validation negative test: an expired state cookie is rejected; a missing state cookie is rejected; a mismatched state is rejected
+- [ ] All five required scopes are requested; the app does NOT request optional scopes at install time (they're declared in `shopify.app.toml` but requested dynamically when features need them in later sprints)
 
-- [ ] `<HeroMetric>` — label + serif numeral + meta line + mini chart slot
-- [ ] `<MetricCard>` — label + value + trend
-- [ ] `<CampaignRow>` — name/meta column, status badge, revenue column
-- [ ] `<ConversationRow>` — avatar + name/time + preview + tag
-- [ ] `<StatusDot>` — coloured dot + text in a pill, four variants (live, draft, paused, error)
-- [ ] `<SidebarItem>` — icon + label + optional count + active state
-- [ ] `<ShopSwitcher>` — sidebar footer card matching the mockup
-- [ ] `<AppShell>` — sidebar + topbar + content layout matching the mockup
+### App Bridge + embedded app
 
-### Seed fixtures
+- [ ] `@shopify/app-bridge` and `@shopify/app-bridge-react` installed in `apps/web`
+- [ ] App Bridge initialised at the root layout of the `(merchant)` route group with the app's API key
+- [ ] A server-side helper `getMerchantFromSession()` in `packages/shopify/src/session.ts` verifies the JWT session token from App Bridge, extracts the `dest` claim (shop domain), looks up the merchant in Supabase, returns the merchant object or throws
+- [ ] The `getMerchantFromSession()` helper rejects: missing token, expired token, token with invalid signature, token with `iss` not matching the configured shop domain
+- [ ] Unit tests in `packages/shopify/__tests__/session.test.ts` cover all four rejection cases
 
-- [ ] `packages/fixtures/src/` contains seed JSON for: one merchant (`Bondi Goods`, plan: growth), a list of 30 lapsed customers with varied scores, 4 campaigns (matching mockup data), 12 conversations across the four tag states, attribution data for the last 30 days
-- [ ] Every fixture is typed (no `any`) using interfaces co-located with the fixture
-- [ ] Fixtures are imported in routes via `import { merchant, lapsedCustomers, campaigns, conversations, attribution } from '@lapsed/fixtures'`
+### Dashboard wiring (replacing seed fixture)
 
-### Routes (every page from `DESIGN-SYSTEM.md` inventory)
+- [ ] The dashboard at `apps/web/app/(merchant)/app/page.tsx` calls `getMerchantFromSession()` server-side; the `ShopSwitcher` and topbar render the real `shop_domain` instead of "Bondi Goods"
+- [ ] All other UI surfaces (hero metric, campaigns panel, conversations panel, etc.) continue to render seed fixtures — they'll be wired to real data in Sprints 03–06. Do not pull any of that work forward.
+- [ ] If the session token is invalid or the merchant doesn't exist in Supabase, the page redirects to `/app/auth/install` instead of crashing
 
-Each route below must render with seed data and be navigable. No real fetch calls, no auth, no API routes. Routes use the seed fixtures directly.
+### Tenancy isolation
 
-- [ ] `/` — marketing landing (placeholder, hero + features + footer)
-- [ ] `/app/auth/install` — pre-install Shopify install prompt (static, no real install action)
-- [ ] `/app` — dashboard matching the mockup faithfully (use the HTML mockup as the reference)
-- [ ] `/app/lapsed` — lapsed customers list with filter bar and table
-- [ ] `/app/lapsed/[id]` — customer detail with profile, order history timeline, conversation history
-- [ ] `/app/campaigns` — campaigns list
-- [ ] `/app/campaigns/new` — 4-step wizard (audience → offer → message → review). Steps navigable but no real submission.
-- [ ] `/app/campaigns/[id]` — campaign detail with performance header, conversation feed, audience breakdown
-- [ ] `/app/conversations` — all conversations with filter
-- [ ] `/app/conversations/[id]` — conversation thread view with customer sidebar and attribution panel
-- [ ] `/app/attribution` — recovered revenue chart (use Recharts), breakdown by campaign, reconciliation status
-- [ ] `/app/billing` — current plan card, usage meter, invoice history (seed), plan switcher
-- [ ] `/app/settings` — shop info, brand voice, opt-out keywords, integrations placeholders
-- [ ] `/app/onboarding` — 3-step onboarding flow (connect → cadence → first campaign)
+- [ ] RLS policy on `merchants` tested with a cross-tenant access attempt in `packages/db/__tests__/rls.test.ts`: a session bound to merchant A cannot select merchant B's row; the test must use the publishable key (which respects RLS), not the secret key
+- [ ] The test commits a row for "merchant-a.myshopify.com" and "merchant-b.myshopify.com", then attempts a select as each, asserting that neither sees the other
 
-### Playwright tour
+### Vercel environment variables
 
-- [ ] `apps/web/e2e/tour.spec.ts` navigates through every route above, asserts on a unique visible string per page, and captures a full-page screenshot into `_evidence/sprint-01/screenshots/`
-- [ ] Tour passes locally and in CI
-- [ ] Screenshots are committed (or stored as CI artifacts and linked in `HANDOFF.md`)
+- [ ] All env vars from `.env.local` that are referenced by `apps/web` server-side code are pushed to Vercel for the `lapsed-web` project across `development`, `preview`, and `production` environments using `vercel env add`
+- [ ] `NEXT_PUBLIC_*` vars are pushed identically (they're client-bundled but still need to exist in the Vercel project env for build-time inlining)
+- [ ] `SHOPIFY_API_SECRET`, `SUPABASE_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY` are marked as "Encrypted" (server-side only) — Vercel handles this automatically for non-`NEXT_PUBLIC_` vars
+- [ ] A `pnpm vercel:env:check` script at the repo root prints which expected env vars are present/missing on the `lapsed-web` Vercel project — useful for verification, runs in CI
 
-### Marketing site
+### End-to-end integration test
 
-- [ ] `/` renders the v1 landing page: hero ("Recover the customers you already paid for"), three-column features, call-to-action ("Install on Shopify"), footer
-- [ ] Uses the same Vellum tokens — visual continuity between marketing and app
+- [ ] A Playwright test at `apps/web/e2e/shopify-install.spec.ts` walks the real install flow against `lapsed-test.myshopify.com`:
+  1. Navigates to the install URL
+  2. Handles Shopify's consent screen (uses a test merchant account stored in CI secrets)
+  3. Verifies redirect to `/app`
+  4. Asserts the rendered dashboard contains the shop domain `lapsed-test.myshopify.com`
+  5. Captures a screenshot to `_evidence/sprint-02/screenshots/`
+- [ ] The test passes in CI (CI uses Shopify CLI credentials + dev store credentials stored as GitHub Actions secrets)
+
+### Logging hygiene
+
+- [ ] No log statement anywhere in the codebase contains `shop_domain`, `access_token`, raw HMAC values, raw state tokens, or merchant `id` in plaintext. Verified by grep:
+  ```
+  pnpm grep:pii  # scripted check that fails CI if any of the above appear in logs
+  ```
 
 ## Definition of Done
 
-- [ ] All acceptance criteria above checked with evidence in HANDOFF.md
-- [ ] `pnpm typecheck` passes with no errors and zero `any`
-- [ ] `pnpm lint` passes with no warnings
-- [ ] `pnpm test` passes (unit tests for any logic in `packages/ui`)
-- [ ] `pnpm build` passes for all three apps
-- [ ] `pnpm test:e2e` (Playwright tour) passes
-- [ ] All three Vercel preview deploys reachable; URLs in HANDOFF.md
-- [ ] Storybook preview deploy reachable; URL in HANDOFF.md
-- [ ] Visual check: dashboard route matches `mockup-dashboard.html` faithfully (side-by-side screenshots in HANDOFF.md)
-- [ ] HANDOFF.md committed
+- [ ] All acceptance criteria above checked with evidence in `HANDOFF.md`
+- [ ] `pnpm typecheck` passes; zero `any`, zero `@ts-ignore`
+- [ ] `pnpm lint` passes
+- [ ] `pnpm test` passes; new tests in `packages/shopify` and `packages/db` execute
+- [ ] `pnpm build` passes for `apps/web`, `apps/marketing`, `apps/storybook`
+- [ ] `pnpm test:e2e` passes including the new `shopify-install.spec.ts`
+- [ ] `pnpm grep:pii` returns no matches
+- [ ] Cross-tenant RLS test passes
+- [ ] Encrypted-at-rest verification screenshot in HANDOFF.md
+- [ ] `app.lapsed.ai` preview URL is reachable and serves the install screen at `/app/auth/install`
+- [ ] Real install against `lapsed-test.myshopify.com` completes end-to-end manually (you do this one in a browser before merge, in addition to the Playwright test)
+- [ ] `HANDOFF.md` committed with: completed list, test output, screenshots, files changed, exact next step for Sprint 03
 - [ ] Sprint branch merged to `main` via PR with green CI
 
 ## Quality Rubric
 
-Score each 0–3. Anything below 3 needs remediation before closing the sprint.
+Score each 0–3. Anything below 3 needs remediation before closing.
 
-- Every UI surface matches `DESIGN-SYSTEM.md` tokens (no hardcoded colors, fonts, radii) — [score]
-- Every custom component has a Storybook story — [score]
-- TypeScript: zero `any`, zero `@ts-ignore`, zero `@ts-expect-error` — [score]
-- Playwright tour covers every route in the page inventory — [score]
-- Dashboard route renders faithful to the HTML mockup (judged by side-by-side) — [score]
-- Build, typecheck, lint, test, e2e all green in CI — [score]
-
-Rubric criteria from `CLAUDE.md` that do not apply this sprint (no backend): 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 — mark N/A.
+- Tenancy isolation tested with cross-merchant access attempt — [score]
+- Shopify HMAC signature verified on every OAuth callback — [score]
+- State token bound, signed, expires in 10 minutes, rejected when tampered — [score]
+- Access token encrypted at rest with a key not in `.env.local` plaintext (env vars are OK, but the storage layer must use Vault or `pgp_sym_encrypt`) — [score]
+- App Bridge session token verified server-side, not raw cookies — [score]
+- No PII (shop_domain, tokens, merchant ID) in logs — [score]
+- TypeScript types generated from DB schema and used end-to-end — [score]
+- Optional scopes declared in `shopify.app.toml` but NOT requested at install — [score]
+- Real install flow tested end-to-end against `lapsed-test.myshopify.com` — [score]
+- Migration was applied successfully (note path: CLI or psql fallback) — [score]
+- Every UI surface still matches `DESIGN-SYSTEM.md` tokens (no design drift introduced by data wiring) — [score]
+- CI is actually green, not "mostly green with one flaky test" — [score]
 
 ## Out of Scope
 
 Explicitly NOT in this sprint. Do not build any of these.
 
-- Any backend logic, any API routes, any server actions that touch external services
-- Shopify OAuth (Sprint 02)
-- Supabase schema or migrations (Sprint 02)
-- Real data fetching — all data comes from `packages/fixtures`
-- Real authentication — pages render as if a merchant is signed in, no auth gate
-- Any webhook handlers
-- Any LLM calls
-- Any Twilio integration
-- Any Stripe integration
-- Mobile-optimised layouts below 1024px (acceptable to break, must not crash)
-- Dark mode (post-v1)
-- Internationalisation (post-v1)
+- Webhook handlers for `app/uninstalled`, `customers/data_request`, etc. (Sprint 03 sets up the webhook infrastructure)
+- Any order, customer, or product data ingestion (Sprint 03)
+- Cadence calculation, lapsed classification, scoring (Sprint 04)
+- Campaign creation as a backend operation — the UI exists from Sprint 01 but creating a campaign still uses fixtures; real campaign persistence is Sprint 04
+- SMS sending, Twilio integration, conversation logic (Sprint 05)
+- Stripe billing wiring (Sprint 06)
+- Resend/email integration (Sprint 06)
+- Admin panel / staff auth — there's no staff functionality yet
+- Optional scopes being dynamically requested — those happen in the sprint that needs them
+- Production credentials anywhere; everything stays in test/sandbox/dev
+- Multi-user accounts within a merchant
+- Custom branding configuration UI
 
 ## Self-verification commands
 
-The Claude Code session should run these in order and paste output into HANDOFF.md:
+Run these in order and paste output into HANDOFF.md:
 
 ```bash
 pnpm install
+pnpm db:migrate   # applies migrations to remote
+pnpm db:types     # regenerates types from schema
 pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
 pnpm test:e2e
-git diff --stat main..HEAD
+pnpm grep:pii
+pnpm vercel:env:check
 ```
 
-If any command fails, do not declare done. Either fix it or stop and write HANDOFF.md recording the failure.
+If any command fails, stop and write HANDOFF.md recording the failure. Do not declare done.
 
 ## Evaluator session prompt
 
 Open a fresh Claude Code session pointed at this repo with this prompt:
 
 ```
-You are a skeptical senior frontend engineer doing QA on Sprint 01 of lapsed.ai (design system + clickable v1 UI).
-Your job is to find everything wrong, incomplete, or inconsistent. Do not approve anything unless you are
-certain it meets the standard.
+You are a skeptical senior engineer doing QA on Sprint 02 of lapsed.ai
+(repo backend foundation + Shopify OAuth + merchant auth). Your job is to
+find everything wrong, incomplete, or inconsistent. Do not approve anything
+unless you are certain it meets the standard.
 
 Specifically:
 - Read CLAUDE.md, DESIGN-SYSTEM.md, SPRINT.md, HANDOFF.md in that order
-- Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm test:e2e` and report exact output
-- Verify every acceptance criterion against the actual code — do not trust HANDOFF.md claims
-- Specifically check:
-  * Open Storybook locally. Does every custom component in DESIGN-SYSTEM.md have a story? Does every shadcn override component have a story?
-  * Open each route in apps/web. Does it render without console errors? Does it match the seed fixtures?
-  * Grep the codebase for hardcoded color hex values outside packages/ui/src/tokens.css. Any found = violation.
-  * Grep for `font-family` declarations outside tokens.css. Any found = violation.
-  * Grep for `any` type and `@ts-ignore`. Any found = violation.
-  * Compare /app dashboard route against mockup-dashboard.html. Any visual divergence = violation.
+- Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm test:e2e`,
+  `pnpm grep:pii`, `pnpm vercel:env:check` and report exact output
+- Verify every acceptance criterion against the actual code — do not trust
+  HANDOFF.md claims, verify them
+- Specifically perform these adversarial checks:
+  * Send an OAuth callback with a tampered HMAC and confirm it is rejected
+  * Send an OAuth callback with an expired state cookie and confirm rejection
+  * Send an OAuth callback with a missing state cookie and confirm rejection
+  * Send an OAuth callback with a state cookie that doesn't match the query
+    parameter and confirm rejection
+  * Query the merchants table directly via psql and confirm `shopify_access_token`
+    is ciphertext, not plaintext (paste the actual hex output)
+  * Attempt to read merchant A's row using a session token bound to merchant B
+    using the publishable key client; confirm zero rows returned
+  * Grep the codebase for hardcoded scope strings — they must come from
+    `shopify.app.toml` or env, not be duplicated in code
+  * Grep logs and recent commits for any of: shop_domain values, access token
+    values, HMAC values. Any leak is a SEVERE violation
+  * Inspect `shopify.app.toml` and confirm optional_scopes are declared but
+    NOT in the required `scopes` field
+  * Verify the dashboard renders the real shop domain by visiting the preview
+    URL with a valid session token and inspecting the DOM
 - Score each rubric criterion 0–3 with justification
-- Report findings in a single message with a clear PASS or REMEDIATE verdict per criterion
+- Report findings in a single message with a clear PASS or REMEDIATE verdict
+  per criterion
 - Do not suggest the sprint is complete unless every criterion scores 3
 ```
 
 ## Exact next action
 
-Create the sprint branch (`git checkout -b sprint-01/design-system`) and initialise the monorepo: `pnpm init`, set up `pnpm-workspace.yaml`, create the package directories. Then scaffold the three apps in this order: `apps/web` (Next.js), `apps/storybook` (Storybook 8 React-Vite), `apps/marketing` (Next.js). Then build `packages/ui` starting with tokens.css and the Tailwind config. Then build components in this order: foundations (Button, Input, Card, Badge, Avatar, Icon), then composed (SidebarItem, ShopSwitcher, AppShell, StatusDot, MetricCard, HeroMetric, CampaignRow, ConversationRow). Then build the dashboard route as a faithful port of mockup-dashboard.html, using only the components you just built. Then the remaining routes in the page inventory.
+Create the sprint branch (`git checkout -b sprint-02/shopify-auth`). First task: run `shopify app config link --client-id $env:SHOPIFY_API_KEY` from the repo root to generate `shopify.app.toml` from your existing Partner Dashboard config (this captures the scopes, URLs, and webhook version into code rather than the dashboard being the source of truth). Verify the toml file matches `.env.local`'s scopes and URLs. Commit. Then move to the Supabase migration: scaffold `packages/db/supabase/`, write `0001_init.sql`, apply via `supabase db push` (or `psql` fallback if the CLI hits the known access-control bug), generate types, commit. Then the OAuth routes in `apps/web/app/api/shopify/`. Then App Bridge in the root layout. Then the dashboard data wiring. Then the Playwright integration test. Then everything in the Definition of Done.

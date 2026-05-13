@@ -12,8 +12,12 @@ import Link from "next/link";
 import { MerchantShell } from "./_components/merchant-shell";
 import { HeroChart } from "./_components/hero-chart";
 import { campaigns, conversations, attribution, merchant } from "@lapsed/fixtures";
+import { requireMerchant } from "@/app/lib/session";
 
-export default function DashboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  await requireMerchant();
   const totalRevenue = attribution.totalRecoveredRevenue.toLocaleString();
   const totalOrders = attribution.totalRecoveredOrders;
   const liveCampaigns = campaigns.filter((c) => c.status === "live").length;

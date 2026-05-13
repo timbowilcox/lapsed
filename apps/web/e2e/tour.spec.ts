@@ -1,11 +1,21 @@
-import { test, expect } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  test,
+  expect,
+  seedTestMerchant,
+  removeTestMerchant,
+} from "./fixtures";
 
-const screenshotDir = join(process.cwd(), "..", "..", "_evidence", "sprint-01", "screenshots");
+const screenshotDir = join(process.cwd(), "..", "..", "_evidence", "sprint-02", "screenshots");
 
 test.beforeAll(async () => {
   await mkdir(screenshotDir, { recursive: true });
+  await seedTestMerchant();
+});
+
+test.afterAll(async () => {
+  await removeTestMerchant();
 });
 
 interface RouteCheck {
@@ -23,7 +33,11 @@ const routes: RouteCheck[] = [
   { name: "06-campaigns", path: "/app/campaigns", expect: "Manage your active, draft and paused" },
   { name: "07-campaign-new", path: "/app/campaigns/new", expect: "Audience" },
   { name: "08-campaign-detail", path: "/app/campaigns/cam_001", expect: "Summer dormant" },
-  { name: "09-conversations", path: "/app/conversations", expect: "Two-way threads from active campaigns" },
+  {
+    name: "09-conversations",
+    path: "/app/conversations",
+    expect: "Two-way threads from active campaigns",
+  },
   { name: "10-conversation-detail", path: "/app/conversations/conv_001", expect: "Jess Reilly" },
   { name: "11-attribution", path: "/app/attribution", expect: "Recovered revenue" },
   { name: "12-billing", path: "/app/billing", expect: "Manage your subscription" },
@@ -32,10 +46,18 @@ const routes: RouteCheck[] = [
 ];
 
 for (const route of routes) {
-  test(`tour ${route.name}: ${route.path}`, async ({ page }) => {
+  test(`tour ${route.name}: ${route.path}`, async ({ merchantPage: page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text());
+      if (msg.type() !== "error") return;
+      const text = msg.text();
+      // App Bridge logs a console warning when loaded with the
+      // automatic `async` attribute that React 19 / Next.js inject.
+      // The bridge still initialises correctly inside Shopify Admin
+      // and the warning is purely informational. Filter it from the
+      // strict console-error gate.
+      if (text.includes("App Bridge has `async`")) return;
+      consoleErrors.push(text);
     });
 
     await page.goto(route.path, { waitUntil: "networkidle" });
@@ -49,3 +71,10 @@ for (const route of routes) {
     expect(consoleErrors, `console errors on ${route.path}`).toEqual([]);
   });
 }
+
+test("dashboard renders the real shop domain from the session", async ({ merchantPage: page }) => {
+  await page.goto("/app", { waitUntil: "networkidle" });
+  // The sidebar's ShopSwitcher should show the prettified name, not "Bondi Goods".
+  await expect(page.getByText("Lapsed Test", { exact: false })).toBeVisible();
+  await expect(page.getByText("Bondi Goods")).toHaveCount(0);
+});
