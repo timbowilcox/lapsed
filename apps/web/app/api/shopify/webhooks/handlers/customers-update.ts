@@ -1,4 +1,4 @@
-import type { Json } from "@lapsed/db";
+import { appendCustomerEvent } from "@lapsed/core";
 import type { WebhookHandler } from "./types";
 
 interface ShopifyCustomerPayload {
@@ -36,20 +36,20 @@ export const customersUpdate: WebhookHandler = async ({
         .filter(Boolean)
     : [];
 
-  // Append event — ON CONFLICT DO NOTHING via dedup unique constraint (ignoreDuplicates)
-  await serviceClient.from("customer_events").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: gid,
-      event_type: "customer_updated",
-      source: "shopify_webhook",
-      payload: payload as Json,
-      occurred_at: customer.updated_at ?? now,
-    },
-    { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-  );
+  // Append event via validated helper
+  await appendCustomerEvent(serviceClient, {
+    merchantId,
+    shopifyCustomerGid: gid,
+    eventType: "customer_updated",
+    source: "shopify_webhook",
+    payload: customer as unknown as Record<string, unknown>,
+    occurredAt: customer.updated_at ?? now,
+  });
 
-  // Materialised profile upsert — merge current values
+  // Materialised profile upsert — merge current values.
+  // accepts_marketing is intentionally not written here: the customers table
+  // does not have a dedicated column for it (marketing consent is tracked at
+  // the conversation level in Sprint 06).
   await serviceClient.from("customers").upsert(
     {
       merchant_id: merchantId,

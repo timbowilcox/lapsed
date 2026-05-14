@@ -1,4 +1,4 @@
-import type { Json } from "@lapsed/db";
+import { appendCustomerEvent, appendOrderEvent } from "@lapsed/core";
 import type { WebhookHandler } from "./types";
 
 interface ShopifyOrderCustomer {
@@ -40,32 +40,26 @@ export const ordersPaid: WebhookHandler = async ({
   const totalCents = Math.round(parseFloat(order.total_price ?? "0") * 100);
   const orderedAt = order.created_at ?? now;
 
-  // 1. Append order event — idempotent via ignoreDuplicates on dedup unique constraint
-  await serviceClient.from("order_events").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: customerGid,
-      shopify_order_gid: orderGid,
-      event_type: "order_paid",
-      source: "shopify_webhook",
-      payload: payload as Json,
-      occurred_at: orderedAt,
-    },
-    { onConflict: "merchant_id,shopify_order_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-  );
+  // 1. Append order event via validated helper
+  await appendOrderEvent(serviceClient, {
+    merchantId,
+    shopifyCustomerGid: customerGid,
+    shopifyOrderGid: orderGid,
+    eventType: "order_paid",
+    source: "shopify_webhook",
+    payload: order as unknown as Record<string, unknown>,
+    occurredAt: orderedAt,
+  });
 
   // 2. Append customer event — order activity is a customer memory event
-  await serviceClient.from("customer_events").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: customerGid,
-      event_type: "order_placed",
-      source: "shopify_webhook",
-      payload: payload as Json,
-      occurred_at: orderedAt,
-    },
-    { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-  );
+  await appendCustomerEvent(serviceClient, {
+    merchantId,
+    shopifyCustomerGid: customerGid,
+    eventType: "order_placed",
+    source: "shopify_webhook",
+    payload: order as unknown as Record<string, unknown>,
+    occurredAt: orderedAt,
+  });
 
   // 3. Upsert orders materialised row
   await serviceClient.from("orders").upsert(

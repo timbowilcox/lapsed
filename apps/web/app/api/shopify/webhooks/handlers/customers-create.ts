@@ -1,4 +1,4 @@
-import type { Json } from "@lapsed/db";
+import { appendCustomerEvent } from "@lapsed/core";
 import type { WebhookHandler } from "./types";
 
 interface ShopifyCustomerPayload {
@@ -36,18 +36,15 @@ export const customersCreate: WebhookHandler = async ({
         .filter(Boolean)
     : [];
 
-  // Append event — ON CONFLICT DO NOTHING via dedup unique constraint (ignoreDuplicates)
-  await serviceClient.from("customer_events").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: gid,
-      event_type: "customer_created",
-      source: "shopify_webhook",
-      payload: payload as Json,
-      occurred_at: customer.created_at ?? now,
-    },
-    { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-  );
+  // Append event via validated helper (Zod schema guards the write)
+  await appendCustomerEvent(serviceClient, {
+    merchantId,
+    shopifyCustomerGid: gid,
+    eventType: "customer_created",
+    source: "shopify_webhook",
+    payload: customer as unknown as Record<string, unknown>,
+    occurredAt: customer.created_at ?? now,
+  });
 
   // Materialised profile upsert
   await serviceClient.from("customers").upsert(
