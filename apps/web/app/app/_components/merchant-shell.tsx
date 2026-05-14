@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
-import { AppShell, type SidebarNavSection } from "@lapsed/ui";
+import { AppShell, formatCount, type SidebarNavSection } from "@lapsed/ui";
 import {
   merchant as fixtureMerchant,
   campaigns,
@@ -21,7 +21,7 @@ const sections: SidebarNavSection[] = [
         href: "/app/lapsed",
         icon: "Users",
         label: "Lapsed customers",
-        count: fixtureMerchant.totalLapsedCount.toLocaleString(),
+        count: formatCount(fixtureMerchant.totalLapsedCount),
       },
       { href: "/app/campaigns", icon: "Send", label: "Campaigns", count: campaignsCount },
       {
@@ -61,12 +61,18 @@ export function MerchantShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const session = useMerchant();
   const activeHref = resolveActive(pathname);
 
   const shopInitials = session?.shopInitials ?? fixtureMerchant.shopInitials;
   const shopName = session?.shopName ?? fixtureMerchant.shopName;
-  const planLabel = session?.planLabel ?? fixtureMerchant.planLabel;
+  const planLabel = undefined;
+
+  async function handleSignOut() {
+    await fetch("/api/auth/signout", { method: "POST" });
+    router.push("/app/auth/install");
+  }
 
   return (
     <AppShell
@@ -78,6 +84,7 @@ export function MerchantShell({
       planLabel={planLabel}
       userInitials={fixtureMerchant.ownerInitials}
       hasNotifications
+      onSignOut={handleSignOut}
     >
       {children}
     </AppShell>

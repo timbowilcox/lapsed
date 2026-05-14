@@ -4,6 +4,14 @@ import { HeroMetric } from "./hero-metric";
 const meta: Meta<typeof HeroMetric> = {
   title: "Components/HeroMetric",
   component: HeroMetric,
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "Instrument Serif hero numeral. **Rule**: used exactly once per page for the single largest metric. All other numeric values use Geist Sans with `tabular-nums`.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -32,7 +40,8 @@ const chart = (
   </svg>
 );
 
-export const Default: Story = {
+/** Dashboard / Attribution — full width with pulse dot and mini chart */
+export const WithChart: Story = {
   args: {
     label: "Recovered revenue · last 30 days",
     pulse: true,
@@ -44,5 +53,24 @@ export const Default: Story = {
       </>
     ),
     chart,
+  },
+};
+
+/** Billing — compact, no chart */
+export const Compact: Story = {
+  args: {
+    label: "Monthly",
+    currency: "$",
+    value: "799",
+    meta: "Renews 4 June 2026",
+  },
+};
+
+/** No currency prefix */
+export const NoCurrency: Story = {
+  args: {
+    label: "Active conversations",
+    value: "2,847",
+    meta: "↑ 184 this week",
   },
 };

@@ -10,10 +10,12 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "test:a11y": "pnpm --filter @lapsed/web test:a11y",
     "storybook": "turbo run storybook --filter=@lapsed/storybook",
     "db:push": "pnpm --filter @lapsed/db db:push",
     "db:types": "pnpm --filter @lapsed/db db:types",
     "grep:pii": "node scripts/grep-pii.mjs",
+    "grep:format-check": "node scripts/grep-format-check.mjs",
     "vercel:env:check": "node scripts/vercel-env-check.mjs",
     "vercel:env:push": "node scripts/push-vercel-env.mjs",
     "clean": "turbo run clean && rm -rf node_modules"

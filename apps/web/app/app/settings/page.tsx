@@ -24,7 +24,7 @@ export default function SettingsPage() {
         <Panel>
           <PanelHeader title="Shop" />
           <PanelBody>
-            <div className="flex flex-col gap-16 p-22">
+            <div className="flex flex-col gap-16 p-24">
               <label className="flex flex-col gap-6">
                 <span className="text-label text-ink-700">Shop domain</span>
                 <Input defaultValue={merchant.shopDomain} readOnly />
@@ -44,7 +44,7 @@ export default function SettingsPage() {
         <Panel>
           <PanelHeader title="Brand voice" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               <p className="text-meta text-ink-500">
                 Used by the conversation engine to keep AI replies on-brand.
               </p>
@@ -63,7 +63,7 @@ export default function SettingsPage() {
         <Panel>
           <PanelHeader title="Opt-out keywords" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               <p className="text-meta text-ink-500">
                 Any inbound SMS matching these (case-insensitive) opts the customer out
                 immediately. STOP and STOPALL are reserved by Twilio.
@@ -82,7 +82,7 @@ export default function SettingsPage() {
         <Panel>
           <PanelHeader title="Integrations" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Shopify</div>

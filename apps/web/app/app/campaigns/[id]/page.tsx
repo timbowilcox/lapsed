@@ -11,6 +11,8 @@ import {
   TabsTrigger,
   TabsContent,
   ConversationRow,
+  formatCount,
+  formatDateTime,
 } from "@lapsed/ui";
 import { campaigns, conversations } from "@lapsed/fixtures";
 import { MerchantShell } from "../../_components/merchant-shell";
@@ -44,13 +46,13 @@ export default async function CampaignDetailPage({ params }: PageProps) {
         <Card className="p-20">
           <div className="text-label text-ink-500">Audience</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            {campaign.audienceSize.toLocaleString()}
+            {formatCount(campaign.audienceSize)}
           </div>
         </Card>
         <Card className="p-20">
           <div className="text-label text-ink-500">Sent messages</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            {campaign.sentMessages.toLocaleString()}
+            {formatCount(campaign.sentMessages)}
           </div>
         </Card>
         <Card className="p-20">
@@ -83,7 +85,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <Panel>
               <PanelHeader title="Offer" />
               <PanelBody>
-                <div className="flex flex-col gap-12 p-22">
+                <div className="flex flex-col gap-12 p-24">
                   <div>
                     <div className="text-label text-ink-500">Description</div>
                     <div className="mt-4 text-body text-ink-900">
@@ -102,7 +104,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <Panel>
               <PanelHeader title="Conversion" />
               <PanelBody>
-                <div className="grid grid-cols-2 gap-12 p-22">
+                <div className="grid grid-cols-2 gap-12 p-24">
                   <Card className="p-16">
                     <div className="text-label text-ink-500">Conversion rate</div>
                     <div className="mt-4 text-h1 text-ink-900 tabular-nums">
@@ -126,7 +128,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <PanelHeader title="Conversation feed" />
             <PanelBody>
               {threadList.length === 0 ? (
-                <div className="p-22 text-meta text-ink-500">
+                <div className="p-24 text-meta text-ink-500">
                   No conversations yet for this campaign.
                 </div>
               ) : (
@@ -159,7 +161,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
                   >
                     <span className="text-body text-ink-900">{b.label}</span>
                     <span className="text-body-strong tabular-nums">
-                      {b.count.toLocaleString()}
+                      {formatCount(b.count)}
                     </span>
                   </div>
                 ))}
@@ -182,12 +184,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
                     <div className="flex-1">
                       <div className="text-body text-ink-900">{event.label}</div>
                       <div className="mt-2 text-mini text-ink-500">
-                        {new Date(event.at).toLocaleString("en-AU", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                        {formatDateTime(event.at)}
                       </div>
                     </div>
                   </li>

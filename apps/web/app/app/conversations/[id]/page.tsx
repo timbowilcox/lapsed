@@ -8,6 +8,8 @@ import {
   PanelBody,
   Tag,
   Badge,
+  formatCurrency,
+  formatDateTime,
 } from "@lapsed/ui";
 import { conversations, lapsedCustomers, campaigns } from "@lapsed/fixtures";
 import { MerchantShell } from "../../_components/merchant-shell";
@@ -38,7 +40,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
             }
           />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               {conversation.messages.map((m) => (
                 <div
                   key={m.id}
@@ -62,12 +64,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
                     </div>
                     <div className="text-body">{m.body}</div>
                     <div className="mt-6 text-[11px] text-ink-700 opacity-60">
-                      {new Date(m.sentAt).toLocaleString("en-AU", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
+                      {formatDateTime(m.sentAt)}
                     </div>
                   </div>
                 </div>
@@ -80,7 +77,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
           <Panel>
             <PanelHeader title="Customer" />
             <PanelBody>
-              <div className="flex flex-col gap-12 p-22">
+              <div className="flex flex-col gap-12 p-24">
                 <div>
                   <div className="text-label text-ink-500">Phone</div>
                   <div className="mt-2 text-body text-ink-900">{conversation.customerPhone}</div>
@@ -90,7 +87,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
                     <div>
                       <div className="text-label text-ink-500">Lifetime value</div>
                       <div className="mt-2 text-body text-ink-900 tabular-nums">
-                        ${customer.lifetimeValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        {formatCurrency(Math.round(customer.lifetimeValue * 100))}
                       </div>
                     </div>
                     <div>
@@ -120,7 +117,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
           <Panel>
             <PanelHeader title="Attribution" />
             <PanelBody>
-              <div className="flex flex-col gap-12 p-22">
+              <div className="flex flex-col gap-12 p-24">
                 {campaign && (
                   <Link
                     href={`/app/campaigns/${campaign.id}`}
@@ -133,7 +130,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
                   <div className="text-label text-ink-500">Recovered revenue</div>
                   <div className="mt-4 text-display text-ink-900 tabular-nums">
                     {conversation.attributedRevenue !== null
-                      ? `$${conversation.attributedRevenue.toLocaleString()}`
+                      ? formatCurrency(conversation.attributedRevenue * 100)
                       : "—"}
                   </div>
                   <div className="mt-2 text-mini text-ink-500">

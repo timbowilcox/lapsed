@@ -1,19 +1,22 @@
 import {
   Card,
+  HeroMetric,
   Panel,
   PanelHeader,
   PanelBody,
   Badge,
+  RevenueChart,
   Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
+  formatCurrency,
+  formatCount,
 } from "@lapsed/ui";
 import { attribution } from "@lapsed/fixtures";
 import { MerchantShell } from "../_components/merchant-shell";
-import { AttributionChart } from "./_attribution-chart";
 
 export default function AttributionPage() {
   return (
@@ -26,13 +29,20 @@ export default function AttributionPage() {
         </p>
       </div>
 
-      <div className="mb-16 grid grid-cols-4 gap-12">
-        <Card className="p-20">
-          <div className="text-label text-ink-500">Total recovered</div>
-          <div className="mt-8 font-serif text-h1 text-ink-900 tabular-nums">
-            ${attribution.totalRecoveredRevenue.toLocaleString()}
-          </div>
-        </Card>
+      <HeroMetric
+        label="Total recovered · last 30 days"
+        currency="$"
+        value={formatCount(attribution.totalRecoveredRevenue)}
+        meta={
+          <>
+            <span className="font-medium text-success-500">↑ {attribution.vsPreviousPeriodPct}%</span>{" "}
+            vs previous period · {attribution.totalRecoveredOrders} orders
+          </>
+        }
+        className="mb-16"
+      />
+
+      <div className="mb-16 grid grid-cols-3 gap-12">
         <Card className="p-20">
           <div className="text-label text-ink-500">Recovered orders</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
@@ -48,10 +58,9 @@ export default function AttributionPage() {
         <Card className="p-20">
           <div className="text-label text-ink-500">Average order</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            $
-            {Math.round(
-              attribution.totalRecoveredRevenue / attribution.totalRecoveredOrders,
-            ).toLocaleString()}
+            {formatCurrency(
+              Math.round(attribution.totalRecoveredRevenue / attribution.totalRecoveredOrders) * 100,
+            )}
           </div>
         </Card>
       </div>
@@ -59,8 +68,10 @@ export default function AttributionPage() {
       <Panel className="mb-16">
         <PanelHeader title="Recovered revenue — last 30 days" />
         <PanelBody>
-          <div className="p-22">
-            <AttributionChart byDay={attribution.byDay} />
+          <div className="p-24">
+            <RevenueChart
+              data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
+            />
           </div>
         </PanelBody>
       </Panel>
@@ -82,7 +93,7 @@ export default function AttributionPage() {
                 <TableRow key={b.campaignId}>
                   <TableCell>{b.campaignName}</TableCell>
                   <TableCell className="tabular-nums">
-                    ${b.recoveredRevenue.toLocaleString()}
+                    {formatCurrency(b.recoveredRevenue * 100)}
                   </TableCell>
                   <TableCell className="tabular-nums">{b.recoveredOrders}</TableCell>
                   <TableCell>

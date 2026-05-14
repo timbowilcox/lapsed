@@ -1,6 +1,15 @@
 // Foundations
 export { Icon, type IconName, type IconProps } from "./components/icon";
 export { cn } from "./lib/cn";
+export {
+  formatCurrency,
+  formatCount,
+  formatDate,
+  formatDateTime,
+  formatRelativeTime,
+  type CurrencyOptions,
+  type DateFormat,
+} from "./lib/format";
 
 // shadcn-style primitives with Vellum overrides
 export { Button, buttonVariants, type ButtonProps } from "./components/button";
@@ -31,6 +40,13 @@ export {
   SelectItem,
 } from "./components/select";
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/tabs";
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "./components/dropdown-menu";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./components/table";
 export { Panel, PanelHeader, PanelBody } from "./components/panel";
 export { Toaster, toast } from "./components/toast";
@@ -53,3 +69,4 @@ export {
   type CampaignStatus,
 } from "./components/campaign-row";
 export { ConversationRow, type ConversationRowProps } from "./components/conversation-row";
+export { RevenueChart, type RevenueChartProps } from "./components/revenue-chart";

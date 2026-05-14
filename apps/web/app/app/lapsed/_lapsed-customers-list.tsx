@@ -16,6 +16,7 @@ import {
   TableCell,
   Badge,
   Avatar,
+  formatCurrency,
 } from "@lapsed/ui";
 import { Search } from "lucide-react";
 import Link from "next/link";
@@ -111,7 +112,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomer[]
                 </Badge>
               </TableCell>
               <TableCell>
-                ${c.lifetimeValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                {formatCurrency(Math.round(c.lifetimeValue * 100))}
               </TableCell>
               <TableCell>{c.lastOrderDaysAgo} days ago</TableCell>
               <TableCell>{c.cadenceDays > 0 ? `${c.cadenceDays} d` : "—"}</TableCell>
