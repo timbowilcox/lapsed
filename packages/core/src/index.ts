@@ -9,3 +9,5 @@ export {
   type CustomerEventInput,
   type OrderEventInput,
 } from "./customer-events";
+
+export { materializeCustomer } from "./materialize-customer";
