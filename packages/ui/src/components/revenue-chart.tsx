@@ -80,7 +80,7 @@ export function RevenueChart({ data, height = 280, range = "auto" }: RevenueChar
               borderRadius: 8,
               fontSize: 13,
             }}
-            formatter={(v: number) => [formatCurrency(v * 100), "Recovered"]}
+            formatter={(v: number) => [formatCurrency(v * 100), "Restored"]}
           />
           <Area
             type="monotone"

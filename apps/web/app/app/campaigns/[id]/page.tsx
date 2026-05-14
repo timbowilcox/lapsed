@@ -44,7 +44,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
 
       <div className="mb-16 grid grid-cols-4 gap-12">
         <Card className="p-20">
-          <div className="text-label text-ink-500">Audience</div>
+          <div className="text-label text-ink-500">Group</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
             {formatCount(campaign.audienceSize)}
           </div>
@@ -62,7 +62,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
           </div>
         </Card>
         <Card className="p-20">
-          <div className="text-label text-ink-500">Recovered revenue</div>
+          <div className="text-label text-ink-500">Restored revenue</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
             {campaign.recoveredRevenueDisplay}
           </div>
@@ -76,7 +76,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
         <TabsList>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="conversations">Conversations</TabsTrigger>
-          <TabsTrigger value="audience">Audience</TabsTrigger>
+          <TabsTrigger value="audience">Group</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
         </TabsList>
 
@@ -151,7 +151,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
 
         <TabsContent value="audience">
           <Panel>
-            <PanelHeader title="Audience breakdown" />
+            <PanelHeader title="Group breakdown" />
             <PanelBody>
               <div className="flex flex-col">
                 {campaign.audienceBreakdown.map((b) => (

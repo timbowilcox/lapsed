@@ -20,7 +20,7 @@ import { ArrowRight, ArrowLeft, Check } from "lucide-react";
 type StepKey = "audience" | "offer" | "message" | "review";
 
 const steps: Array<{ key: StepKey; label: string; description: string }> = [
-  { key: "audience", label: "Audience", description: "Who receives this campaign" },
+  { key: "audience", label: "Group", description: "Who receives this campaign" },
   { key: "offer", label: "Offer", description: "Discount, free shipping or sample" },
   { key: "message", label: "Message", description: "Opening line and tone guidance" },
   { key: "review", label: "Review", description: "Confirm and launch" },
@@ -91,7 +91,7 @@ export function CampaignWizard() {
             {currentStep.key === "audience" && (
               <div className="flex flex-col gap-16">
                 <label className="flex flex-col gap-6">
-                  <span className="text-label text-ink-700">Cohort</span>
+                  <span className="text-label text-ink-700">Group</span>
                   <Select value={audience} onValueChange={setAudience}>
                     <SelectTrigger>
                       <SelectValue />
@@ -177,7 +177,7 @@ export function CampaignWizard() {
                   <div className="mt-4 text-body-strong text-ink-900">{campaignName}</div>
                 </Card>
                 <Card className="p-20">
-                  <div className="text-label text-ink-500">Audience</div>
+                  <div className="text-label text-ink-500">Group</div>
                   <div className="mt-4 text-body-strong text-ink-900">{audience}</div>
                 </Card>
                 <Card className="p-20">

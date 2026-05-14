@@ -5,12 +5,12 @@ const features = [
   {
     icon: BarChart3,
     title: "Cadence, not guesses",
-    body: "We compute each shop's actual purchase cadence — so lapsed means lapsed for your customers, not a generic 60-day threshold.",
+    body: "lapsed.ai computes each shop's actual purchase cadence — so lapsed means lapsed for your customers, not a generic 60-day threshold.",
   },
   {
     icon: MessageCircle,
     title: "Two-way AI SMS",
-    body: "Real conversations, not blast campaigns. The AI uses your product catalogue, your brand voice, and stops when a customer says stop.",
+    body: "Real conversations, not broadcast campaigns. The AI uses your product catalogue, your brand voice, and stops when a customer says stop.",
   },
   {
     icon: Send,
@@ -90,7 +90,7 @@ export default function MarketingPage() {
         <div className="mx-auto max-w-[1180px] px-32 py-64 text-center">
           <h2 className="text-h1 text-ink-900">Pricing that scales with results</h2>
           <p className="mx-auto mt-12 max-w-[520px] text-meta text-ink-500">
-            Three flat plans for sending volume. A 3% performance kicker on recovered revenue
+            Three flat plans for sending volume. A 3% performance kicker on restored revenue
             above the tier baseline arrives in v2.
           </p>
           <div className="mx-auto mt-32 grid max-w-[820px] grid-cols-3 gap-16">

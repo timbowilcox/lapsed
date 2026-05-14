@@ -20,7 +20,7 @@ export const CampaignRow = forwardRef<HTMLDivElement, CampaignRowProps>(function
     status,
     statusLabel,
     revenue = "—",
-    revenueLabel = "recovered",
+    revenueLabel = "restored",
     className,
     ...props
   },
