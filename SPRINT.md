@@ -1,218 +1,222 @@
-# Sprint 02 — Repo Backend Foundation + Shopify OAuth + Merchant Auth
+# Sprint 02.5 — UI Polish
 
-Date: 2026-05-13
-Repo: lapsed
-Branch: `sprint-02/shopify-auth`
+Date: 2026-05-14
+Repo: timbowilcox/lapsed
+Branch: `sprint-02.5/ui-polish`
+Estimated effort: 3–4 days, single PR
 
 ## Scope
 
-Wire the first backend layer behind the design system from Sprint 01. By end of sprint, a Shopify merchant can install the lapsed.ai dev app on a real Shopify store, complete OAuth, and land on the merchant dashboard with their actual shop domain visible in the `ShopSwitcher` instead of the seed-fixture "Bondi Goods" label.
+A focused cosmetic + accessibility sprint sitting between Sprint 02 (OAuth) and Sprint 03 (data ingestion). Every issue surfaced in the post-Sprint-02 UI review of the six embedded app screens (Dashboard, Campaigns, Conversations, Attribution, Billing, Settings) is fixed here. No backend changes, no fixture-to-real-data sweep, no new features. Goal: when the user opens the app, the surfaces look finished. Goal is NOT: the surfaces are wired to real merchant data — that's Sprint 03.
 
-This is the first sprint that touches real external services in mutation-mode: Shopify OAuth, Supabase schema, encrypted token persistence, Vercel env var configuration. Use sandbox/dev modes throughout; never reach production credentials.
+Single PR against `main`. Squash merge after green CI + evaluator pass.
 
-The closed loop for Sprint 02 is "merchant can install, authenticate, and reach the dashboard with their real shop identity displayed." Order ingestion, scoring, conversations, billing — all out of scope for this sprint.
+## In scope
 
-## Prerequisites (verify before starting)
+### 1. Primary button contrast — currently invisible
 
-These items from VERIFICATION.md must be resolved or this sprint cannot complete:
+`packages/ui/src/components/button.tsx` primary variant renders dark text on dark background everywhere except the install page (which got a one-off fix in PR #3). Swap the token for the primary variant globally.
 
-- [ ] `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET` populated in `.env.local` (from the Lapsed app's API access page in Shopify Partners)
-- [ ] `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` starts with `sb_publishable_` (not `eyJ...` legacy JWT)
-- [ ] `SUPABASE_SECRET_KEY` starts with `sb_secret_`
-- [ ] `SUPABASE_DB_URL` connection string with the actual password substituted
-- [ ] `psql` installed locally (`scoop install postgresql`)
-- [ ] Sprint 01 merged to `main` and deployed; Vercel projects (`lapsed-web`, `lapsed-marketing`, `lapsed-storybook`) all linked with correct Root Directories
+- Primary variant: `bg-ink-900 text-cream-50` (not `text-ink-900`)
+- Secondary variant: keep as-is (`bg-cream-100 text-ink-900 border border-ink-200`)
+- Add a Storybook story per variant with the actual computed contrast ratio visible
+- Add a unit test that mounts `<Button variant="primary">Test</Button>` and asserts `getComputedStyle` `color` matches the cream token
 
-If any of these are unmet, stop and surface the gaps in `HANDOFF.md` before doing any code work.
+### 2. Topbar — broken layout + non-functional icons
 
-## Acceptance Criteria
+Topbar component at `packages/ui/src/components/topbar.tsx` (or `apps/web/app/(app)/_components/topbar.tsx` — check current location). Fixes:
 
-### Database schema
+- **Height**: explicit `h-14` (56px). Icons should not exceed this.
+- **Icon size**: 20px (`size-5`). Currently appears 24px+, spilling vertically.
+- **Notification dot**: 8px (`size-2`), red-error token, positioned `absolute -top-0.5 -right-0.5` relative to the bell button (currently oversized and floating in negative space).
+- **? button (help)**: opens `https://docs.lapsed.ai` in a new tab via `target="_blank" rel="noopener"`. The docs site doesn't exist yet — that's fine; it 404s gracefully. Placeholder is acceptable.
+- **Bell button**: opens a Radix dropdown panel. Empty state for now: "No notifications yet" + small caption "We'll let you know when campaigns finish or customers reply." No badge / dot until Sprint 03 wires real events.
+- **Avatar (TW) button**: opens dropdown menu with three items: "Account settings" (links to `/app/settings`), "Switch shop" (disabled with tooltip "Coming soon"), "Sign out" (clears session, redirects to Shopify Admin). Real sign-out flow.
+- **Page title duplication**: drop the page title from the topbar. Keep only branding + actions in topbar. Page H1 lives in page content.
 
-- [ ] Initial migration committed at `packages/db/supabase/migrations/0001_init.sql` creates the `merchants` table with columns: `id uuid pk default gen_random_uuid()`, `shopify_shop_domain text unique not null`, `shopify_access_token bytea not null` (ciphertext, never plaintext), `shopify_scope text not null`, `installed_at timestamptz not null default now()`, `uninstalled_at timestamptz`, `plan text not null default 'starter'`, `created_at timestamptz not null default now()`, `updated_at timestamptz not null default now()`
-- [ ] Migration applied to remote Supabase project — verified by querying `information_schema.tables` for the `merchants` table existence
-- [ ] If `supabase db push` fails due to the known CLI access-control bug, fall back to applying the migration via `psql "$SUPABASE_DB_URL"` directly — record which path was used in HANDOFF.md
-- [ ] RLS enabled on `merchants` with a policy that allows row read only when the request carries an authenticated session token bound to that merchant's shop domain; the policy uses a custom claim `shop_domain` set during session token verification
-- [ ] TypeScript types generated by `pnpm db:types` (Supabase CLI's `gen types`) and committed to `packages/db/src/types.ts`; consumed by `packages/shopify` and `apps/web`
-- [ ] Updated_at trigger on `merchants` (standard `moddatetime` pattern via Supabase's pre-installed extension)
+### 3. Unified chart component
 
-### Token encryption
+Dashboard hero chart and Attribution chart currently use different implementations and rendering styles. Replace both with a single component.
 
-- [ ] Shopify access tokens encrypted at rest. Default approach: Supabase Vault if the `vault.secrets` extension is available; fall back to `pgp_sym_encrypt` with a key stored as a Vercel environment variable (`TOKEN_ENCRYPTION_KEY`, 32 bytes, base64-encoded)
-- [ ] The chosen approach is documented in `packages/db/README.md` along with the rotation procedure
-- [ ] Verification: a direct SQL select on `merchants.shopify_access_token` returns ciphertext, not plaintext. Screenshot the query result in HANDOFF.md.
-- [ ] A server-side helper in `packages/db/src/encryption.ts` exposes `encryptToken(plaintext)` and `decryptToken(ciphertext)` functions. Both are pure (no env reads inside the functions; the key is injected at call sites or via a single initialisation function).
+- Create `packages/ui/src/components/revenue-chart.tsx` using Recharts `AreaChart`
+- Smooth `monotone` curve, lavender gradient fill, no jagged steps
+- X-axis: date labels with appropriate tick density for the date range
+- Y-axis: currency-formatted (using new format helpers)
+- Hover tooltip: shows date + currency value for that day
+- Props: `data: Array<{ date: string; value: number }>`, `height?: number`, `range?: 'auto' | 'compact'`
+- Storybook story showing both compact (Dashboard hero) and full (Attribution) variants
+- Replace usages in `apps/web/app/(app)/dashboard/page.tsx` and `apps/web/app/(app)/attribution/page.tsx`
 
-### Shopify app config
+### 4. Format helpers — single source of truth
 
-- [ ] `shopify.app.toml` exists at the repo root, generated by `shopify app config link --client-id $SHOPIFY_API_KEY` and committed
-- [ ] The `scopes` field matches `.env.local`'s `SHOPIFY_SCOPES` exactly: `read_customers,read_orders,read_products,write_discounts,write_pixels`
-- [ ] The `optional_scopes` field matches `SHOPIFY_OPTIONAL_SCOPES`: `read_inventory,read_checkouts,write_draft_orders,read_locations,read_price_rules`
-- [ ] `application_url` set to the production-style URL `https://app.lapsed.ai`; Shopify CLI overrides this during `shopify app dev` with the Cloudflare tunnel URL
-- [ ] `redirect_urls` includes `https://app.lapsed.ai/api/shopify/callback`
-- [ ] Webhooks API version set to `2026-04`
-- [ ] `shopify app config push` runs cleanly with no diff against the Partner Dashboard
+New module `packages/ui/src/lib/format.ts`:
 
-### Shopify OAuth flow
+- `formatCurrency(cents: number, opts?: { locale?: string; currency?: string }): string` — default `en-US` + `USD`, thousands separator, no decimals unless cents > 0
+- `formatDate(input: string | Date, format: 'short' | 'long' | 'iso'): string` — `short` → "5 May 2026", `long` → "Tuesday, 5 May 2026", `iso` → "2026-05-05"
+- `formatRelativeTime(input: string | Date): string` — "2m", "1h", "yesterday", "3d", "Mon 5 May" (anything older than 7 days renders as `short`)
+- Unit tests for every branch in `packages/ui/src/lib/format.test.ts`
 
-- [ ] `apps/web/app/api/shopify/install/route.ts` initiates OAuth: generates a signed state token (10-minute expiry, stored as a signed cookie not a server-side store), constructs the Shopify authorize URL with `client_id`, `scope`, `redirect_uri`, `state`, redirects the browser
-- [ ] `apps/web/app/api/shopify/callback/route.ts` handles the OAuth callback: verifies HMAC signature on every callback, verifies the state cookie matches and hasn't expired, exchanges the authorisation code for an access token via Shopify's `oauth/access_token` endpoint, encrypts the access token, upserts the `merchants` row (insert on first install, update on reinstall), redirects to `/app`
-- [ ] HMAC verification negative test in `packages/shopify/__tests__/oauth.test.ts`: a tampered callback (one byte changed in any query param) is rejected
-- [ ] State token validation negative test: an expired state cookie is rejected; a missing state cookie is rejected; a mismatched state is rejected
-- [ ] All five required scopes are requested; the app does NOT request optional scopes at install time (they're declared in `shopify.app.toml` but requested dynamically when features need them in later sprints)
+Sweep every surface in `apps/web/app/(app)/**` and replace inline formatting (`${value}`, `value.toLocaleString()`, etc.) with the helpers. CI should grep-fail if `toLocaleString` or hardcoded `$` interpolation appears outside `format.ts`.
 
-### App Bridge + embedded app
+### 5. Number typography — Instrument Serif for hero only
 
-- [ ] `@shopify/app-bridge` and `@shopify/app-bridge-react` installed in `apps/web`
-- [ ] App Bridge initialised at the root layout of the `(merchant)` route group with the app's API key
-- [ ] A server-side helper `getMerchantFromSession()` in `packages/shopify/src/session.ts` verifies the JWT session token from App Bridge, extracts the `dest` claim (shop domain), looks up the merchant in Supabase, returns the merchant object or throws
-- [ ] The `getMerchantFromSession()` helper rejects: missing token, expired token, token with invalid signature, token with `iss` not matching the configured shop domain
-- [ ] Unit tests in `packages/shopify/__tests__/session.test.ts` cover all four rejection cases
+- New component `packages/ui/src/components/hero-metric.tsx`: large Instrument Serif numeral with a label above. Used only for the single largest metric per page (e.g., "Total recovered $47,283" on Dashboard, "Total recovered $47,283" on Attribution).
+- Everything else (secondary metrics, table values, inline counts) uses Geist Sans with `font-variant-numeric: tabular-nums`.
+- Update Dashboard, Attribution, Billing, Campaigns pages: identify the one hero metric, wrap in `<HeroMetric>`, everything else uses default body type.
+- Document the rule in `DESIGN-SYSTEM.md` under "Typography".
 
-### Dashboard wiring (replacing seed fixture)
+### 6. Card padding audit
 
-- [ ] The dashboard at `apps/web/app/(merchant)/app/page.tsx` calls `getMerchantFromSession()` server-side; the `ShopSwitcher` and topbar render the real `shop_domain` instead of "Bondi Goods"
-- [ ] All other UI surfaces (hero metric, campaigns panel, conversations panel, etc.) continue to render seed fixtures — they'll be wired to real data in Sprints 03–06. Do not pull any of that work forward.
-- [ ] If the session token is invalid or the merchant doesn't exist in Supabase, the page redirects to `/app/auth/install` instead of crashing
+- Audit every card in `packages/ui/src/components/card.tsx` consumers
+- Standardize on `p-6` for elevated cards, `p-4` for inline / list-item cards
+- Fix the Billing "Usage this period" overflow (the visible clipping of the heading text)
+- Card body should never abut card edge — minimum `pr-6` for content
 
-### Tenancy isolation
+### 7. Sidebar — counts policy + plan badge
 
-- [ ] RLS policy on `merchants` tested with a cross-tenant access attempt in `packages/db/__tests__/rls.test.ts`: a session bound to merchant A cannot select merchant B's row; the test must use the publishable key (which respects RLS), not the secret key
-- [ ] The test commits a row for "merchant-a.myshopify.com" and "merchant-b.myshopify.com", then attempts a select as each, asserting that neither sees the other
+- Counts shown only on data-bearing nav items where the count is meaningful: Lapsed, Campaigns, Conversations
+- No counts on: Dashboard, Attribution, Billing, Settings
+- Document the rule as a code comment in the sidebar component
+- Remove the "Lapsed Test / Starter · 5k msgs" plan badge from the Conversations page sidebar. Sprint 03 will reintroduce it as a global sidebar footer once real plan data is wired.
 
-### Vercel environment variables
+### 8. Accessibility
 
-- [ ] All env vars from `.env.local` that are referenced by `apps/web` server-side code are pushed to Vercel for the `lapsed-web` project across `development`, `preview`, and `production` environments using `vercel env add`
-- [ ] `NEXT_PUBLIC_*` vars are pushed identically (they're client-bundled but still need to exist in the Vercel project env for build-time inlining)
-- [ ] `SHOPIFY_API_SECRET`, `SUPABASE_SECRET_KEY`, `TOKEN_ENCRYPTION_KEY` are marked as "Encrypted" (server-side only) — Vercel handles this automatically for non-`NEXT_PUBLIC_` vars
-- [ ] A `pnpm vercel:env:check` script at the repo root prints which expected env vars are present/missing on the `lapsed-web` Vercel project — useful for verification, runs in CI
+- Visible focus ring on every interactive element: `focus-visible:ring-2 ring-lavender-500 ring-offset-2 ring-offset-cream-50`
+- `aria-label` on every icon-only button (help, bell, avatar)
+- Skip-to-content link at the top of `apps/web/app/(app)/layout.tsx`, visible on focus only
+- Run `pnpm test:a11y` (axe-core integration) as part of CI for the six app routes. No serious or critical violations allowed; moderate violations get a tracked issue.
 
-### End-to-end integration test
+### 9. Tests
 
-- [ ] A Playwright test at `apps/web/e2e/shopify-install.spec.ts` walks the real install flow against `lapsed-test.myshopify.com`:
-  1. Navigates to the install URL
-  2. Handles Shopify's consent screen (uses a test merchant account stored in CI secrets)
-  3. Verifies redirect to `/app`
-  4. Asserts the rendered dashboard contains the shop domain `lapsed-test.myshopify.com`
-  5. Captures a screenshot to `_evidence/sprint-02/screenshots/`
-- [ ] The test passes in CI (CI uses Shopify CLI credentials + dev store credentials stored as GitHub Actions secrets)
+- Storybook stories updated / added for: Button (all variants with contrast assertions), HeroMetric, RevenueChart (compact + full), Topbar (with all three dropdowns open), Card (all padding variants)
+- New Playwright e2e in `apps/web/e2e/topbar.spec.ts`: opens each topbar dropdown, asserts contents, asserts keyboard navigation works
+- Visual regression diff via Playwright `toHaveScreenshot` for Dashboard, Billing, Attribution, Conversations — baseline screenshots updated and committed
+- `pnpm test` includes new format helper unit tests
+- a11y scan via `@axe-core/playwright` for the six app routes
 
-### Logging hygiene
+## Out of scope (do not touch — these are later sprints)
 
-- [ ] No log statement anywhere in the codebase contains `shop_domain`, `access_token`, raw HMAC values, raw state tokens, or merchant `id` in plaintext. Verified by grep:
-  ```
-  pnpm grep:pii  # scripted check that fails CI if any of the above appear in logs
-  ```
+- **Settings page fixture leak** (`bondi-goods.myshopify.com` showing instead of real shop) — Sprint 03 (data wiring)
+- **Empty states** for any screen — Sprint 03
+- **Loading skeletons / error states** for fetch boundaries — Sprint 03
+- **Onboarding flow refresh** — Sprint 05
+- **Brand voice character count + AI suggestion** — Sprint 05
+- **Email as channel** — post-v1 backlog
+- **Mobile responsive pass** — post-v1 backlog
+- **Cmd+K global search** — post-v1 backlog
+- **Dark mode** — post-v1 backlog
+- Any change to API routes, server actions, database schema, Shopify webhooks, encryption, or auth flow
+- Real plan data in sidebar footer (deferred to Sprint 03)
+- Real notification feed in bell dropdown (deferred to Sprint 03)
 
-## Definition of Done
+## Acceptance criteria
 
-- [ ] All acceptance criteria above checked with evidence in `HANDOFF.md`
-- [ ] `pnpm typecheck` passes; zero `any`, zero `@ts-ignore`
-- [ ] `pnpm lint` passes
-- [ ] `pnpm test` passes; new tests in `packages/shopify` and `packages/db` execute
-- [ ] `pnpm build` passes for `apps/web`, `apps/marketing`, `apps/storybook`
-- [ ] `pnpm test:e2e` passes including the new `shopify-install.spec.ts`
-- [ ] `pnpm grep:pii` returns no matches
-- [ ] Cross-tenant RLS test passes
-- [ ] Encrypted-at-rest verification screenshot in HANDOFF.md
-- [ ] `app.lapsed.ai` preview URL is reachable and serves the install screen at `/app/auth/install`
-- [ ] Real install against `lapsed-test.myshopify.com` completes end-to-end manually (you do this one in a browser before merge, in addition to the Playwright test)
-- [ ] `HANDOFF.md` committed with: completed list, test output, screenshots, files changed, exact next step for Sprint 03
-- [ ] Sprint branch merged to `main` via PR with green CI
+Every box must be checked with evidence in the PR description (screenshot, test output, or file path).
 
-## Quality Rubric
+- [ ] Primary button text is cream on ink (not ink on ink) across all six app routes — screenshot of each
+- [ ] Topbar height is 56px exactly — DOM inspector screenshot
+- [ ] Topbar icons are 20px — DOM inspector screenshot
+- [ ] Notification dot is 8px, positioned top-right of bell, not floating outside — screenshot
+- [ ] ? button opens new tab to `https://docs.lapsed.ai` — e2e test
+- [ ] Bell button opens dropdown with empty-state copy — e2e test + screenshot
+- [ ] Avatar button opens dropdown with Account / Switch shop (disabled) / Sign out — e2e test + screenshot
+- [ ] Sign out clears session and redirects appropriately — e2e test
+- [ ] Page title appears only as H1 in page content, never in topbar — screenshot of every route
+- [ ] Single `<RevenueChart>` component used in both Dashboard hero and Attribution — file diff
+- [ ] Chart renders smooth curve (no stair-step), with axes and hover tooltip — screenshot
+- [ ] `formatCurrency`, `formatDate`, `formatRelativeTime` exist in `packages/ui/src/lib/format.ts` with full unit test coverage — test output
+- [ ] No inline currency / date / timestamp formatting remains in `apps/web/app/(app)/**` — grep output proving zero matches
+- [ ] `<HeroMetric>` component exists and is used exactly once per page (the largest single metric) — file diff
+- [ ] All non-hero numbers render in Geist tabular — visual verification
+- [ ] Billing "Usage this period" card no longer clips heading text — screenshot
+- [ ] All elevated cards have consistent padding — visual review
+- [ ] Sidebar counts present only on Lapsed, Campaigns, Conversations — screenshot
+- [ ] Plan badge removed from Conversations sidebar — screenshot
+- [ ] Every interactive element has a visible focus ring when tabbed to — keyboard nav video or screenshot sequence
+- [ ] Every icon-only button has `aria-label` — code search proving 100% coverage
+- [ ] Skip-to-content link present and works — keyboard nav test
+- [ ] `pnpm test:a11y` reports zero serious/critical violations on all six routes — test output
+- [ ] Visual regression baselines committed for Dashboard, Billing, Attribution, Conversations — file diff
+- [ ] Storybook updated with new and changed stories — screenshot of Storybook nav
 
-Score each 0–3. Anything below 3 needs remediation before closing.
+## Definition of done
 
-- Tenancy isolation tested with cross-merchant access attempt — [score]
-- Shopify HMAC signature verified on every OAuth callback — [score]
-- State token bound, signed, expires in 10 minutes, rejected when tampered — [score]
-- Access token encrypted at rest with a key not in `.env.local` plaintext (env vars are OK, but the storage layer must use Vault or `pgp_sym_encrypt`) — [score]
-- App Bridge session token verified server-side, not raw cookies — [score]
-- No PII (shop_domain, tokens, merchant ID) in logs — [score]
-- TypeScript types generated from DB schema and used end-to-end — [score]
-- Optional scopes declared in `shopify.app.toml` but NOT requested at install — [score]
-- Real install flow tested end-to-end against `lapsed-test.myshopify.com` — [score]
-- Migration was applied successfully (note path: CLI or psql fallback) — [score]
-- Every UI surface still matches `DESIGN-SYSTEM.md` tokens (no design drift introduced by data wiring) — [score]
-- CI is actually green, not "mostly green with one flaky test" — [score]
+- [ ] All acceptance criteria above checked with evidence in the PR description
+- [ ] `pnpm typecheck` exits 0
+- [ ] `pnpm lint` exits 0
+- [ ] `pnpm test` all passing
+- [ ] `pnpm build` exits 0 for all three apps
+- [ ] `pnpm test:e2e` all passing including new topbar.spec.ts
+- [ ] `pnpm test:a11y` zero serious/critical violations
+- [ ] `pnpm grep:pii` clean
+- [ ] `pnpm vercel:env:check` clean (no env changes expected this sprint)
+- [ ] No new dependencies added without justification in PR description
+- [ ] No hardcoded colors / fonts / radii outside `packages/ui` — verified by grep
+- [ ] HANDOFF.md committed at sprint end with rubric scores
+- [ ] PR opened, evaluator session run, every rubric criterion scored 3, then squash-merged to main
 
-## Out of Scope
+## Quality rubric for this sprint
 
-Explicitly NOT in this sprint. Do not build any of these.
+Scored 0–3 by the evaluator session. All must score 3 before merge.
 
-- Webhook handlers for `app/uninstalled`, `customers/data_request`, etc. (Sprint 03 sets up the webhook infrastructure)
-- Any order, customer, or product data ingestion (Sprint 03)
-- Cadence calculation, lapsed classification, scoring (Sprint 04)
-- Campaign creation as a backend operation — the UI exists from Sprint 01 but creating a campaign still uses fixtures; real campaign persistence is Sprint 04
-- SMS sending, Twilio integration, conversation logic (Sprint 05)
-- Stripe billing wiring (Sprint 06)
-- Resend/email integration (Sprint 06)
-- Admin panel / staff auth — there's no staff functionality yet
-- Optional scopes being dynamically requested — those happen in the sprint that needs them
-- Production credentials anywhere; everything stays in test/sandbox/dev
-- Multi-user accounts within a merchant
-- Custom branding configuration UI
-
-## Self-verification commands
-
-Run these in order and paste output into HANDOFF.md:
-
-```bash
-pnpm install
-pnpm db:migrate   # applies migrations to remote
-pnpm db:types     # regenerates types from schema
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
-pnpm test:e2e
-pnpm grep:pii
-pnpm vercel:env:check
-```
-
-If any command fails, stop and write HANDOFF.md recording the failure. Do not declare done.
+1. **Token discipline** — Every visual change uses Vellum tokens; no hardcoded values
+2. **Format helpers used everywhere** — Zero inline currency / date / timestamp formatting in `apps/web/app/(app)/**`
+3. **Chart unification** — Both Dashboard and Attribution use the same component; no two implementations
+4. **Accessibility** — Focus rings visible, aria-labels present, skip-to-content works, axe scan clean
+5. **Storybook coverage** — Every new or changed component has a story
+6. **Test coverage** — Format helpers have unit tests for every branch; topbar interactions have e2e tests
+7. **Visual regression** — Baselines committed; diffs reviewed; no unintended changes
+8. **Scope discipline** — Nothing from "Out of scope" was touched. No data wiring, no backend, no Sprint 03 work.
+9. **PR hygiene** — Conventional commits, clean diff, no unrelated changes, no console.log left behind
+10. **No regressions** — All existing tests still pass; no new TypeScript errors
 
 ## Evaluator session prompt
 
-Open a fresh Claude Code session pointed at this repo with this prompt:
+After implementation, open a fresh Claude Code session with this exact prompt:
 
 ```
-You are a skeptical senior engineer doing QA on Sprint 02 of lapsed.ai
-(repo backend foundation + Shopify OAuth + merchant auth). Your job is to
-find everything wrong, incomplete, or inconsistent. Do not approve anything
-unless you are certain it meets the standard.
+You are a skeptical senior engineer doing QA on Sprint 02.5 (UI Polish) of lapsed.ai. Your job is to find everything wrong, incomplete, or inconsistent. Do not approve anything unless you are certain it meets the standard.
 
-Specifically:
-- Read CLAUDE.md, DESIGN-SYSTEM.md, SPRINT.md, HANDOFF.md in that order
-- Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm test:e2e`,
-  `pnpm grep:pii`, `pnpm vercel:env:check` and report exact output
-- Verify every acceptance criterion against the actual code — do not trust
-  HANDOFF.md claims, verify them
-- Specifically perform these adversarial checks:
-  * Send an OAuth callback with a tampered HMAC and confirm it is rejected
-  * Send an OAuth callback with an expired state cookie and confirm rejection
-  * Send an OAuth callback with a missing state cookie and confirm rejection
-  * Send an OAuth callback with a state cookie that doesn't match the query
-    parameter and confirm rejection
-  * Query the merchants table directly via psql and confirm `shopify_access_token`
-    is ciphertext, not plaintext (paste the actual hex output)
-  * Attempt to read merchant A's row using a session token bound to merchant B
-    using the publishable key client; confirm zero rows returned
-  * Grep the codebase for hardcoded scope strings — they must come from
-    `shopify.app.toml` or env, not be duplicated in code
-  * Grep logs and recent commits for any of: shop_domain values, access token
-    values, HMAC values. Any leak is a SEVERE violation
-  * Inspect `shopify.app.toml` and confirm optional_scopes are declared but
-    NOT in the required `scopes` field
-  * Verify the dashboard renders the real shop domain by visiting the preview
-    URL with a valid session token and inspecting the DOM
-- Score each rubric criterion 0–3 with justification
-- Report findings in a single message with a clear PASS or REMEDIATE verdict
-  per criterion
-- Do not suggest the sprint is complete unless every criterion scores 3
+Read in order: CLAUDE.md, DESIGN-SYSTEM.md, SPRINT.md, HANDOFF.md.
+
+Then run and report exact output:
+- pnpm typecheck
+- pnpm lint
+- pnpm test
+- pnpm build
+- pnpm test:e2e
+- pnpm test:a11y
+- pnpm grep:pii
+- pnpm vercel:env:check
+- git diff main --stat (to see scope of changes)
+- grep -rE "\\.toLocaleString\\(|\\$\\{.*\\.toFixed" apps/web/app (to verify format helpers are used)
+
+Then verify EVERY acceptance criterion in SPRINT.md against actual code — do not trust HANDOFF.md claims. Open the relevant files, check the actual implementation, and confirm.
+
+Score each of the 10 rubric criteria 0-3 with justification. Pay special attention to:
+- Did the sprint touch anything in "Out of scope"? (Especially: no data wiring, no backend, no empty states, no onboarding changes.)
+- Are the format helpers actually used everywhere, or just defined and partially adopted?
+- Does the chart unification mean one component, or two components that look similar?
+- Are aria-labels real and descriptive, or copy-pasted "button"?
+
+Report PASS or REMEDIATE per criterion. If any criterion is below 3, list the exact files and lines that need fixing. Do not suggest the sprint is complete unless every criterion scores 3.
 ```
 
 ## Exact next action
 
-Create the sprint branch (`git checkout -b sprint-02/shopify-auth`). First task: run `shopify app config link --client-id $env:SHOPIFY_API_KEY` from the repo root to generate `shopify.app.toml` from your existing Partner Dashboard config (this captures the scopes, URLs, and webhook version into code rather than the dashboard being the source of truth). Verify the toml file matches `.env.local`'s scopes and URLs. Commit. Then move to the Supabase migration: scaffold `packages/db/supabase/`, write `0001_init.sql`, apply via `supabase db push` (or `psql` fallback if the CLI hits the known access-control bug), generate types, commit. Then the OAuth routes in `apps/web/app/api/shopify/`. Then App Bridge in the root layout. Then the dashboard data wiring. Then the Playwright integration test. Then everything in the Definition of Done.
+Open Claude Code in worktree mode pointed at `C:\dev\lapsed`, create branch `sprint-02.5/ui-polish`, and start with criterion 1 (primary button contrast fix in `packages/ui/src/components/button.tsx`) since it's the smallest change, has the highest visual impact, and unblocks visual regression baseline capture for the rest of the sprint.
+
+Suggested chunking, in order:
+
+1. Button contrast fix + Storybook story + unit test → commit
+2. Format helpers module + unit tests → commit
+3. Sweep inline formatting in app routes to use helpers → commit
+4. HeroMetric component + sweep pages → commit
+5. RevenueChart component + replace Dashboard + Attribution usages → commit
+6. Topbar height + icon + dot fixes → commit
+7. Topbar dropdown wiring (?, bell, avatar) + e2e tests → commit
+8. Card padding audit + Billing fix → commit
+9. Sidebar counts + plan badge cleanup → commit
+10. Focus rings + aria-labels + skip-to-content + a11y test pass → commit
+11. Visual regression baselines + final sweep → commit
+12. HANDOFF.md → commit, open PR
