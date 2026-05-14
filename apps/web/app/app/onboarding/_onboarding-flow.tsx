@@ -39,7 +39,7 @@ export function OnboardingFlow() {
       <div className="mb-24 text-center">
         <h2 className="text-h1 text-ink-900">Welcome to lapsed.</h2>
         <p className="mt-4 text-meta text-ink-500">
-          Three steps to your first recovered customer.
+          Three steps to your first win-back.
         </p>
       </div>
 
@@ -86,7 +86,7 @@ export function OnboardingFlow() {
                     {step.key === "cadence" &&
                       "Detected cadence: 38 days. 2,847 customers currently past their typical reorder window."}
                     {step.key === "first-campaign" &&
-                      "Audience: lapsed 60–90 days repeat buyers · Offer: $20 off · Estimated revenue lift: $18,400"}
+                      "Group: lapsed 60–90 days repeat buyers · Offer: $20 off · Estimated revenue lift: $18,400"}
                   </div>
                 </Card>
                 <div className="flex w-full justify-between">

@@ -3,7 +3,7 @@ import type { Campaign } from "./types";
 export const campaigns: Campaign[] = [
   {
     id: "cam_001",
-    name: "Summer dormant — 60 day cohort",
+    name: "Summer dormant — 60 day group",
     meta: "812 customers · launched 8 days ago",
     status: "live",
     statusLabel: "Live",
@@ -74,7 +74,7 @@ export const campaigns: Campaign[] = [
     statusLabel: "Draft",
     audienceSize: 446,
     audienceDescription: "Past purchasers of monthly-cadence SKUs whose typical reorder window has passed",
-    cohortLabel: "Replenishment · supplements cohort",
+    cohortLabel: "Replenishment · supplements group",
     offerDescription: "Free shipping on reorder + 10% loyalty discount",
     offerCode: "RELOAD10",
     offerValue: "Free shipping + 10%",

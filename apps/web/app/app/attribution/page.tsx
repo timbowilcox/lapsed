@@ -34,7 +34,7 @@ export default function AttributionPage() {
       </div>
 
       <HeroMetric
-        label="Total recovered · last 30 days"
+        label="Total restored · last 30 days"
         currency="$"
         value={formatCount(attribution.totalRecoveredRevenue)}
         meta={
