@@ -1,4 +1,4 @@
-export { computeOAuthHmac, verifyOAuthHmac } from "./hmac";
+export { computeOAuthHmac, verifyOAuthHmac, verifyWebhookHmac } from "./hmac";
 export {
   signStateToken,
   verifyStateToken,

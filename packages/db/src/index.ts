@@ -2,10 +2,19 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SignJWT } from "jose";
 import type { Database } from "./types";
 
-export type { Database } from "./types";
+export type { Database, Json } from "./types";
 export type LapsedSupabaseClient = SupabaseClient<Database>;
 
 export { encryptToken, decryptToken, decodeEncryptionKey } from "./encryption";
+
+export {
+  getLapsedCustomers,
+  getCustomer,
+  getCustomerOrders,
+  getMerchantSummary,
+  type LapsedCustomersPage,
+  type MerchantSummaryRow,
+} from "./queries";
 
 const ROLE = "authenticated";
 const SESSION_TTL_SECONDS = 3600; // align with Supabase auth.jwt_exp

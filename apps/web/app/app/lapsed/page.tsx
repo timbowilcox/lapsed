@@ -1,9 +1,16 @@
-import { Panel } from "@lapsed/ui";
-import { lapsedCustomers } from "@lapsed/fixtures";
+import { Suspense } from "react";
+import { Panel, LapsedCustomersSkeleton } from "@lapsed/ui";
+import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
-import { LapsedCustomersList } from "./_lapsed-customers-list";
+import { LapsedCustomersContent } from "./_lapsed-customers-content";
 
-export default function LapsedPage() {
+interface PageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function LapsedPage({ searchParams }: PageProps) {
+  const merchant = await requireMerchant({ searchParams: await searchParams });
+
   return (
     <MerchantShell pageTitle="Lapsed customers">
       <div className="mb-24 flex items-start justify-between">
@@ -17,7 +24,9 @@ export default function LapsedPage() {
       </div>
 
       <Panel>
-        <LapsedCustomersList customers={lapsedCustomers} />
+        <Suspense fallback={<LapsedCustomersSkeleton />}>
+          <LapsedCustomersContent merchant={merchant} />
+        </Suspense>
       </Panel>
     </MerchantShell>
   );

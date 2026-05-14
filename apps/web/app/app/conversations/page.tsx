@@ -13,6 +13,9 @@ export default function ConversationsPage() {
         </p>
       </div>
       <Panel>
+        <div className="flex items-center gap-8 border-b border-border px-16 py-10">
+          <span className="text-mini text-ink-400">[demo data] — real conversations in Sprint 06</span>
+        </div>
         <ConversationsList conversations={conversations} />
       </Panel>
     </MerchantShell>

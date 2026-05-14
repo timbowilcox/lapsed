@@ -29,6 +29,10 @@ export default function AttributionPage() {
         </p>
       </div>
 
+      <div className="mb-12 rounded-sm border border-cream-200 bg-cream-50 px-12 py-8">
+        <span className="text-mini text-ink-400">[demo data] — real attribution in Sprint 08</span>
+      </div>
+
       <HeroMetric
         label="Total recovered · last 30 days"
         currency="$"

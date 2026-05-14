@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { computeOAuthHmac, verifyOAuthHmac } from "../src/hmac";
+import { computeOAuthHmac, verifyOAuthHmac, verifyWebhookHmac } from "../src/hmac";
 
 const SECRET = "test-shopify-api-secret";
 
@@ -89,5 +90,51 @@ describe("verifyOAuthHmac", () => {
     const signed = sign(buildParams());
     signed.set("extra", "injected");
     expect(verifyOAuthHmac(signed, SECRET)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verifyWebhookHmac
+// ─────────────────────────────────────────────────────────────────────────────
+
+function webhookHmac(body: Buffer, secret = SECRET): string {
+  return createHmac("sha256", secret).update(body).digest("base64");
+}
+
+const WEBHOOK_SECRET = "whsec_test_shopify_webhook_secret";
+const SAMPLE_BODY = Buffer.from('{"id":12345,"email":"test@example.com"}');
+
+describe("verifyWebhookHmac", () => {
+  it("accepts a valid raw body with the correct header", () => {
+    const header = webhookHmac(SAMPLE_BODY, WEBHOOK_SECRET);
+    expect(verifyWebhookHmac(SAMPLE_BODY, header, WEBHOOK_SECRET)).toBe(true);
+  });
+
+  it("rejects when the body has been tampered (one byte changed)", () => {
+    const header = webhookHmac(SAMPLE_BODY, WEBHOOK_SECRET);
+    const tampered = Buffer.from(SAMPLE_BODY);
+    tampered[0] = tampered[0]! ^ 0x01;
+    expect(verifyWebhookHmac(tampered, header, WEBHOOK_SECRET)).toBe(false);
+  });
+
+  it("rejects when the header value has one character changed", () => {
+    const header = webhookHmac(SAMPLE_BODY, WEBHOOK_SECRET);
+    const tampered = header.slice(0, -1) + (header.endsWith("A") ? "B" : "A");
+    expect(verifyWebhookHmac(SAMPLE_BODY, tampered, WEBHOOK_SECRET)).toBe(false);
+  });
+
+  it("rejects when the header is an empty string", () => {
+    expect(verifyWebhookHmac(SAMPLE_BODY, "", WEBHOOK_SECRET)).toBe(false);
+  });
+
+  it("rejects when the wrong secret is used", () => {
+    const header = webhookHmac(SAMPLE_BODY, WEBHOOK_SECRET);
+    expect(verifyWebhookHmac(SAMPLE_BODY, header, "wrong-secret")).toBe(false);
+  });
+
+  it("accepts an empty body with its correct HMAC", () => {
+    const emptyBody = Buffer.alloc(0);
+    const header = webhookHmac(emptyBody, WEBHOOK_SECRET);
+    expect(verifyWebhookHmac(emptyBody, header, WEBHOOK_SECRET)).toBe(true);
   });
 });
