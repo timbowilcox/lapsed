@@ -5,7 +5,8 @@ import { cn } from "../lib/cn";
 export interface ShopSwitcherProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   shopInitials: string;
   shopName: string;
-  planLabel: string;
+  /** Omit until Sprint 03 wires real plan data. */
+  planLabel?: string;
 }
 
 export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
@@ -28,7 +29,9 @@ export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-meta font-semibold text-ink-900">{shopName}</div>
-          <div className="text-[11px] text-ink-700 opacity-75">{planLabel}</div>
+          {planLabel && (
+            <div className="text-[11px] text-ink-700 opacity-75">{planLabel}</div>
+          )}
         </div>
         <ChevronsUpDown
           strokeWidth={1.75}

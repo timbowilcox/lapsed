@@ -67,7 +67,7 @@ export function MerchantShell({
 
   const shopInitials = session?.shopInitials ?? fixtureMerchant.shopInitials;
   const shopName = session?.shopName ?? fixtureMerchant.shopName;
-  const planLabel = session?.planLabel ?? fixtureMerchant.planLabel;
+  const planLabel = undefined;
 
   async function handleSignOut() {
     await fetch("/api/auth/signout", { method: "POST" });

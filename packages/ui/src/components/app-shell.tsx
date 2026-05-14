@@ -32,7 +32,7 @@ export interface AppShellProps {
   pageTitle: string;
   shopInitials: string;
   shopName: string;
-  planLabel: string;
+  planLabel?: string;
   userInitials: string;
   hasNotifications?: boolean;
   onSignOut?: () => void;
