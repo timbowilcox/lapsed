@@ -62,7 +62,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
           </div>
         </Card>
         <Card className="p-20">
-          <div className="text-label text-ink-500">Recovered revenue</div>
+          <div className="text-label text-ink-500">Restored revenue</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
             {campaign.recoveredRevenueDisplay}
           </div>

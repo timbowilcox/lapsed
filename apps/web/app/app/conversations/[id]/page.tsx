@@ -127,7 +127,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
                   </Link>
                 )}
                 <Card className="p-16">
-                  <div className="text-label text-ink-500">Recovered revenue</div>
+                  <div className="text-label text-ink-500">Restored revenue</div>
                   <div className="mt-4 text-display text-ink-900 tabular-nums">
                     {conversation.attributedRevenue !== null
                       ? formatCurrency(conversation.attributedRevenue * 100)

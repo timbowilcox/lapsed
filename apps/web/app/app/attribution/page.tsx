@@ -22,7 +22,7 @@ export default function AttributionPage() {
   return (
     <MerchantShell pageTitle="Attribution">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Recovered revenue</h2>
+        <h2 className="mb-4 text-h1 text-ink-900">Restored revenue</h2>
         <p className="text-meta text-ink-500">
           Revenue from orders attributable to a campaign-driven conversation, reconciled against
           Shopify orders.
@@ -70,7 +70,7 @@ export default function AttributionPage() {
       </div>
 
       <Panel className="mb-16">
-        <PanelHeader title="Recovered revenue — last 30 days" />
+        <PanelHeader title="Restored revenue — last 30 days" />
         <PanelBody>
           <div className="p-24">
             <RevenueChart
@@ -87,7 +87,7 @@ export default function AttributionPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Campaign</TableHead>
-                <TableHead>Recovered revenue</TableHead>
+                <TableHead>Restored revenue</TableHead>
                 <TableHead>Orders</TableHead>
                 <TableHead>Reconciliation</TableHead>
               </TableRow>

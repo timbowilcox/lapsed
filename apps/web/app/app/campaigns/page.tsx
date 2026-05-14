@@ -43,7 +43,7 @@ export default function CampaignsPage() {
               <TableHead>Audience</TableHead>
               <TableHead>Sent</TableHead>
               <TableHead>Response</TableHead>
-              <TableHead>Recovered</TableHead>
+              <TableHead>Restored</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>

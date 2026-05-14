@@ -91,7 +91,7 @@ export function CampaignWizard() {
             {currentStep.key === "audience" && (
               <div className="flex flex-col gap-16">
                 <label className="flex flex-col gap-6">
-                  <span className="text-label text-ink-700">Cohort</span>
+                  <span className="text-label text-ink-700">Group</span>
                   <Select value={audience} onValueChange={setAudience}>
                     <SelectTrigger>
                       <SelectValue />
