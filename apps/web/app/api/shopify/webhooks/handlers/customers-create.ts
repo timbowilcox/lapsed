@@ -1,16 +1,8 @@
-import { appendCustomerEvent } from "@lapsed/core";
+import { appendCustomerEvent, materializeCustomer } from "@lapsed/core";
 import type { WebhookHandler } from "./types";
 
 interface ShopifyCustomerPayload {
   id: number;
-  email?: string | null;
-  phone?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  tags?: string;
-  orders_count?: number;
-  total_spent?: string;
-  last_order_id?: number | null;
   created_at?: string;
 }
 
@@ -29,14 +21,8 @@ export const customersCreate: WebhookHandler = async ({
 
   const gid = toGid(customer.id);
   const now = new Date().toISOString();
-  const tags = customer.tags
-    ? customer.tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : [];
 
-  // Append event via validated helper (Zod schema guards the write)
+  // Append event via validated helper — full payload stored for event-log replay
   await appendCustomerEvent(serviceClient, {
     merchantId,
     shopifyCustomerGid: gid,
@@ -46,21 +32,9 @@ export const customersCreate: WebhookHandler = async ({
     occurredAt: customer.created_at ?? now,
   });
 
-  // Materialised profile upsert
-  await serviceClient.from("customers").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: gid,
-      email: customer.email ?? null,
-      phone: customer.phone ?? null,
-      first_name: customer.first_name ?? null,
-      last_name: customer.last_name ?? null,
-      tags,
-      total_order_count: customer.orders_count ?? 0,
-      total_ltv_cents: Math.round(parseFloat(customer.total_spent ?? "0") * 100),
-    },
-    { onConflict: "merchant_id,shopify_customer_gid" },
-  );
+  // Rebuild the materialised profile from the event log so that the customers
+  // table is always reconstructable by replaying events alone.
+  await materializeCustomer(serviceClient, merchantId, gid);
 
   console.info(`webhook customers/create shop_prefix=${shopDomain.split(".")[0] ?? "unknown"} gid=${customer.id}`);
 };

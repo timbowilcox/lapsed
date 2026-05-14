@@ -63,7 +63,7 @@ export async function appendCustomerEvent(
 ): Promise<void> {
   const v = CustomerEventInputSchema.parse(event);
 
-  await serviceClient.from("customer_events").upsert(
+  const { error } = await serviceClient.from("customer_events").upsert(
     {
       merchant_id: v.merchantId,
       shopify_customer_gid: v.shopifyCustomerGid,
@@ -77,6 +77,7 @@ export async function appendCustomerEvent(
       ignoreDuplicates: true,
     },
   );
+  if (error) throw error;
 }
 
 /**
@@ -92,7 +93,7 @@ export async function appendOrderEvent(
 ): Promise<void> {
   const v = OrderEventInputSchema.parse(event);
 
-  await serviceClient.from("order_events").upsert(
+  const { error } = await serviceClient.from("order_events").upsert(
     {
       merchant_id: v.merchantId,
       shopify_customer_gid: v.shopifyCustomerGid,
@@ -107,4 +108,5 @@ export async function appendOrderEvent(
       ignoreDuplicates: true,
     },
   );
+  if (error) throw error;
 }

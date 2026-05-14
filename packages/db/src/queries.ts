@@ -44,15 +44,18 @@ export async function getLapsedCustomers(
 }
 
 /**
- * Returns a single customer row by Shopify GID, or null if not found.
+ * Returns a single customer row by merchant + Shopify GID, or null if not found.
+ * The explicit merchant_id filter provides defense-in-depth beyond RLS alone.
  */
 export async function getCustomer(
   merchantClient: LapsedSupabaseClient,
+  merchantId: string,
   shopifyCustomerGid: string,
 ): Promise<CustomerRow | null> {
   const { data, error } = await merchantClient
     .from("customers")
     .select("*")
+    .eq("merchant_id", merchantId)
     .eq("shopify_customer_gid", shopifyCustomerGid)
     .maybeSingle();
 

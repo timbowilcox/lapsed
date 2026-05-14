@@ -19,14 +19,16 @@ type UpsertCall = {
   opts: unknown;
 };
 
-function makeMockClient() {
+function makeMockClient(upsertError?: { message: string }) {
   const upserts: UpsertCall[] = [];
 
   const client = {
     from: vi.fn((table: string) => ({
       upsert: vi.fn((row: Record<string, unknown>, opts: unknown) => {
         upserts.push({ table, row, opts });
-        return Promise.resolve({ data: null, error: null });
+        return Promise.resolve(
+          upsertError ? { data: null, error: upsertError } : { data: null, error: null },
+        );
       }),
     })),
   } as unknown as LapsedSupabaseClient;
@@ -126,6 +128,13 @@ describe("appendCustomerEvent", () => {
       appendCustomerEvent(client, withoutMerchant as typeof VALID_CUSTOMER_EVENT),
     ).rejects.toThrow();
   });
+
+  it("throws when Supabase upsert returns an error", async () => {
+    const { client } = makeMockClient({ message: "FK violation" });
+    await expect(appendCustomerEvent(client, VALID_CUSTOMER_EVENT)).rejects.toMatchObject({
+      message: "FK violation",
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,5 +201,12 @@ describe("appendOrderEvent", () => {
     await expect(
       appendOrderEvent(client, { ...VALID_ORDER_EVENT, occurredAt: "2024/01/15" }),
     ).rejects.toThrow();
+  });
+
+  it("throws when Supabase upsert returns an error", async () => {
+    const { client } = makeMockClient({ message: "DB error" });
+    await expect(appendOrderEvent(client, VALID_ORDER_EVENT)).rejects.toMatchObject({
+      message: "DB error",
+    });
   });
 });

@@ -16,6 +16,7 @@
     "clean": "rm -rf .turbo .next node_modules/.cache"
   },
   "dependencies": {
+    "@lapsed/core": "workspace:*",
     "@lapsed/db": "workspace:*",
     "@lapsed/fixtures": "workspace:*",
     "@lapsed/shopify": "workspace:*",
@@ -28,8 +29,8 @@
     "recharts": "^2.13.0"
   },
   "devDependencies": {
-    "@lapsed/config": "workspace:*",
     "@axe-core/playwright": "^4.10.1",
+    "@lapsed/config": "workspace:*",
     "@playwright/test": "^1.49.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",

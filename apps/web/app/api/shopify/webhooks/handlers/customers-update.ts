@@ -1,17 +1,9 @@
-import { appendCustomerEvent } from "@lapsed/core";
+import { appendCustomerEvent, materializeCustomer } from "@lapsed/core";
 import type { WebhookHandler } from "./types";
 
 interface ShopifyCustomerPayload {
   id: number;
-  email?: string | null;
-  phone?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  tags?: string;
-  orders_count?: number;
-  total_spent?: string;
   updated_at?: string;
-  accepts_marketing?: boolean;
 }
 
 function toGid(shopifyId: number): string {
@@ -29,14 +21,10 @@ export const customersUpdate: WebhookHandler = async ({
 
   const gid = toGid(customer.id);
   const now = new Date().toISOString();
-  const tags = customer.tags
-    ? customer.tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : [];
 
-  // Append event via validated helper
+  // Append event via validated helper — full payload stored for event-log replay.
+  // accepts_marketing is intentionally not persisted to the customers table:
+  // marketing consent is tracked at the conversation level in Sprint 06.
   await appendCustomerEvent(serviceClient, {
     merchantId,
     shopifyCustomerGid: gid,
@@ -46,24 +34,8 @@ export const customersUpdate: WebhookHandler = async ({
     occurredAt: customer.updated_at ?? now,
   });
 
-  // Materialised profile upsert — merge current values.
-  // accepts_marketing is intentionally not written here: the customers table
-  // does not have a dedicated column for it (marketing consent is tracked at
-  // the conversation level in Sprint 06).
-  await serviceClient.from("customers").upsert(
-    {
-      merchant_id: merchantId,
-      shopify_customer_gid: gid,
-      email: customer.email ?? null,
-      phone: customer.phone ?? null,
-      first_name: customer.first_name ?? null,
-      last_name: customer.last_name ?? null,
-      tags,
-      total_order_count: customer.orders_count ?? 0,
-      total_ltv_cents: Math.round(parseFloat(customer.total_spent ?? "0") * 100),
-    },
-    { onConflict: "merchant_id,shopify_customer_gid" },
-  );
+  // Rebuild the materialised profile from the event log.
+  await materializeCustomer(serviceClient, merchantId, gid);
 
   console.info(`webhook customers/update shop_prefix=${shopDomain.split(".")[0] ?? "unknown"} gid=${customer.id}`);
 };

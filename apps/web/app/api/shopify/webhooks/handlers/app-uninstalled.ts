@@ -22,10 +22,13 @@ export const appUninstalled: WebhookHandler = async ({
 
   // 2. Mark the merchant as uninstalled. Do not delete data — retained for
   //    potential reinstall and for billing reconciliation.
+  //    The IS NULL guard prevents a duplicate webhook from overwriting a
+  //    reinstall's cleared uninstalled_at.
   await serviceClient
     .from("merchants")
     .update({ uninstalled_at: now })
-    .eq("id", merchantId);
+    .eq("id", merchantId)
+    .is("uninstalled_at", null);
 
   // Log only the shop domain prefix (before the dot) to avoid PII log leakage.
   const domainLabel = shopDomain.split(".")[0] ?? "unknown";
