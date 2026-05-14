@@ -3,6 +3,7 @@ import { verifyOAuthHmac } from "@lapsed/shopify";
 import { createServiceClient } from "@lapsed/db";
 import { serverEnv } from "./lib/env";
 import { resolveRootRedirect, toURLSearchParams } from "./lib/root-redirect";
+import { IframeBreakout } from "./_components/iframe-breakout";
 
 // Force per-request rendering — search params drive the redirect target,
 // and the merchant lookup hits Supabase. Caching would be wrong.
@@ -13,15 +14,23 @@ type RawSearchParams = Record<string, string | string[] | undefined>;
 /**
  * Root entry. Three cases:
  *
- *   1. Shopify embedded entry: /?shop=...&host=...&hmac=...&timestamp=...
- *      Verify HMAC, look up the merchant, then either redirect into the
- *      dashboard (installed) or kick off OAuth (not installed).
+ *   1. Shopify embedded entry (merchant installed):
+ *      /?shop=...&host=...&hmac=...&timestamp=...
+ *      Server-side redirect to /app preserving the query string so App
+ *      Bridge can read shop/host/id_token from the iframe URL.
  *
- *   2. Untrusted ?shop= without a valid HMAC: fall through to (3) — never
- *      blindly trust the query string from arbitrary callers.
+ *   2. Shopify embedded entry (merchant NOT installed):
+ *      Same URL shape, but the merchant lookup says they're not in our
+ *      DB (or uninstalled_at is set). We CANNOT server-side redirect to
+ *      /api/shopify/install from here — that would run the install
+ *      endpoint inside the Shopify Admin iframe, making the state cookie
+ *      a third-party cookie which Chrome drops. Instead we render a tiny
+ *      client-side break-out page that does `window.top.location.href`
+ *      to start OAuth as a top-level navigation. The install endpoint
+ *      then sets the state cookie in first-party context.
  *
- *   3. Direct visit (no shop, e.g. someone typing the URL):
- *      Redirect to /app, which will then redirect to install if no session.
+ *   3. Direct visit (no shop) or invalid HMAC:
+ *      Redirect to /app, which will redirect to install if no session.
  */
 export default async function RootPage({
   searchParams,
@@ -36,7 +45,7 @@ export default async function RootPage({
   }
 
   const env = serverEnv();
-  const { target } = await resolveRootRedirect({
+  const result = await resolveRootRedirect({
     searchParams: params,
     verifyHmac: (p) => verifyOAuthHmac(p, env.shopifyApiSecret),
     lookupMerchant: async (shop) => {
@@ -52,5 +61,9 @@ export default async function RootPage({
       return { installed: !!data && data.uninstalled_at === null };
     },
   });
-  redirect(target);
+
+  if (result.kind === "iframeBreakout") {
+    return <IframeBreakout target={result.target} />;
+  }
+  redirect(result.target);
 }
