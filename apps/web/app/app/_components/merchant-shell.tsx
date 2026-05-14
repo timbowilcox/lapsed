@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
 import { AppShell, formatCount, type SidebarNavSection } from "@lapsed/ui";
 import {
@@ -61,12 +61,18 @@ export function MerchantShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const session = useMerchant();
   const activeHref = resolveActive(pathname);
 
   const shopInitials = session?.shopInitials ?? fixtureMerchant.shopInitials;
   const shopName = session?.shopName ?? fixtureMerchant.shopName;
   const planLabel = session?.planLabel ?? fixtureMerchant.planLabel;
+
+  async function handleSignOut() {
+    await fetch("/api/auth/signout", { method: "POST" });
+    router.push("/app/auth/install");
+  }
 
   return (
     <AppShell
@@ -78,6 +84,7 @@ export function MerchantShell({
       planLabel={planLabel}
       userInitials={fixtureMerchant.ownerInitials}
       hasNotifications
+      onSignOut={handleSignOut}
     >
       {children}
     </AppShell>

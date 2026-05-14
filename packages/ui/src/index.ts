@@ -40,6 +40,13 @@ export {
   SelectItem,
 } from "./components/select";
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/tabs";
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "./components/dropdown-menu";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./components/table";
 export { Panel, PanelHeader, PanelBody } from "./components/panel";
 export { Toaster, toast } from "./components/toast";
