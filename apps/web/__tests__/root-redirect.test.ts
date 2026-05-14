@@ -4,7 +4,6 @@ import {
   toURLSearchParams,
 } from "../app/lib/root-redirect";
 
-// Helpers
 const validHmac = () => true;
 const invalidHmac = () => false;
 const merchantInstalled = vi.fn(async () => ({ installed: true }));
@@ -28,7 +27,6 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: merchantInstalled,
     });
-    expect(result.kind).toBe("redirect");
     expect(result.target.startsWith("/app?")).toBe(true);
     const qp = new URLSearchParams(result.target.split("?")[1]);
     expect(qp.get("shop")).toBe("lapsed-test.myshopify.com");
@@ -38,7 +36,10 @@ describe("resolveRootRedirect", () => {
     expect(qp.get("timestamp")).toBe("1715635200");
   });
 
-  it("shop present + merchant not installed → iframeBreakout to /api/shopify/install", async () => {
+  it("shop present + merchant not installed → /app/auth/install with shop+host", async () => {
+    // Why /app/auth/install (not /api/shopify/install directly): the user
+    // needs to click the install button to provide the gesture that lets
+    // the iframe break out to top-level OAuth. See HANDOFF.md.
     const params = paramsWith({
       shop: "lapsed-test.myshopify.com",
       host: "YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvbGFwc2VkLXRlc3Q",
@@ -50,8 +51,7 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: merchantMissing,
     });
-    expect(result.kind).toBe("iframeBreakout");
-    expect(result.target.startsWith("/api/shopify/install?")).toBe(true);
+    expect(result.target.startsWith("/app/auth/install?")).toBe(true);
     const qp = new URLSearchParams(result.target.split("?")[1]);
     expect(qp.get("shop")).toBe("lapsed-test.myshopify.com");
     expect(qp.get("host")).toBe("YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvbGFwc2VkLXRlc3Q");
@@ -60,15 +60,32 @@ describe("resolveRootRedirect", () => {
     expect(qp.get("embedded")).toBeNull();
   });
 
-  it("shop present + merchant uninstalled → iframeBreakout to /api/shopify/install", async () => {
+  it("shop present + merchant uninstalled → /app/auth/install (treated as fresh install)", async () => {
     const params = paramsWith({ shop: "lapsed-test.myshopify.com", hmac: "x" });
     const result = await resolveRootRedirect({
       searchParams: params,
       verifyHmac: validHmac,
       lookupMerchant: async () => ({ installed: false }),
     });
-    expect(result.kind).toBe("iframeBreakout");
-    expect(result.target.startsWith("/api/shopify/install?")).toBe(true);
+    expect(result.target.startsWith("/app/auth/install?")).toBe(true);
+  });
+
+  it("install case targets /app/auth/install — NEVER /api/shopify/install directly", async () => {
+    // Regression-defence: an earlier iteration sent users straight to
+    // /api/shopify/install (either via server-side redirect or a useEffect
+    // window.top.location.href). Both were broken — the former set the
+    // state cookie in iframe context (third-party, dropped), the latter
+    // was blocked by Chrome's user-gesture requirement for cross-origin
+    // iframe → top navigation. The install screen with its user-clickable
+    // button is the only flow that satisfies both constraints.
+    const params = paramsWith({ shop: "lapsed-test.myshopify.com", hmac: "x" });
+    const result = await resolveRootRedirect({
+      searchParams: params,
+      verifyHmac: validHmac,
+      lookupMerchant: async () => ({ installed: false }),
+    });
+    expect(result.target.startsWith("/api/shopify/install")).toBe(false);
+    expect(result.target.startsWith("/app/auth/install")).toBe(true);
   });
 
   it("no shop param → /app (existing direct-visit behavior)", async () => {
@@ -78,7 +95,6 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: lookup,
     });
-    expect(result.kind).toBe("redirect");
     expect(result.target).toBe("/app");
     expect(lookup).not.toHaveBeenCalled();
   });
@@ -94,24 +110,10 @@ describe("resolveRootRedirect", () => {
       verifyHmac: invalidHmac,
       lookupMerchant: lookup,
     });
-    expect(result.kind).toBe("redirect");
     expect(result.target).toBe("/app");
     // Critical: the merchant lookup is NEVER called for untrusted shops,
     // so attacker.myshopify.com can't be probed via a redirect oracle.
     expect(lookup).not.toHaveBeenCalled();
-  });
-
-  it("install case always returns kind=iframeBreakout (not a plain redirect)", async () => {
-    // Defends against accidental regression to server-side redirect for
-    // the install case, which would re-introduce the third-party cookie
-    // bug that fix/oauth-cookie-iframe is solving.
-    const params = paramsWith({ shop: "lapsed-test.myshopify.com", hmac: "x" });
-    const result = await resolveRootRedirect({
-      searchParams: params,
-      verifyHmac: validHmac,
-      lookupMerchant: async () => ({ installed: false }),
-    });
-    expect(result.kind).toBe("iframeBreakout");
   });
 
   it("shop present without host param → install URL omits host (still includes shop)", async () => {
