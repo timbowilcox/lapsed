@@ -6,6 +6,24 @@
 
 ---
 
+## Post-Sprint-02 polish (PR `fix/oauth-cookie-iframe`)
+
+After `fix/root-embedded-entry` shipped, the OAuth flow fired but the callback returned `{"error":"state_missing"}`. Root cause: the state cookie set by `/api/shopify/install` was being lost because the install endpoint was hit from inside the Shopify Admin iframe — Chrome treats cookies set on `app.lapsed.ai` while the parent frame is `admin.shopify.com` as third-party and silently drops them without explicit `SameSite=None; Secure; Partitioned` attributes. Even with those attributes, the callback comes back top-level (Shopify's consent screen refuses to embed), so the iframe-set partitioned cookie isn't necessarily readable in the top-level context.
+
+The fix is two layers — break out of the iframe BEFORE setting the cookie, plus harden the cookie attributes as defense-in-depth:
+
+1. **Iframe break-out before OAuth.** `resolveRootRedirect` now returns a discriminated union `{ kind: "redirect" | "iframeBreakout", target: string }`. The `iframeBreakout` kind is returned for the install case (HMAC-verified shop, not in `merchants` table). `apps/web/app/page.tsx` checks the kind: for `redirect` it calls Next's `redirect(target)`; for `iframeBreakout` it renders a new `<IframeBreakout>` client component that does `window.top.location.href = target` in a `useEffect`. This makes the OAuth flow start as a **top-level navigation**, so the install endpoint runs first-party, the state cookie is set first-party, and the callback (also top-level) reads it back without any third-party-cookie machinery.
+
+2. **Partitioned cookie attributes (defense-in-depth).** `apps/web/app/api/shopify/install/route.ts` sets the state cookie with `SameSite=None; Secure; Partitioned; HttpOnly; Path=/; Max-Age=600`. Confirmed Next 15.1's `ResponseCookies.set()` supports `partitioned` directly (see `node_modules/next/dist/compiled/@edge-runtime/cookies/index.d.ts:69`). If the top-level break-out path is blocked for any reason — sandboxed iframe without `allow-top-navigation`, etc. — the third-party cookie path still works in CHIPS-compliant browsers (Chrome 114+, Edge, Firefox 132+).
+
+3. **Break-out UX.** `IframeBreakout` renders a minimal Vellum-styled "Starting install…" card with a pulsing lavender dot and a clickable fallback link, wrapped in `role="status" aria-live="polite"`. A `<noscript><meta http-equiv="refresh">` covers the JavaScript-disabled edge case (React 19 hoists the `<meta>` into `<head>`). Adds ~600 bytes to the `/` route bundle.
+
+4. **Tests.** `apps/web/__tests__/install-route.test.ts` (new) — 4 tests asserting the state cookie's `Set-Cookie` header carries all five attributes (`HttpOnly`, `Secure`, `SameSite=None`, `Partitioned`, `Path=/`, `Max-Age=600`), plus the existing authorize-URL / invalid-shop / missing-shop coverage. `apps/web/__tests__/root-redirect.test.ts` extended to assert `result.kind === "iframeBreakout"` for the install case (with a regression-defence test that explicitly checks the kind, so a future refactor can't silently revert to a server-side redirect). Test count now 26 (was 21). `apps/web/vitest.config.ts` gained a `resolve.alias["@"]` entry so route handlers importing `@/app/lib/env` resolve under Vitest.
+
+The callback route is unchanged — once the cookie is set in first-party context, the existing state-token verification path works.
+
+---
+
 ## Post-Sprint-02 polish (PR `fix/root-embedded-entry`)
 
 Shopify loads the embedded app iframe at `https://app.lapsed.ai/?shop=...&host=...&embedded=1&hmac=...&timestamp=...` — the **root path** with query params, not `/app/auth/install`. The Sprint 01 root page was `redirect("/app")` (no async, no searchParams), which stripped every query param. `/app` then called `requireMerchant()` which redirected to `/app/auth/install` — also without params — so by the time the install page rendered, `?shop=` and `?host=` were gone and the previous `fix/install-embedded-context` auto-redirect never triggered.

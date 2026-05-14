@@ -28,6 +28,7 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: merchantInstalled,
     });
+    expect(result.kind).toBe("redirect");
     expect(result.target.startsWith("/app?")).toBe(true);
     const qp = new URLSearchParams(result.target.split("?")[1]);
     expect(qp.get("shop")).toBe("lapsed-test.myshopify.com");
@@ -37,7 +38,7 @@ describe("resolveRootRedirect", () => {
     expect(qp.get("timestamp")).toBe("1715635200");
   });
 
-  it("shop present + merchant not installed → /api/shopify/install with shop+host", async () => {
+  it("shop present + merchant not installed → iframeBreakout to /api/shopify/install", async () => {
     const params = paramsWith({
       shop: "lapsed-test.myshopify.com",
       host: "YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvbGFwc2VkLXRlc3Q",
@@ -49,6 +50,7 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: merchantMissing,
     });
+    expect(result.kind).toBe("iframeBreakout");
     expect(result.target.startsWith("/api/shopify/install?")).toBe(true);
     const qp = new URLSearchParams(result.target.split("?")[1]);
     expect(qp.get("shop")).toBe("lapsed-test.myshopify.com");
@@ -58,13 +60,14 @@ describe("resolveRootRedirect", () => {
     expect(qp.get("embedded")).toBeNull();
   });
 
-  it("shop present + merchant uninstalled treated as not installed → /api/shopify/install", async () => {
+  it("shop present + merchant uninstalled → iframeBreakout to /api/shopify/install", async () => {
     const params = paramsWith({ shop: "lapsed-test.myshopify.com", hmac: "x" });
     const result = await resolveRootRedirect({
       searchParams: params,
       verifyHmac: validHmac,
       lookupMerchant: async () => ({ installed: false }),
     });
+    expect(result.kind).toBe("iframeBreakout");
     expect(result.target.startsWith("/api/shopify/install?")).toBe(true);
   });
 
@@ -75,6 +78,7 @@ describe("resolveRootRedirect", () => {
       verifyHmac: validHmac,
       lookupMerchant: lookup,
     });
+    expect(result.kind).toBe("redirect");
     expect(result.target).toBe("/app");
     expect(lookup).not.toHaveBeenCalled();
   });
@@ -90,10 +94,24 @@ describe("resolveRootRedirect", () => {
       verifyHmac: invalidHmac,
       lookupMerchant: lookup,
     });
+    expect(result.kind).toBe("redirect");
     expect(result.target).toBe("/app");
     // Critical: the merchant lookup is NEVER called for untrusted shops,
     // so attacker.myshopify.com can't be probed via a redirect oracle.
     expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("install case always returns kind=iframeBreakout (not a plain redirect)", async () => {
+    // Defends against accidental regression to server-side redirect for
+    // the install case, which would re-introduce the third-party cookie
+    // bug that fix/oauth-cookie-iframe is solving.
+    const params = paramsWith({ shop: "lapsed-test.myshopify.com", hmac: "x" });
+    const result = await resolveRootRedirect({
+      searchParams: params,
+      verifyHmac: validHmac,
+      lookupMerchant: async () => ({ installed: false }),
+    });
+    expect(result.kind).toBe("iframeBreakout");
   });
 
   it("shop present without host param → install URL omits host (still includes shop)", async () => {
