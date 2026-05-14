@@ -41,3 +41,25 @@ export function verifyOAuthHmac(
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
+
+/**
+ * Verify the `X-Shopify-Hmac-Sha256` header on an inbound webhook.
+ *
+ * Shopify computes HMAC-SHA256(secret, rawBody) and Base64-encodes the result.
+ * The raw request body (before any JSON parsing) must be passed as a Buffer.
+ * Uses a constant-time comparison to avoid timing side channels.
+ *
+ * Per https://shopify.dev/docs/apps/build/webhooks/validate
+ */
+export function verifyWebhookHmac(
+  rawBody: Buffer,
+  hmacHeader: string,
+  secret: string,
+): boolean {
+  if (!hmacHeader) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest("base64");
+  const a = Buffer.from(hmacHeader, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
