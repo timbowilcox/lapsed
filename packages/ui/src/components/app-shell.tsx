@@ -32,7 +32,7 @@ export interface AppShellProps {
 export function AppShell({
   sections,
   activeHref,
-  pageTitle,
+  pageTitle: _pageTitle,
   shopInitials,
   shopName,
   planLabel,
@@ -73,17 +73,16 @@ export function AppShell({
       </aside>
 
       <main className="flex min-w-0 flex-col">
-        <header className="flex h-64 items-center justify-between border-b border-border bg-cream-100 px-32">
-          <h1 className="text-h2 text-ink-900">{pageTitle}</h1>
+        <header className="flex h-64 items-center justify-end border-b border-border bg-cream-100 px-32">
           <div className="flex items-center gap-8">
             <IconButton aria-label="Help">
-              <HelpCircle strokeWidth={1.75} size={18} />
+              <HelpCircle strokeWidth={1.75} size={20} />
             </IconButton>
             <IconButton aria-label="Notifications">
-              <Bell strokeWidth={1.75} size={18} />
+              <Bell strokeWidth={1.75} size={20} />
               {hasNotifications && (
                 <span
-                  className="absolute right-8 top-7 h-7 w-7 rounded-pill bg-danger-500 ring-2 ring-cream-100"
+                  className="absolute -right-0.5 -top-0.5 h-8 w-8 rounded-full bg-danger-500 ring-2 ring-cream-100"
                   aria-hidden="true"
                 />
               )}
