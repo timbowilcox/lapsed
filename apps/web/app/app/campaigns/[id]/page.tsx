@@ -11,6 +11,8 @@ import {
   TabsTrigger,
   TabsContent,
   ConversationRow,
+  formatCount,
+  formatDateTime,
 } from "@lapsed/ui";
 import { campaigns, conversations } from "@lapsed/fixtures";
 import { MerchantShell } from "../../_components/merchant-shell";
@@ -44,13 +46,13 @@ export default async function CampaignDetailPage({ params }: PageProps) {
         <Card className="p-20">
           <div className="text-label text-ink-500">Audience</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            {campaign.audienceSize.toLocaleString()}
+            {formatCount(campaign.audienceSize)}
           </div>
         </Card>
         <Card className="p-20">
           <div className="text-label text-ink-500">Sent messages</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            {campaign.sentMessages.toLocaleString()}
+            {formatCount(campaign.sentMessages)}
           </div>
         </Card>
         <Card className="p-20">
@@ -159,7 +161,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
                   >
                     <span className="text-body text-ink-900">{b.label}</span>
                     <span className="text-body-strong tabular-nums">
-                      {b.count.toLocaleString()}
+                      {formatCount(b.count)}
                     </span>
                   </div>
                 ))}
@@ -182,12 +184,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
                     <div className="flex-1">
                       <div className="text-body text-ink-900">{event.label}</div>
                       <div className="mt-2 text-mini text-ink-500">
-                        {new Date(event.at).toLocaleString("en-AU", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                        {formatDateTime(event.at)}
                       </div>
                     </div>
                   </li>

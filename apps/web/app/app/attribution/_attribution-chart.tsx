@@ -10,6 +10,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { AttributionDay } from "@lapsed/fixtures";
+import { formatCurrency } from "@lapsed/ui";
 
 export function AttributionChart({ byDay }: { byDay: AttributionDay[] }) {
   const data = byDay.map((d) => ({
@@ -41,7 +42,7 @@ export function AttributionChart({ byDay }: { byDay: AttributionDay[] }) {
             fontSize={11}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
+            tickFormatter={(v: number) => "$" + (v / 1000).toFixed(1) + "k"}
           />
           <Tooltip
             contentStyle={{
@@ -50,7 +51,7 @@ export function AttributionChart({ byDay }: { byDay: AttributionDay[] }) {
               borderRadius: 8,
               fontSize: 13,
             }}
-            formatter={(v: number) => [`$${v.toLocaleString()}`, "Recovered"]}
+            formatter={(v: number) => [formatCurrency(v * 100), "Recovered"]}
           />
           <Area
             type="monotone"

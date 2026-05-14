@@ -9,6 +9,7 @@ import {
   TableHead,
   TableCell,
   StatusDot,
+  formatCount,
 } from "@lapsed/ui";
 import { Plus } from "lucide-react";
 import { campaigns } from "@lapsed/fixtures";
@@ -55,8 +56,8 @@ export default function CampaignsPage() {
                     <div className="text-mini text-ink-500">{c.cohortLabel}</div>
                   </Link>
                 </TableCell>
-                <TableCell>{c.audienceSize.toLocaleString()}</TableCell>
-                <TableCell>{c.sentMessages.toLocaleString()}</TableCell>
+                <TableCell>{formatCount(c.audienceSize)}</TableCell>
+                <TableCell>{formatCount(c.sentMessages)}</TableCell>
                 <TableCell>{(c.responseRate * 100).toFixed(1)}%</TableCell>
                 <TableCell>{c.recoveredRevenueDisplay}</TableCell>
                 <TableCell>

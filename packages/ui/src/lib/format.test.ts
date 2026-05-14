@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { formatCurrency, formatDate, formatRelativeTime } from "./format";
+import { formatCount, formatCurrency, formatDate, formatDateTime, formatRelativeTime } from "./format";
+
+// ─── formatCount ─────────────────────────────────────────────────────────────
+
+describe("formatCount", () => {
+  it("formats an integer with thousands separator", () => {
+    expect(formatCount(2847)).toBe("2,847");
+  });
+
+  it("formats zero", () => {
+    expect(formatCount(0)).toBe("0");
+  });
+
+  it("formats a large number", () => {
+    expect(formatCount(25000)).toBe("25,000");
+  });
+
+  it("formats a small number without separator", () => {
+    expect(formatCount(999)).toBe("999");
+  });
+});
 
 // ─── formatCurrency ───────────────────────────────────────────────────────────
 
@@ -70,6 +90,28 @@ describe("formatDate", () => {
 
   it("pads single-digit months and days in iso format", () => {
     expect(formatDate("2026-01-09", "iso")).toBe("2026-01-09");
+  });
+});
+
+// ─── formatDateTime ──────────────────────────────────────────────────────────
+
+describe("formatDateTime", () => {
+  it("formats a UTC date-time string", () => {
+    const result = formatDateTime("2026-05-14T03:24:00Z");
+    // Should contain day, month abbreviation, year, and time
+    expect(result).toMatch(/14/);
+    expect(result).toMatch(/May/);
+    expect(result).toMatch(/2026/);
+    expect(result).toMatch(/3:24/);
+  });
+
+  it("accepts a Date object and includes date + time components", () => {
+    const d = new Date("2026-01-09T00:00:00Z");
+    const result = formatDateTime(d);
+    expect(result).toMatch(/Jan/);
+    expect(result).toMatch(/2026/);
+    // Should contain a time component like "0:00" or "10:00" etc.
+    expect(result).toMatch(/\d+:\d{2}/);
   });
 });
 

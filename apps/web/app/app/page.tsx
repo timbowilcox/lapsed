@@ -6,6 +6,7 @@ import {
   PanelBody,
   CampaignRow,
   ConversationRow,
+  formatCount,
 } from "@lapsed/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -24,7 +25,7 @@ export default async function DashboardPage({
   searchParams: Promise<RawSearchParams>;
 }) {
   await requireMerchant({ searchParams: await searchParams });
-  const totalRevenue = attribution.totalRecoveredRevenue.toLocaleString();
+  const totalRevenue = formatCount(attribution.totalRecoveredRevenue);
   const totalOrders = attribution.totalRecoveredOrders;
   const liveCampaigns = campaigns.filter((c) => c.status === "live").length;
   const pausedCampaigns = campaigns.filter((c) => c.status === "paused").length;
@@ -60,13 +61,13 @@ export default async function DashboardPage({
         />
         <MetricCard
           label="Lapsed cohort"
-          value={merchant.totalLapsedCount.toLocaleString()}
+          value={formatCount(merchant.totalLapsedCount)}
           trend={`↑ ${merchant.weeklyLapsedDelta} this week`}
           trendDirection="up"
         />
         <MetricCard
           label="Reactivation rate"
-          value={`${merchant.reactivationRate.toFixed(1)}%`}
+          value={merchant.reactivationRate.toFixed(1) + "%"}
           trend={`↑ ${merchant.reactivationRateDeltaPp}pp vs avg`}
           trendDirection="up"
         />

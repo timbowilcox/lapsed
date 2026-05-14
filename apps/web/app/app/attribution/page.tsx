@@ -10,6 +10,7 @@ import {
   TableRow,
   TableHead,
   TableCell,
+  formatCurrency,
 } from "@lapsed/ui";
 import { attribution } from "@lapsed/fixtures";
 import { MerchantShell } from "../_components/merchant-shell";
@@ -30,7 +31,7 @@ export default function AttributionPage() {
         <Card className="p-20">
           <div className="text-label text-ink-500">Total recovered</div>
           <div className="mt-8 font-serif text-h1 text-ink-900 tabular-nums">
-            ${attribution.totalRecoveredRevenue.toLocaleString()}
+            {formatCurrency(attribution.totalRecoveredRevenue * 100)}
           </div>
         </Card>
         <Card className="p-20">
@@ -48,10 +49,9 @@ export default function AttributionPage() {
         <Card className="p-20">
           <div className="text-label text-ink-500">Average order</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            $
-            {Math.round(
-              attribution.totalRecoveredRevenue / attribution.totalRecoveredOrders,
-            ).toLocaleString()}
+            {formatCurrency(
+              Math.round(attribution.totalRecoveredRevenue / attribution.totalRecoveredOrders) * 100,
+            )}
           </div>
         </Card>
       </div>
@@ -82,7 +82,7 @@ export default function AttributionPage() {
                 <TableRow key={b.campaignId}>
                   <TableCell>{b.campaignName}</TableCell>
                   <TableCell className="tabular-nums">
-                    ${b.recoveredRevenue.toLocaleString()}
+                    {formatCurrency(b.recoveredRevenue * 100)}
                   </TableCell>
                   <TableCell className="tabular-nums">{b.recoveredOrders}</TableCell>
                   <TableCell>

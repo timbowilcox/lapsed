@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
-import { AppShell, type SidebarNavSection } from "@lapsed/ui";
+import { AppShell, formatCount, type SidebarNavSection } from "@lapsed/ui";
 import {
   merchant as fixtureMerchant,
   campaigns,
@@ -21,7 +21,7 @@ const sections: SidebarNavSection[] = [
         href: "/app/lapsed",
         icon: "Users",
         label: "Lapsed customers",
-        count: fixtureMerchant.totalLapsedCount.toLocaleString(),
+        count: formatCount(fixtureMerchant.totalLapsedCount),
       },
       { href: "/app/campaigns", icon: "Send", label: "Campaigns", count: campaignsCount },
       {

@@ -9,6 +9,8 @@ import {
   PanelBody,
   Button,
   Tag,
+  formatCurrency,
+  formatDate,
 } from "@lapsed/ui";
 import { lapsedCustomers, conversations } from "@lapsed/fixtures";
 import { MerchantShell } from "../../_components/merchant-shell";
@@ -54,7 +56,7 @@ export default async function LapsedDetailPage({ params }: PageProps) {
         <Card className="p-20">
           <div className="text-label text-ink-500">Lifetime value</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
-            ${customer.lifetimeValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            {formatCurrency(Math.round(customer.lifetimeValue * 100))}
           </div>
         </Card>
         <Card className="p-20">
@@ -86,11 +88,7 @@ export default async function LapsedDetailPage({ params }: PageProps) {
                   className="grid grid-cols-[120px_1fr_120px] items-center gap-16 border-b border-border px-22 py-14 last:border-b-0"
                 >
                   <div className="text-mini text-ink-500">
-                    {new Date(order.placedAt).toLocaleDateString("en-AU", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+                    {formatDate(order.placedAt, "short")}
                   </div>
                   <div>
                     <div className="text-body-strong text-ink-900">{order.topProduct}</div>
@@ -100,7 +98,7 @@ export default async function LapsedDetailPage({ params }: PageProps) {
                     </div>
                   </div>
                   <div className="text-right text-body-strong tabular-nums text-ink-900">
-                    ${order.total.toFixed(2)}
+                    {formatCurrency(Math.round(order.total * 100))}
                   </div>
                 </div>
               ))}

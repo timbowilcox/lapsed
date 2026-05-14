@@ -11,6 +11,8 @@ import {
   TableRow,
   TableHead,
   TableCell,
+  formatCount,
+  formatDate,
 } from "@lapsed/ui";
 import { billing } from "@lapsed/fixtures";
 import { MerchantShell } from "../_components/merchant-shell";
@@ -48,11 +50,7 @@ export default function BillingPage() {
                   {billing.currentPlanPrice}
                 </div>
                 <div className="mt-4 text-mini text-ink-500">
-                  Renews {new Date(billing.renewsAt).toLocaleDateString("en-AU", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
+                  Renews {formatDate(billing.renewsAt, "short")}
                 </div>
               </div>
               <Button variant="secondary">Manage subscription</Button>
@@ -66,10 +64,10 @@ export default function BillingPage() {
             <div className="flex flex-col gap-12 p-22">
               <div className="flex items-baseline justify-between">
                 <span className="text-display text-ink-900 tabular-nums">
-                  {billing.monthlyMessagesUsed.toLocaleString()}
+                  {formatCount(billing.monthlyMessagesUsed)}
                 </span>
                 <span className="text-meta text-ink-500">
-                  of {billing.monthlyMessageQuota.toLocaleString()} SMS
+                  of {formatCount(billing.monthlyMessageQuota)} SMS
                 </span>
               </div>
               <div className="h-8 w-full overflow-hidden rounded-pill bg-cream-200">
@@ -103,7 +101,7 @@ export default function BillingPage() {
                     <span className="ml-2 text-meta font-normal text-ink-500">/ mo</span>
                   </div>
                   <div className="mb-16 text-meta text-ink-500">
-                    {tier.quota.toLocaleString()} SMS messages
+                    {formatCount(tier.quota)} SMS messages
                   </div>
                   <Button variant={isCurrent ? "secondary" : "primary"} disabled={isCurrent}>
                     {isCurrent ? "Current plan" : "Choose plan"}
@@ -133,13 +131,7 @@ export default function BillingPage() {
             <TableBody>
               {billing.invoices.map((inv) => (
                 <TableRow key={inv.id}>
-                  <TableCell>
-                    {new Date(inv.issuedAt).toLocaleDateString("en-AU", {
-                      month: "long",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </TableCell>
+                  <TableCell>{formatDate(inv.issuedAt, "short")}</TableCell>
                   <TableCell className="tabular-nums">${inv.amount}</TableCell>
                   <TableCell>
                     <Badge tone={inv.status === "paid" ? "live" : "neutral"}>

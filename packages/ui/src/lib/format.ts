@@ -1,3 +1,29 @@
+/**
+ * Formats a plain integer/decimal with thousands separators (no currency symbol).
+ *
+ * @example formatCount(2847)  → "2,847"
+ * @example formatCount(25000) → "25,000"
+ */
+export function formatCount(n: number): string {
+  return new Intl.NumberFormat("en-US").format(n);
+}
+
+/**
+ * Formats a date+time value as a compact string.
+ *
+ * @example formatDateTime("2026-05-14T03:24:00Z") → "14 May 2026, 3:24 am"
+ */
+export function formatDateTime(input: string | Date): string {
+  const d = typeof input === "string" ? new Date(input) : input;
+  return d.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export interface CurrencyOptions {
   locale?: string;
   currency?: string;

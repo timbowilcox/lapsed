@@ -3,7 +3,9 @@ export { Icon, type IconName, type IconProps } from "./components/icon";
 export { cn } from "./lib/cn";
 export {
   formatCurrency,
+  formatCount,
   formatDate,
+  formatDateTime,
   formatRelativeTime,
   type CurrencyOptions,
   type DateFormat,
