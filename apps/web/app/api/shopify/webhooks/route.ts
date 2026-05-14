@@ -56,12 +56,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     payload = JSON.parse(rawBody.toString("utf8"));
   } catch {
     // Malformed JSON — log the topic but do not re-throw; still acknowledge.
-    console.warn(`webhook_parse_error topic=${topic} shop=${shopDomain}`);
+    console.warn(`webhook_parse_error topic=${topic}`);
     payload = null;
   }
 
-  // Write the idempotency log row. Fail open: if this insert fails (e.g. on a
-  // race with a concurrent duplicate delivery), the handler still runs once.
+  // Write the idempotency log row. Fail open: if this insert returns no row
+  // (conflict on shopify_webhook_id), deliveryId is null and the status update
+  // is skipped — the delivery has already been recorded by the first consumer.
   const { data: deliveryRow } = await serviceClient
     .from("webhook_deliveries")
     .insert({
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Dispatch to the topic handler if one is registered.
   const handler = getHandler(topic);
   let finalStatus = "processed";
+  let errorMessage: string | null = null;
 
   if (handler && merchantId) {
     try {
@@ -86,7 +88,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } catch (err) {
       // Never let a handler error cause a non-200 response — Shopify retries on
       // non-200 and the error will be recorded in the idempotency log.
-      console.warn(`webhook_handler_error topic=${topic} err=${(err as Error).message}`);
+      errorMessage = (err as Error).message;
+      console.warn(`webhook_handler_error topic=${topic} err=${errorMessage}`);
       finalStatus = "failed";
     }
   }
@@ -95,7 +98,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (deliveryId) {
     await serviceClient
       .from("webhook_deliveries")
-      .update({ status: finalStatus, processed_at: new Date().toISOString() })
+      .update({
+        status: finalStatus,
+        processed_at: new Date().toISOString(),
+        ...(errorMessage !== null ? { error_message: errorMessage } : {}),
+      })
       .eq("id", deliveryId);
   }
 

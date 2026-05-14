@@ -65,21 +65,14 @@ function makeSupabaseMock(
               }),
             };
           }),
-          update: vi.fn().mockReturnThis(),
-          // update(...).eq(...) chain
-          __updateEq: vi.fn().mockResolvedValue({ error: null }),
+          update: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ error: null }),
+          })),
         };
       }
       return {};
     }),
   };
-
-  // Make update().eq() work by returning a chainable mock
-  const deliveryFrom = mockClient.from("webhook_deliveries");
-  const originalUpdate = (deliveryFrom as { update: ReturnType<typeof vi.fn> }).update;
-  originalUpdate.mockImplementation(() => ({
-    eq: vi.fn().mockResolvedValue({ error: null }),
-  }));
 
   return { mockClient, insertedRows };
 }
