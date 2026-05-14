@@ -85,7 +85,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <Panel>
               <PanelHeader title="Offer" />
               <PanelBody>
-                <div className="flex flex-col gap-12 p-22">
+                <div className="flex flex-col gap-12 p-24">
                   <div>
                     <div className="text-label text-ink-500">Description</div>
                     <div className="mt-4 text-body text-ink-900">
@@ -104,7 +104,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <Panel>
               <PanelHeader title="Conversion" />
               <PanelBody>
-                <div className="grid grid-cols-2 gap-12 p-22">
+                <div className="grid grid-cols-2 gap-12 p-24">
                   <Card className="p-16">
                     <div className="text-label text-ink-500">Conversion rate</div>
                     <div className="mt-4 text-h1 text-ink-900 tabular-nums">
@@ -128,7 +128,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
             <PanelHeader title="Conversation feed" />
             <PanelBody>
               {threadList.length === 0 ? (
-                <div className="p-22 text-meta text-ink-500">
+                <div className="p-24 text-meta text-ink-500">
                   No conversations yet for this campaign.
                 </div>
               ) : (

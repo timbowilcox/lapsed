@@ -43,7 +43,7 @@ export default function BillingPage() {
             action={<Badge tone="info">{billing.currentPlanLabel}</Badge>}
           />
           <PanelBody>
-            <div className="flex items-end justify-between p-22">
+            <div className="flex items-end justify-between p-24">
               <HeroMetric
                 label="Monthly"
                 currency="$"
@@ -58,7 +58,7 @@ export default function BillingPage() {
         <Panel>
           <PanelHeader title="Usage this period" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               <div className="flex items-baseline justify-between">
                 <span className="text-display text-ink-900 tabular-nums">
                   {formatCount(billing.monthlyMessagesUsed)}
@@ -84,7 +84,7 @@ export default function BillingPage() {
       <Panel className="mb-16">
         <PanelHeader title="Switch plan" />
         <PanelBody>
-          <div className="grid grid-cols-3 gap-12 p-22">
+          <div className="grid grid-cols-3 gap-12 p-24">
             {planTiers.map((tier) => {
               const isCurrent = tier.tier === billing.currentPlan;
               return (

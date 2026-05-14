@@ -14,7 +14,7 @@ export const Default: Story = {
     <Panel className="w-[480px]">
       <PanelHeader title="Campaigns" action={<a className="text-meta text-ink-500" href="#">View all</a>} />
       <PanelBody>
-        <div className="p-22 text-meta text-ink-500">Panel body content.</div>
+        <div className="p-24 text-meta text-ink-500">Panel body content.</div>
       </PanelBody>
     </Panel>
   ),

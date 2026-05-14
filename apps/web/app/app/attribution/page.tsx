@@ -68,7 +68,7 @@ export default function AttributionPage() {
       <Panel className="mb-16">
         <PanelHeader title="Recovered revenue — last 30 days" />
         <PanelBody>
-          <div className="p-22">
+          <div className="p-24">
             <RevenueChart
               data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
             />

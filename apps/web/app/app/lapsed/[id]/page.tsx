@@ -117,7 +117,7 @@ export default async function LapsedDetailPage({ params }: PageProps) {
           />
           <PanelBody>
             {customerConversations.length === 0 ? (
-              <div className="p-22 text-meta text-ink-500">
+              <div className="p-24 text-meta text-ink-500">
                 No conversations yet. Add to a campaign to start a thread.
               </div>
             ) : (

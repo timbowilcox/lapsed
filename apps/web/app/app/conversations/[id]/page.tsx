@@ -40,7 +40,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
             }
           />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-22">
+            <div className="flex flex-col gap-12 p-24">
               {conversation.messages.map((m) => (
                 <div
                   key={m.id}
@@ -77,7 +77,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
           <Panel>
             <PanelHeader title="Customer" />
             <PanelBody>
-              <div className="flex flex-col gap-12 p-22">
+              <div className="flex flex-col gap-12 p-24">
                 <div>
                   <div className="text-label text-ink-500">Phone</div>
                   <div className="mt-2 text-body text-ink-900">{conversation.customerPhone}</div>
@@ -117,7 +117,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
           <Panel>
             <PanelHeader title="Attribution" />
             <PanelBody>
-              <div className="flex flex-col gap-12 p-22">
+              <div className="flex flex-col gap-12 p-24">
                 {campaign && (
                   <Link
                     href={`/app/campaigns/${campaign.id}`}
