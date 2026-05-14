@@ -14,11 +14,234 @@ export type Database = {
   }
   public: {
     Tables: {
+      conversation_messages: {
+        Row: {
+          body: string
+          channel: string
+          conversation_id: string
+          embedding: string | null
+          id: string
+          merchant_id: string
+          role: string
+          sent_at: string
+        }
+        Insert: {
+          body: string
+          channel?: string
+          conversation_id: string
+          embedding?: string | null
+          id?: string
+          merchant_id: string
+          role: string
+          sent_at?: string
+        }
+        Update: {
+          body?: string
+          channel?: string
+          conversation_id?: string
+          embedding?: string | null
+          id?: string
+          merchant_id?: string
+          role?: string
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_messages_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          attributed_order_gid: string | null
+          attributed_revenue_cents: number | null
+          campaign_id: string | null
+          channel: string
+          created_at: string
+          embedding: string | null
+          id: string
+          last_message_at: string | null
+          merchant_id: string
+          message_count: number
+          shopify_customer_gid: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attributed_order_gid?: string | null
+          attributed_revenue_cents?: number | null
+          campaign_id?: string | null
+          channel?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          last_message_at?: string | null
+          merchant_id: string
+          message_count?: number
+          shopify_customer_gid: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attributed_order_gid?: string | null
+          attributed_revenue_cents?: number | null
+          campaign_id?: string | null
+          channel?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          last_message_at?: string | null
+          merchant_id?: string
+          message_count?: number
+          shopify_customer_gid?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_events: {
+        Row: {
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          occurred_at: string
+          payload: Json
+          shopify_customer_gid: string
+          source: string
+        }
+        Insert: {
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          occurred_at: string
+          payload?: Json
+          shopify_customer_gid: string
+          source: string
+        }
+        Update: {
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          occurred_at?: string
+          payload?: Json
+          shopify_customer_gid?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customers: {
+        Row: {
+          created_at: string
+          email: string | null
+          first_name: string | null
+          id: string
+          lapsed_at: string | null
+          lapsed_score: number | null
+          last_name: string | null
+          last_order_at: string | null
+          last_order_days_ago: number | null
+          merchant_id: string
+          phone: string | null
+          profile_version: number
+          restored_at: string | null
+          shopify_customer_gid: string
+          sms_opt_out: boolean
+          sms_opt_out_at: string | null
+          tags: string[]
+          total_ltv_cents: number
+          total_order_count: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          lapsed_at?: string | null
+          lapsed_score?: number | null
+          last_name?: string | null
+          last_order_at?: string | null
+          last_order_days_ago?: number | null
+          merchant_id: string
+          phone?: string | null
+          profile_version?: number
+          restored_at?: string | null
+          shopify_customer_gid: string
+          sms_opt_out?: boolean
+          sms_opt_out_at?: string | null
+          tags?: string[]
+          total_ltv_cents?: number
+          total_order_count?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          lapsed_at?: string | null
+          lapsed_score?: number | null
+          last_name?: string | null
+          last_order_at?: string | null
+          last_order_days_ago?: number | null
+          merchant_id?: string
+          phone?: string | null
+          profile_version?: number
+          restored_at?: string | null
+          shopify_customer_gid?: string
+          sms_opt_out?: boolean
+          sms_opt_out_at?: string | null
+          tags?: string[]
+          total_ltv_cents?: number
+          total_order_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customers_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       merchants: {
         Row: {
           created_at: string
           id: string
           installed_at: string
+          last_backfill_at: string | null
           plan: string
           shopify_access_token: string
           shopify_scope: string
@@ -30,6 +253,7 @@ export type Database = {
           created_at?: string
           id?: string
           installed_at?: string
+          last_backfill_at?: string | null
           plan?: string
           shopify_access_token: string
           shopify_scope: string
@@ -41,6 +265,7 @@ export type Database = {
           created_at?: string
           id?: string
           installed_at?: string
+          last_backfill_at?: string | null
           plan?: string
           shopify_access_token?: string
           shopify_scope?: string
@@ -49,6 +274,188 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      order_events: {
+        Row: {
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          occurred_at: string
+          payload: Json
+          shopify_customer_gid: string
+          shopify_order_gid: string
+          source: string
+        }
+        Insert: {
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          occurred_at: string
+          payload?: Json
+          shopify_customer_gid: string
+          shopify_order_gid: string
+          source: string
+        }
+        Update: {
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          occurred_at?: string
+          payload?: Json
+          shopify_customer_gid?: string
+          shopify_order_gid?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orders: {
+        Row: {
+          created_at: string
+          financial_status: string
+          fulfilled_at: string | null
+          id: string
+          merchant_id: string
+          shopify_created_at: string
+          shopify_customer_gid: string
+          shopify_order_gid: string
+          total_price_cents: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          financial_status: string
+          fulfilled_at?: string | null
+          id?: string
+          merchant_id: string
+          shopify_created_at: string
+          shopify_customer_gid: string
+          shopify_order_gid: string
+          total_price_cents: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          financial_status?: string
+          fulfilled_at?: string | null
+          id?: string
+          merchant_id?: string
+          shopify_created_at?: string
+          shopify_customer_gid?: string
+          shopify_order_gid?: string
+          total_price_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          created_at: string
+          handle: string
+          id: string
+          inventory_quantity: number
+          merchant_id: string
+          price_cents: number
+          product_type: string
+          shopify_product_gid: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          handle: string
+          id?: string
+          inventory_quantity?: number
+          merchant_id: string
+          price_cents?: number
+          product_type?: string
+          shopify_product_gid: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          handle?: string
+          id?: string
+          inventory_quantity?: number
+          merchant_id?: string
+          price_cents?: number
+          product_type?: string
+          shopify_product_gid?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      webhook_deliveries: {
+        Row: {
+          error_message: string | null
+          id: string
+          merchant_id: string | null
+          payload: Json
+          processed_at: string | null
+          received_at: string
+          shopify_webhook_id: string
+          status: string
+          topic: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          merchant_id?: string | null
+          payload: Json
+          processed_at?: string | null
+          received_at?: string
+          shopify_webhook_id: string
+          status?: string
+          topic: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          merchant_id?: string | null
+          payload?: Json
+          processed_at?: string | null
+          received_at?: string
+          shopify_webhook_id?: string
+          status?: string
+          topic?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_deliveries_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
