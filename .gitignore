@@ -41,4 +41,5 @@ Thumbs.db
 !.vscode/settings.json
 
 # claude code session metadata
-.claude/
+.claude/*
+!.claude/agents/
