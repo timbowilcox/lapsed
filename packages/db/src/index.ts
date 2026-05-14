@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SignJWT } from "jose";
 import type { Database } from "./types";
 
-export type { Database } from "./types";
+export type { Database, Json } from "./types";
 export type LapsedSupabaseClient = SupabaseClient<Database>;
 
 export { encryptToken, decryptToken, decodeEncryptionKey } from "./encryption";
