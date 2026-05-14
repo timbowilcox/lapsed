@@ -5,6 +5,7 @@ import {
   PanelHeader,
   PanelBody,
   Badge,
+  RevenueChart,
   Table,
   TableHeader,
   TableBody,
@@ -16,7 +17,6 @@ import {
 } from "@lapsed/ui";
 import { attribution } from "@lapsed/fixtures";
 import { MerchantShell } from "../_components/merchant-shell";
-import { AttributionChart } from "./_attribution-chart";
 
 export default function AttributionPage() {
   return (
@@ -69,7 +69,9 @@ export default function AttributionPage() {
         <PanelHeader title="Recovered revenue — last 30 days" />
         <PanelBody>
           <div className="p-22">
-            <AttributionChart byDay={attribution.byDay} />
+            <RevenueChart
+              data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
+            />
           </div>
         </PanelBody>
       </Panel>

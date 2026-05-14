@@ -6,12 +6,12 @@ import {
   PanelBody,
   CampaignRow,
   ConversationRow,
+  RevenueChart,
   formatCount,
 } from "@lapsed/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { MerchantShell } from "./_components/merchant-shell";
-import { HeroChart } from "./_components/hero-chart";
 import { campaigns, conversations, attribution, merchant } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
 
@@ -48,7 +48,13 @@ export default async function DashboardPage({
             vs previous period · {totalOrders} orders
           </>
         }
-        chart={<HeroChart />}
+        chart={
+          <RevenueChart
+            data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
+            range="compact"
+            height={80}
+          />
+        }
         className="mb-16"
       />
 

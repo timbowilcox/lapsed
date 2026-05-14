@@ -62,3 +62,4 @@ export {
   type CampaignStatus,
 } from "./components/campaign-row";
 export { ConversationRow, type ConversationRowProps } from "./components/conversation-row";
+export { RevenueChart, type RevenueChartProps } from "./components/revenue-chart";
