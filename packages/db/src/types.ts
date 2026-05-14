@@ -236,6 +236,44 @@ export type Database = {
           },
         ]
       }
+      merchant_events: {
+        Row: {
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          occurred_at: string
+          payload: Json
+          source: string
+        }
+        Insert: {
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          occurred_at: string
+          payload?: Json
+          source: string
+        }
+        Update: {
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          occurred_at?: string
+          payload?: Json
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       merchants: {
         Row: {
           created_at: string
@@ -462,7 +500,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      increment_customer_order: {
+        Args: {
+          p_merchant_id: string
+          p_customer_gid: string
+          p_amount_cents: number
+          p_ordered_at: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

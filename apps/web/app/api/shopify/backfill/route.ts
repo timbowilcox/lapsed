@@ -93,18 +93,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       : `${baseUrl}/orders.json?limit=${PAGE_SIZE}&status=any&fields=id,customer,total_price,financial_status,fulfilled_at,created_at`;
   }
 
-  // Fetch from Shopify.
+  // Fetch from Shopify — 25 s timeout, well under Vercel's 60 s function limit.
   let shopifyResp: Response;
   try {
     shopifyResp = await fetch(apiUrl, {
+      signal: AbortSignal.timeout(25_000),
       headers: {
         "X-Shopify-Access-Token": accessToken,
         "Content-Type": "application/json",
       },
     });
   } catch (err) {
+    const errName = (err as Error).name;
+    const status = errName === "TimeoutError" || errName === "AbortError" ? 504 : 502;
     console.warn(`backfill_fetch_error resource=${resource} err=${(err as Error).message}`);
-    return NextResponse.json({ error: "shopify_fetch_failed" }, { status: 502 });
+    return NextResponse.json({ error: "shopify_fetch_failed" }, { status });
   }
 
   // Rate limit: pass Retry-After back to the caller.
@@ -148,14 +151,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         : [];
       const occurredAt = customer.created_at ?? now;
 
-      await serviceClient.from("customer_events").insert({
-        merchant_id: merchant.id,
-        shopify_customer_gid: gid,
-        event_type: "customer_backfilled",
-        source: "shopify_backfill",
-        payload: customer as unknown as Json,
-        occurred_at: occurredAt,
-      });
+      await serviceClient.from("customer_events").upsert(
+        {
+          merchant_id: merchant.id,
+          shopify_customer_gid: gid,
+          event_type: "customer_backfilled",
+          source: "shopify_backfill",
+          payload: customer as unknown as Json,
+          occurred_at: occurredAt,
+        },
+        { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
+      );
 
       await serviceClient.from("customers").upsert(
         {
@@ -191,15 +197,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const occurredAt = order.created_at ?? now;
       const totalCents = Math.round(parseFloat(order.total_price ?? "0") * 100);
 
-      await serviceClient.from("order_events").insert({
-        merchant_id: merchant.id,
-        shopify_customer_gid: customerGid,
-        shopify_order_gid: orderGid,
-        event_type: "order_backfilled",
-        source: "shopify_backfill",
-        payload: order as unknown as Json,
-        occurred_at: occurredAt,
-      });
+      await serviceClient.from("order_events").upsert(
+        {
+          merchant_id: merchant.id,
+          shopify_customer_gid: customerGid,
+          shopify_order_gid: orderGid,
+          event_type: "order_backfilled",
+          source: "shopify_backfill",
+          payload: order as unknown as Json,
+          occurred_at: occurredAt,
+        },
+        { onConflict: "merchant_id,shopify_order_gid,event_type,source,occurred_at", ignoreDuplicates: true },
+      );
 
       await serviceClient.from("orders").upsert(
         {

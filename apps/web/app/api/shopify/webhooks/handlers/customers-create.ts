@@ -36,15 +36,18 @@ export const customersCreate: WebhookHandler = async ({
         .filter(Boolean)
     : [];
 
-  // Append event — idempotent via dedup unique constraint
-  await serviceClient.from("customer_events").insert({
-    merchant_id: merchantId,
-    shopify_customer_gid: gid,
-    event_type: "customer_created",
-    source: "shopify_webhook",
-    payload: payload as Json,
-    occurred_at: customer.created_at ?? now,
-  });
+  // Append event — ON CONFLICT DO NOTHING via dedup unique constraint (ignoreDuplicates)
+  await serviceClient.from("customer_events").upsert(
+    {
+      merchant_id: merchantId,
+      shopify_customer_gid: gid,
+      event_type: "customer_created",
+      source: "shopify_webhook",
+      payload: payload as Json,
+      occurred_at: customer.created_at ?? now,
+    },
+    { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
+  );
 
   // Materialised profile upsert
   await serviceClient.from("customers").upsert(
@@ -62,6 +65,5 @@ export const customersCreate: WebhookHandler = async ({
     { onConflict: "merchant_id,shopify_customer_gid" },
   );
 
-  // No PII in logs — only log the GID fragment (numeric ID is safe; never log email/phone)
-  console.info(`webhook customers/create shop=${shopDomain} gid=${customer.id}`);
+  console.info(`webhook customers/create shop_prefix=${shopDomain.split(".")[0] ?? "unknown"} gid=${customer.id}`);
 };

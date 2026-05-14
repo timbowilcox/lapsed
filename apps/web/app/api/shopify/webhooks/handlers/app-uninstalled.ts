@@ -5,12 +5,26 @@ export const appUninstalled: WebhookHandler = async ({
   shopDomain,
   serviceClient,
 }) => {
+  const now = new Date().toISOString();
 
-  // Mark the merchant as uninstalled. Do not delete data — retained for
-  // potential reinstall and for billing reconciliation.
+  // 1. Append merchant lifecycle event — required for billing reconciliation.
+  //    Incremental revenue attribution is bounded by install windows derived from
+  //    this log. ignoreDuplicates guards against double delivery.
+  await serviceClient.from("merchant_events").upsert(
+    {
+      merchant_id: merchantId,
+      event_type: "app_uninstalled",
+      source: "shopify_webhook",
+      occurred_at: now,
+    },
+    { onConflict: "merchant_id,event_type,source,occurred_at", ignoreDuplicates: true },
+  );
+
+  // 2. Mark the merchant as uninstalled. Do not delete data — retained for
+  //    potential reinstall and for billing reconciliation.
   await serviceClient
     .from("merchants")
-    .update({ uninstalled_at: new Date().toISOString() })
+    .update({ uninstalled_at: now })
     .eq("id", merchantId);
 
   // Log only the shop domain prefix (before the dot) to avoid PII log leakage.

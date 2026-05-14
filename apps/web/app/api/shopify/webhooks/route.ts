@@ -37,18 +37,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const merchantId = merchantRow?.id ?? null;
 
+  // Shopify guarantees X-Shopify-Webhook-Id on every delivery (API 2026-04+).
+  // A missing ID is a malformed delivery — acknowledge and skip processing so
+  // we do not write a synthetic row that wastes the idempotency table's slot.
+  if (!webhookId) {
+    console.warn(`webhook_missing_id topic=${topic}`);
+    return new NextResponse(null, { status: 200 });
+  }
+
   // Idempotency check: if this webhookId has already been processed, return 200
   // immediately without re-processing. shopify_webhook_id has a UNIQUE constraint.
-  if (webhookId) {
-    const { data: existing } = await serviceClient
-      .from("webhook_deliveries")
-      .select("id, status")
-      .eq("shopify_webhook_id", webhookId)
-      .maybeSingle();
+  const { data: existing } = await serviceClient
+    .from("webhook_deliveries")
+    .select("id, status")
+    .eq("shopify_webhook_id", webhookId)
+    .maybeSingle();
 
-    if (existing) {
-      return new NextResponse(null, { status: 200 });
-    }
+  if (existing) {
+    return new NextResponse(null, { status: 200 });
   }
 
   let payload: unknown;
@@ -68,7 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .insert({
       merchant_id: merchantId,
       topic,
-      shopify_webhook_id: webhookId || `noid_${Date.now()}`,
+      shopify_webhook_id: webhookId,
       payload: (payload ?? {}) as Json,
       status: "pending",
     })

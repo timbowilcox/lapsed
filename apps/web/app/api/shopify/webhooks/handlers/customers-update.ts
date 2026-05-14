@@ -36,15 +36,18 @@ export const customersUpdate: WebhookHandler = async ({
         .filter(Boolean)
     : [];
 
-  // Append event — idempotent via dedup unique constraint
-  await serviceClient.from("customer_events").insert({
-    merchant_id: merchantId,
-    shopify_customer_gid: gid,
-    event_type: "customer_updated",
-    source: "shopify_webhook",
-    payload: payload as Json,
-    occurred_at: customer.updated_at ?? now,
-  });
+  // Append event — ON CONFLICT DO NOTHING via dedup unique constraint (ignoreDuplicates)
+  await serviceClient.from("customer_events").upsert(
+    {
+      merchant_id: merchantId,
+      shopify_customer_gid: gid,
+      event_type: "customer_updated",
+      source: "shopify_webhook",
+      payload: payload as Json,
+      occurred_at: customer.updated_at ?? now,
+    },
+    { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
+  );
 
   // Materialised profile upsert — merge current values
   await serviceClient.from("customers").upsert(
@@ -62,5 +65,5 @@ export const customersUpdate: WebhookHandler = async ({
     { onConflict: "merchant_id,shopify_customer_gid" },
   );
 
-  console.info(`webhook customers/update shop=${shopDomain} gid=${customer.id}`);
+  console.info(`webhook customers/update shop_prefix=${shopDomain.split(".")[0] ?? "unknown"} gid=${customer.id}`);
 };
