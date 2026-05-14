@@ -1,5 +1,6 @@
 import {
   Card,
+  HeroMetric,
   Panel,
   PanelHeader,
   PanelBody,
@@ -11,6 +12,7 @@ import {
   TableHead,
   TableCell,
   formatCurrency,
+  formatCount,
 } from "@lapsed/ui";
 import { attribution } from "@lapsed/fixtures";
 import { MerchantShell } from "../_components/merchant-shell";
@@ -27,13 +29,20 @@ export default function AttributionPage() {
         </p>
       </div>
 
-      <div className="mb-16 grid grid-cols-4 gap-12">
-        <Card className="p-20">
-          <div className="text-label text-ink-500">Total recovered</div>
-          <div className="mt-8 font-serif text-h1 text-ink-900 tabular-nums">
-            {formatCurrency(attribution.totalRecoveredRevenue * 100)}
-          </div>
-        </Card>
+      <HeroMetric
+        label="Total recovered · last 30 days"
+        currency="$"
+        value={formatCount(attribution.totalRecoveredRevenue)}
+        meta={
+          <>
+            <span className="font-medium text-success-500">↑ {attribution.vsPreviousPeriodPct}%</span>{" "}
+            vs previous period · {attribution.totalRecoveredOrders} orders
+          </>
+        }
+        className="mb-16"
+      />
+
+      <div className="mb-16 grid grid-cols-3 gap-12">
         <Card className="p-20">
           <div className="text-label text-ink-500">Recovered orders</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">

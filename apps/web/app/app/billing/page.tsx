@@ -1,6 +1,7 @@
 import {
   Button,
   Card,
+  HeroMetric,
   Panel,
   PanelHeader,
   PanelBody,
@@ -43,16 +44,12 @@ export default function BillingPage() {
           />
           <PanelBody>
             <div className="flex items-end justify-between p-22">
-              <div>
-                <div className="text-label text-ink-500">Monthly</div>
-                <div className="mt-4 font-serif text-hero text-ink-900 tabular-nums">
-                  <span className="align-top text-[32px] text-ink-500">$</span>
-                  {billing.currentPlanPrice}
-                </div>
-                <div className="mt-4 text-mini text-ink-500">
-                  Renews {formatDate(billing.renewsAt, "short")}
-                </div>
-              </div>
+              <HeroMetric
+                label="Monthly"
+                currency="$"
+                value={String(billing.currentPlanPrice)}
+                meta={`Renews ${formatDate(billing.renewsAt, "short")}`}
+              />
               <Button variant="secondary">Manage subscription</Button>
             </div>
           </PanelBody>

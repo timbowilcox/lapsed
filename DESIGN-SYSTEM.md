@@ -97,6 +97,10 @@ Two fonts. No third font. No system fallbacks except for monospace.
 
 All numeric values in metrics, tables, conversation timestamps, and revenue displays use `font-variant-numeric: tabular-nums` so columns align.
 
+### Instrument Serif rule (hero numbers only)
+
+`font-serif` (Instrument Serif) is used **exactly once per page** — in the `<HeroMetric>` component for the single largest stat on that page (e.g. "Total recovered $47,283" on Dashboard and Attribution, "$799 / mo" on Billing). All other numbers use Geist Sans with `tabular-nums`. Never add `font-serif` ad hoc in app route files; always go through `<HeroMetric>`.
+
 ---
 
 ## Spacing, radius, shadow
