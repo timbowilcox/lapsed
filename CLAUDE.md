@@ -90,6 +90,22 @@ Each sprint that touches a relevant area scores against these. Anything below 3 
 11. UI surfaces use Vellum tokens — no hardcoded colors / fonts / radii outside `packages/ui`
 12. Optional Shopify scopes declared in `shopify.app.toml` but requested dynamically only when features need them (not at install)
 
+## Architectural load-bearing decisions
+
+These six decisions are expensive to retrofit. Any code that touches them is reviewed by the `architecture-guardian` subagent (see `.claude/agents/architecture-guardian.md`). "We'll fix it later" is not an acceptable deferral for any of these.
+
+1. **Event-sourced customer memory graph (Sprint 03).** Append-only event log with timestamp + source. Materialised customer profile regenerated nightly. No snapshot mutations — every customer state change is an appended event, never an `UPDATE` to the profile row.
+
+2. **pgvector for conversation memory (Sprint 03, not later).** Semantic search over conversation transcripts requires an embedding column on the conversations table from the start. Adding vector search to an existing schema is a migration burden; getting it right on first build is not. Schema decisions ripple through the conversation engine.
+
+3. **Channel-agnostic conversation engine (Sprint 07).** Channel is a parameter (`"sms" | "voice" | "email"`), not a hardcoded assumption. v1 ships SMS only, but every function signature, prompt template, and event record accepts channel cleanly. No `if channel === 'sms'` branching without an abstraction. No `sendSms(...)` functions — `sendMessage(..., channel)`.
+
+4. **Bandit state as first-class data structure (Sprint 06).** Thompson sampling state per group across hypothesis dimensions (offer type, message timing, tone). Not a future enhancement — campaign generation reads from and writes to bandit state on every run. A/B test logic that bypasses the bandit state is a violation.
+
+5. **Holdout control groups baked into every group engagement (Sprint 08).** 10% randomised holdout per group, per campaign, deterministically seeded by `(campaign_id, customer_id)`. Never optional. If a cohort is "too small" for a holdout, it is too small to run a campaign on — the answer is not to skip the holdout.
+
+6. **Performance pricing on incremental revenue, not gross.** Billing math is `(attributed revenue × incrementality factor)`. The incrementality factor is derived from holdout group comparison. No invoice line item uses gross attributed revenue without the adjustment. "We'll fix it later" means the billing math is wrong from day one.
+
 ## Conventions
 
 - **Sprint branches**: `sprint-NN/<short-name>` or `fix/<short-name>` for hotfixes
@@ -99,6 +115,7 @@ Each sprint that touches a relevant area scores against these. Anything below 3 
 - **Env vars**: every server-side var read by `apps/web` MUST be declared in `turbo.json`'s `tasks["@lapsed/web#build"].env` array. The `pnpm vercel:env:check` script enforces parity between `EXPECTED_ALL`, Vercel project env, and `turbo.json`. Drift fails CI.
 - **Encryption**: tokens encrypted at rest with AES-256-GCM in Node runtime; key never touches Postgres. `packages/db/src/encryption.ts` is the single helper.
 - **Format helpers**: currency / date / timestamp formatting lives in `packages/ui/src/lib/format.ts` (lands in Sprint 02.5). Never format inline.
+- **Parallel review during build**: six specialist subagents in `.claude/agents/` can be dispatched in parallel after each implementation chunk to review work independently. See `.claude/agents/README.md` for which subagents to run per sprint type and how to dispatch them. The evaluator session (post-merge) and the subagents (during build) are both required — they are not substitutes for each other.
 
 ## Failure modes encoded so far
 
