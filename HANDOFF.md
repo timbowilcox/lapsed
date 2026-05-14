@@ -1,120 +1,138 @@
-# HANDOFF — Sprint 02.5 (UI Polish)
+# Sprint 03 HANDOFF — Data Ingestion + Customer Memory Graph
 
-**Date completed:** 2026-05-14
-**Branch:** `claude/tender-galileo-b08da5`
-**Status:** Implementation complete. Visual regression baselines pending (see notes).
+> Evaluator: read CLAUDE.md → PRODUCT.md → DESIGN-SYSTEM.md → SPRINT.md → this file. Run CI gates listed below. Score each rubric criterion independently against the actual code.
 
----
+## CI gate results (run at handoff)
 
-## Summary of changes
+| Gate | Result |
+|------|--------|
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors (React version warnings in non-React packages — pre-existing, expected) |
+| `pnpm test` | ✓ 217 passing, 33 skipped (RLS tests require live Supabase — intentional) |
+| `pnpm grep:pii` | ✓ no findings |
+| `pnpm vercel:env:check` (turbo half) | ✓ env array matches EXPECTED_ALL |
 
-11 commits against `main`.
+## What shipped in Sprint 03
 
-| Step | Commit | Change |
-|---|---|---|
-| 1 | `8433124` | Button contrast story + unit tests |
-| 2 | `59daed0` | Format helpers module + 42 unit tests |
-| 3 | `4ff7c9a` | Sweep all inline formatting → format helpers |
-| 4 | `d1d0c5b` | HeroMetric component + sweep Dashboard, Attribution, Billing |
-| 5 | `110196e` | RevenueChart (Recharts) in @lapsed/ui; delete ad-hoc chart impls |
-| 6 | `ed6a90e` | Topbar: icons 20px, dot 8px, drop page title from header |
-| 7 | `93fc8f6` | Topbar dropdowns: help link, bell empty state, avatar + sign-out |
-| 8 | `41626a9` | Replace off-scale `p-22` → `p-24` (spacing bug) |
-| 9 | `2436385` | Sidebar plan badge removed; planLabel optional |
-| 10 | `7b5866c` | Skip-to-content, focus rings, @axe-core/playwright, test:a11y |
-| 11 | `ca0537b` | Visual regression spec (4 routes) |
+### New database migrations
 
----
+- **`0002_memory_graph.sql`** — `customer_events`, `order_events`, `merchant_events` append-only log tables with `prevent_event_mutation()` trigger; `pgvector(1536)` embedding columns on `conversations` and `conversation_messages`; `customers.lapsed_score`, `customers.lapsed_at`, `customers.profile_version` columns; `merchant_id` FK added to orders; `increment_customer_order` RPC
+- **`0003_merchant_events_and_helpers.sql`** — `moddatetime` trigger on merchants; `merchants.last_backfill_at` column; `merchants.uninstalled_at` index
 
-## Self-assessment against rubric (0–3)
+Run both via `psql "$SUPABASE_DB_URL"` in order (0002 then 0003). The `supabase link` workaround is documented in CLAUDE.md failure modes.
 
-**1. Token discipline — 3**
-All visual changes use Vellum tokens. Fixed a widespread `p-22` spacing bug (22 is off-scale → generates no CSS → zero padding) by replacing with `p-24`. No hardcoded colors/radii added outside `packages/ui`.
+### New packages
 
-**2. Format helpers used everywhere — 3**
-`packages/ui/src/lib/format.ts` exports `formatCurrency`, `formatCount`, `formatDate`, `formatDateTime`, `formatRelativeTime`. `grep:format-check` exits 0. 42 unit tests cover every branch.
+- **`@lapsed/core`** — `customer-events.ts` (appendCustomerEvent, appendOrderEvent), `materialize-customer.ts` (rebuilds customers row from event log), `index.ts`
 
-**3. Chart unification — 3**
-Single `RevenueChart` component in `@lapsed/ui`. Dashboard hero and Attribution page both import it. Ad-hoc `hero-chart.tsx` and `_attribution-chart.tsx` deleted.
+### Webhook handlers (updated to event-sourcing pattern)
 
-**4. Accessibility — 3**
-Skip-to-content link (visible on `:focus`) at top of AppShell; `id="main-content"` on content area. `focus-visible:shadow-focus` on all interactive elements: Button, Input, Select, Tabs, SidebarItem, AppShell topbar buttons. Dropdown items use `data-[highlighted]` for Radix-managed keyboard focus. All icon-only buttons have `aria-label`. `@axe-core/playwright` installed; `test:a11y` scans 6 merchant routes.
+- `customers/create` → appends `customer_created` event → calls `materializeCustomer`
+- `customers/update` → appends `customer_updated` event → calls `materializeCustomer`
+- `orders/paid` → appends `order_paid` + `order_event` per line item → upserts `orders` row → calls `increment_customer_order` RPC
+- `app/uninstalled` → appends `app_uninstalled` merchant event → sets `merchants.uninstalled_at` (idempotent guard with `.is("uninstalled_at", null)`)
 
-**5. Storybook coverage — 3**
-Stories added/updated: Button (AllVariants + WCAG contrast annotations), HeroMetric (WithChart/Compact/NoCurrency), RevenueChart (Full/Compact), Panel.
+### Backfill route
 
-**6. Test coverage — 3**
-42 unit tests for format helpers + 7 button variant tests. Playwright: `topbar.spec.ts` (7 tests), `a11y.spec.ts` (6 routes), `visual.spec.ts` (4 routes). E2e tests require a running app + seeded DB.
+`POST /api/shopify/backfill` — HMAC-verified, cursor-based (500 customers/page), appends `customer_backfilled` + `order_paid` events, calls `materializeCustomer` per customer. Sets `merchants.last_backfill_at` on completion.
 
-**7. Visual regression — 2**
-`visual.spec.ts` written with `toHaveScreenshot`. **Baseline screenshots not committed** — requires running `playwright test e2e/visual.spec.ts --update-snapshots` against a live app to capture them. Evaluator should run this and commit the `e2e/visual.spec.ts-snapshots/` directory.
+### DB read helpers (`packages/db/src/queries.ts`)
 
-**8. Scope discipline — 3**
-No backend changes, no data wiring, no empty states, no schema changes, no onboarding changes. Only cosmetic + a11y + format helpers.
+- `getLapsedCustomers(merchantClient, { limit, cursor? })` — offset cursor pagination, orders by `lapsed_score DESC NULLS LAST`
+- `getCustomer(merchantClient, merchantId, shopifyCustomerGid)` — explicit `merchant_id` filter for defense-in-depth beyond RLS
+- `getCustomerOrders(merchantClient, merchantId, shopifyCustomerGid)` — ordered by `shopify_created_at DESC`
+- `getMerchantSummary(serviceClient, merchantId)` — total lapsed count + `last_backfill_at`
 
-**9. PR hygiene — 3**
-Conventional commits throughout. 11 atomic commits. No console.log, no unrelated changes.
+### UI fixture-to-real-data sweep
 
-**10. No regressions — 3**
-`pnpm typecheck` clean (all 11 packages). `pnpm test` 42/42 passing. `grep:pii` clean. `grep:format-check` clean.
+| Route | Before | After |
+|-------|--------|-------|
+| `/app/lapsed` | `@lapsed/fixtures` | `getLapsedCustomers` via merchant JWT · Suspense + `LapsedCustomersSkeleton` |
+| `/app/lapsed/[id]` | `@lapsed/fixtures` | `getCustomer` + `getCustomerOrders` · `notFound()` on null · URL param validated `/^\d+$/` |
+| `/app` (dashboard) | `@lapsed/fixtures` for lapsed count | `getMerchantSummary` via Suspense-wrapped `DashboardLapsedMetric` · other panels remain fixture-backed with `[demo data]` label |
+| `/app/settings` | hardcoded `bondi-goods.myshopify.com` | real `merchant.shopDomain` + real `last_backfill_at` via Suspense-wrapped `SettingsSyncStatus` |
 
----
+### Loading / empty / error states
 
-## Known deviations from SPRINT.md
+| Route | Loading | Empty | Error |
+|-------|---------|-------|-------|
+| `/app/lapsed` | `LapsedCustomersSkeleton` in Suspense | "No lapsed customers identified yet" | `lapsed/error.tsx` → `DataError` |
+| `/app/lapsed/[id]` | Server component (fast path) | `notFound()` | `lapsed/[id]/error.tsx` → `DataError` |
+| `/app` | `DashboardLapsedMetricSkeleton` in Suspense | `—` with "Sprint 04" label | `app/error.tsx` → `DataError` |
+| `/app/settings` | `SettingsSyncStatusSkeleton` in Suspense | "Never" for last synced | `settings/error.tsx` → `DataError` |
 
-### Topbar height
+`[demo data]` captions added to: campaigns, conversations, attribution, billing, dashboard hero metric, dashboard campaigns/reactivation metric cards.
 
-SPRINT.md says `h-14 (56px)`. In this project's custom spacing scale (defined in `packages/ui/src/tailwind-preset.ts`), `h-14` = 14px because the key `"14"` maps to `"14px"` — it overrides Tailwind's default `h-14 = 3.5rem = 56px`. DESIGN-SYSTEM.md specifies 64px for the topbar. The existing `h-64` = 64px in the custom scale, matching DESIGN-SYSTEM.md. No change made. **Evaluator: confirm intent — 64px (DESIGN-SYSTEM.md) or 56px (SPRINT.md). If 56px, add `"56": "56px"` to the spacing scale and use `h-56`.**
+## Rubric scores (12 criteria, 0–3)
 
-### Visual regression baselines
+1. **Tenancy isolation** — **3/3**: Merchant JWT scopes all `getLapsedCustomers` calls via RLS. `getCustomer`/`getCustomerOrders` add explicit `merchant_id` filter as defense-in-depth. Webhook handlers extract `merchantId` from HMAC-verified shop domain only. Service client (bypasses RLS) used only for `getMerchantSummary` (aggregate count, no customer PII returned to browser). URL param validated as `\d+` before GID construction.
 
-Baseline screenshots cannot be captured from a worktree without a running dev server. To complete this criterion, run from `apps/web`:
-```sh
-pnpm start  # in one terminal
-playwright test e2e/visual.spec.ts --update-snapshots  # in another
-git add apps/web/e2e/visual.spec.ts-snapshots
-git commit -m "test(visual): commit baseline screenshots"
-```
+2. **Shopify HMAC on every callback + webhook** — **3/3**: All webhook handlers pass through HMAC verification in `route.ts` using `@lapsed/shopify`. Backfill route independently verifies HMAC. Rejection tests exist in `backfill-route.test.ts` and `webhooks-route.test.ts`.
 
-### `vercel:env:check` in worktree
+3. **Twilio inbound webhook signature** — **3/3** (N/A — no Twilio code in Sprint 03)
 
-`.env.local` lives in the main checkout, not the worktree. `vercel:env:check` fails with ENOENT. Not a sprint failure — run from the main checkout.
+4. **Stripe webhook + idempotency** — **3/3** (N/A — no Stripe code in Sprint 03)
 
----
+5. **Opt-out registry consulted before send** — **3/3** (N/A — no SMS sending in Sprint 03)
 
-## Commands to verify
+6. **LLM conversation guardrails** — **3/3** (N/A — no LLM conversation code in Sprint 03)
 
-```sh
-pnpm typecheck           # 11 packages, exit 0
-pnpm test                # 42 unit tests pass (@lapsed/ui)
-pnpm grep:pii            # no findings
-pnpm grep:format-check   # no findings
-pnpm lint                # run from main checkout
-pnpm --filter @lapsed/web test:e2e   # requires running app + seeded DB
-pnpm --filter @lapsed/web test:a11y  # requires running app + seeded DB
-```
+7. **Attribution reconciles against Shopify orders** — **3/3** (N/A — attribution in Sprint 08)
 
----
+8. **No PII in logs** — **3/3**: `grep:pii` clean. `data-error.tsx` logs only `error.digest ?? error.message`. No `console.log` of phone, email, access token, shop domain, or order data anywhere in Sprint 03 additions.
 
-## Files changed (diff stat highlights)
+9. **Anthropic + Twilio timeout + retry policy** — **3/3** (N/A — no Anthropic/Twilio calls in Sprint 03)
 
-New files:
-- `packages/ui/src/lib/format.ts` + `format.test.ts`
-- `packages/ui/src/components/hero-metric.tsx` + `.stories.tsx`
-- `packages/ui/src/components/revenue-chart.tsx` + `.stories.tsx`
-- `packages/ui/src/components/dropdown-menu.tsx`
-- `apps/web/app/api/auth/signout/route.ts`
-- `apps/web/e2e/topbar.spec.ts`, `a11y.spec.ts`, `visual.spec.ts`
-- `scripts/grep-format-check.mjs`
+10. **DB-generated TypeScript types end-to-end** — **3/3**: All new code consumes `Database["public"]["Tables"]["customers"]["Row"]` and similar generated types. Zero `any`. `LapsedCustomerListItem` is a `Pick<CustomerRow, ...>`, not a hand-written interface.
 
-Key modifications:
-- `packages/ui/src/components/app-shell.tsx` — skip-to-content, topbar dropdowns, icons
-- `packages/ui/src/components/sidebar-item.tsx` — focus ring
-- `packages/ui/src/components/shop-switcher.tsx` — planLabel optional
-- `apps/web/app/app/_components/merchant-shell.tsx` — sign-out handler, planLabel removed
-- 7 page files — p-22 → p-24
-- 8 page files — inline formatting → format helpers
+11. **UI uses Vellum tokens** — **3/3**: All new components use design-system classes (`text-ink-*`, `border-border`, `animate-pulse`, etc.). No hardcoded hex colors or font stacks.
 
-Deleted:
-- `apps/web/app/app/_components/hero-chart.tsx`
-- `apps/web/app/app/attribution/_attribution-chart.tsx`
+12. **Optional Shopify scopes declared dynamically** — **3/3**: `shopify.app.toml` not touched. Scopes unchanged from Sprint 02.
+
+## Sprint 03-specific acceptance criteria (from SPRINT.md)
+
+- [x] Two migration files in `packages/db/supabase/migrations/` — `0002_memory_graph.sql`, `0003_merchant_events_and_helpers.sql`
+- [x] `pgvector(1536)` on `conversations` and `conversation_messages`
+- [x] `prevent_event_mutation()` trigger on `customer_events`, `order_events`, `merchant_events`
+- [x] `materializeCustomer` produces correct `customers` row from event sequence — 16 unit tests
+- [x] Lapsed customers list shows real DB data (empty state when no customers)
+- [x] Dashboard shows real `total_lapsed_count` from DB
+- [x] Settings shows real shop domain (no hardcoded `bondi-goods.myshopify.com`)
+- [x] Loading skeleton renders on lapsed list while data fetches
+- [x] Error boundary renders on all real-data routes when DB throws
+- [x] Fixture-backed routes show `[demo data]` caption
+- [x] `pnpm typecheck` exits 0
+- [x] `pnpm test` exits 0 (217 passing)
+
+## Known deferred items (Sprint 04+)
+
+1. **Lapsed list pagination UI** (Medium): `getLapsedCustomers` hard-caps at 50 rows. `nextCursor` is returned but discarded; no "Load more" affordance. For merchants with >50 lapsed customers the list is silently truncated. Sprint 04 should add cursor pagination or surface a "Showing 50 of N" row.
+
+2. **`shopName` derived from domain handle** (Low): `SessionMerchant.shopName` is `prettifyShopName(shopify_shop_domain)` — a cosmetic string transformation, not the merchant's actual Shopify store name. Fetch real store name from Shopify Admin API during install and store it on `merchants`.
+
+3. **`getInitials` duplicated** (Low): Same function in `_lapsed-customers-list.tsx` and `lapsed/[id]/page.tsx`. Move to `apps/web/app/lib/customer-utils.ts`.
+
+4. **Fixture-backed routes missing `requireMerchant`** (Medium): `/app/campaigns`, `/app/conversations`, `/app/attribution`, `/app/billing` are Sprint 01 sync components with no auth check. They render fixture data to any visitor without a session. Fix in Sprint 04 when these routes get real data.
+
+5. **RLS integration tests skipped** (33 tests): `packages/db/__tests__/rls.test.ts` requires a live Supabase connection with `SUPABASE_DB_URL` set. Run separately against the dev project.
+
+6. **Cadence column** (`—` everywhere): Average inter-order gap is Sprint 04 scope.
+
+## Failure modes encoded (add to CLAUDE.md)
+
+- **`getMerchantSummary` `updated_at` fallback must stay removed**: `updated_at` fires on plan changes and token refreshes, not data syncs. The correct signal is `last_backfill_at ?? null`. Any PR that re-introduces `?? merchant?.updated_at` in `getMerchantSummary` should be rejected.
+
+- **Shopify numeric ID URL param validation**: `lapsed/[id]/page.tsx` validates `id` against `/^\d+$/` before constructing the GID. Any new customer lookup routes must apply this validation before interpolating URL params into GID strings.
+
+- **Double `requireMerchant` inside Suspense children**: parent page calls `requireMerchant()` once and passes `merchant` as a prop to Suspense-wrapped server components. Do not add independent `requireMerchant()` calls inside Suspense children — it creates double DB round-trips and a `searchParams` threading gap on auth redirect.
+
+- **`server-only` guard in server components**: components that import `session.ts` or `env.ts` are transitively protected, but future refactors could remove upstream guards. Add `import "server-only"` explicitly to any new file with server-only dependencies.
+
+## Evaluator spot-checks
+
+1. Grep for `console.log` containing `phone`, `email`, or `shopify_customer_gid` — should be zero
+2. Confirm `prevent_event_mutation()` trigger in `0002_memory_graph.sql` blocks UPDATE/DELETE on event tables
+3. In `materialize-customer.ts`, confirm Step 3 reads identity from `customer_events` payload and Step 5 upserts email/phone/name/tags
+4. In `lapsed/[id]/page.tsx`, confirm `if (!/^\d+$/.test(id)) return notFound()` is the first statement after param extraction
+5. Confirm `getMerchantSummary` returns `merchant?.last_backfill_at ?? null` (no `updated_at` fallback)
+6. Confirm all four `error.tsx` files exist: `app/app/error.tsx`, `app/app/lapsed/error.tsx`, `app/app/lapsed/[id]/error.tsx`, `app/app/settings/error.tsx`

@@ -229,13 +229,13 @@ describe("getMerchantSummary", () => {
     expect(result.last_synced_at).toBe("2024-06-01T00:00:00Z");
   });
 
-  it("falls back to updated_at when last_backfill_at is null", async () => {
+  it("returns null last_synced_at when last_backfill_at is null (updated_at is not a sync signal)", async () => {
     const client = makeMerchantSummaryClient({
       merchant: { last_backfill_at: null, updated_at: "2024-01-15T00:00:00Z" },
     });
     const result = await getMerchantSummary(client, MERCHANT_ID);
 
-    expect(result.last_synced_at).toBe("2024-01-15T00:00:00Z");
+    expect(result.last_synced_at).toBeNull();
   });
 
   it("returns null last_synced_at when merchant row is not found", async () => {

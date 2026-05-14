@@ -33,6 +33,9 @@ export default function CampaignsPage() {
       </div>
 
       <Panel>
+        <div className="flex items-center gap-8 border-b border-border px-16 py-10">
+          <span className="text-mini text-ink-400">[demo data] — real campaigns in Sprint 06</span>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>

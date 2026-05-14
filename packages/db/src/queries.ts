@@ -1,6 +1,8 @@
 import type { LapsedSupabaseClient } from "./index";
 import type { Database } from "./types";
 
+type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
+
 type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
 
 export interface LapsedCustomersPage {
@@ -64,6 +66,25 @@ export async function getCustomer(
 }
 
 /**
+ * Returns orders for a single customer, ordered by date descending.
+ */
+export async function getCustomerOrders(
+  merchantClient: LapsedSupabaseClient,
+  merchantId: string,
+  shopifyCustomerGid: string,
+): Promise<OrderRow[]> {
+  const { data, error } = await merchantClient
+    .from("orders")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("shopify_customer_gid", shopifyCustomerGid)
+    .order("shopify_created_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
  * Returns a merchant-level summary: total lapsed customer count and the
  * last time data was synced from Shopify.
  */
@@ -90,6 +111,6 @@ export async function getMerchantSummary(
   const merchant = merchantResult.data;
   return {
     total_lapsed_count: countResult.count ?? 0,
-    last_synced_at: merchant?.last_backfill_at ?? merchant?.updated_at ?? null,
+    last_synced_at: merchant?.last_backfill_at ?? null,
   };
 }

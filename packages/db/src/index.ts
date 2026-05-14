@@ -10,6 +10,7 @@ export { encryptToken, decryptToken, decodeEncryptionKey } from "./encryption";
 export {
   getLapsedCustomers,
   getCustomer,
+  getCustomerOrders,
   getMerchantSummary,
   type LapsedCustomersPage,
   type MerchantSummaryRow,

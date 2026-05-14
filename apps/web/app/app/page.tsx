@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import {
   HeroMetric,
   MetricCard,
@@ -12,8 +13,9 @@ import {
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { MerchantShell } from "./_components/merchant-shell";
-import { campaigns, conversations, attribution, merchant } from "@lapsed/fixtures";
+import { campaigns, conversations, attribution } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
+import { DashboardLapsedMetric, DashboardLapsedMetricSkeleton } from "./_dashboard-lapsed-metric";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +26,8 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  await requireMerchant({ searchParams: await searchParams });
+  const merchant = await requireMerchant({ searchParams: await searchParams });
+
   const totalRevenue = formatCount(attribution.totalRecoveredRevenue);
   const totalOrders = attribution.totalRecoveredOrders;
   const liveCampaigns = campaigns.filter((c) => c.status === "live").length;
@@ -36,7 +39,7 @@ export default async function DashboardPage({
   return (
     <MerchantShell pageTitle="Dashboard">
       <HeroMetric
-        label="Recovered revenue · last 30 days"
+        label="Recovered revenue · last 30 days [demo data]"
         pulse
         currency="$"
         value={totalRevenue}
@@ -62,20 +65,17 @@ export default async function DashboardPage({
         <MetricCard
           label="Active campaigns"
           value={activeCampaigns.toString()}
-          trend={`${liveCampaigns} live · ${pausedCampaigns} paused`}
+          trend={`${liveCampaigns} live · ${pausedCampaigns} paused [demo data]`}
           trendDirection="flat"
         />
-        <MetricCard
-          label="Lapsed cohort"
-          value={formatCount(merchant.totalLapsedCount)}
-          trend={`↑ ${merchant.weeklyLapsedDelta} this week`}
-          trendDirection="up"
-        />
+        <Suspense fallback={<DashboardLapsedMetricSkeleton />}>
+          <DashboardLapsedMetric merchantId={merchant.id} />
+        </Suspense>
         <MetricCard
           label="Reactivation rate"
-          value={merchant.reactivationRate.toFixed(1) + "%"}
-          trend={`↑ ${merchant.reactivationRateDeltaPp}pp vs avg`}
-          trendDirection="up"
+          value="—"
+          trend="Attribution in Sprint 08"
+          trendDirection="flat"
         />
       </section>
 
@@ -84,12 +84,15 @@ export default async function DashboardPage({
           <PanelHeader
             title="Campaigns"
             action={
-              <Link
-                href="/app/campaigns"
-                className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-              >
-                View all <ArrowRight strokeWidth={1.75} size={14} />
-              </Link>
+              <div className="flex items-center gap-12">
+                <span className="text-mini text-ink-400">[demo data]</span>
+                <Link
+                  href="/app/campaigns"
+                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
+                >
+                  View all <ArrowRight strokeWidth={1.75} size={14} />
+                </Link>
+              </div>
             }
           />
           <PanelBody>
@@ -112,12 +115,15 @@ export default async function DashboardPage({
           <PanelHeader
             title="Active conversations"
             action={
-              <Link
-                href="/app/conversations"
-                className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-              >
-                View all <ArrowRight strokeWidth={1.75} size={14} />
-              </Link>
+              <div className="flex items-center gap-12">
+                <span className="text-mini text-ink-400">[demo data]</span>
+                <Link
+                  href="/app/conversations"
+                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
+                >
+                  View all <ArrowRight strokeWidth={1.75} size={14} />
+                </Link>
+              </div>
             }
           />
           <PanelBody>

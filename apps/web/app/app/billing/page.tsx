@@ -36,6 +36,10 @@ export default function BillingPage() {
         </p>
       </div>
 
+      <div className="mb-12 rounded-sm border border-cream-200 bg-cream-50 px-12 py-8">
+        <span className="text-mini text-ink-400">[demo data] — Stripe billing wired in Sprint 08</span>
+      </div>
+
       <div className="mb-16 grid grid-cols-[1.5fr_1fr] gap-16">
         <Panel>
           <PanelHeader

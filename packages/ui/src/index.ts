@@ -70,3 +70,6 @@ export {
 } from "./components/campaign-row";
 export { ConversationRow, type ConversationRowProps } from "./components/conversation-row";
 export { RevenueChart, type RevenueChartProps } from "./components/revenue-chart";
+
+// Skeletons
+export { LapsedCustomersSkeleton } from "./components/skeletons/lapsed-customers-skeleton";

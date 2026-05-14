@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import {
   Button,
   Input,
@@ -7,10 +8,20 @@ import {
   Tag,
   Card,
 } from "@lapsed/ui";
-import { merchant } from "@lapsed/fixtures";
+import { merchant as fixtureMerchant } from "@lapsed/fixtures";
+import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
+import { SettingsSyncStatus, SettingsSyncStatusSkeleton } from "../_settings-sync-status";
 
-export default function SettingsPage() {
+export const dynamic = "force-dynamic";
+
+interface PageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function SettingsPage({ searchParams }: PageProps) {
+  const merchant = await requireMerchant({ searchParams: await searchParams });
+
   return (
     <MerchantShell pageTitle="Settings">
       <div className="mb-24">
@@ -31,12 +42,12 @@ export default function SettingsPage() {
               </label>
               <label className="flex flex-col gap-6">
                 <span className="text-label text-ink-700">Shop name</span>
-                <Input defaultValue={merchant.shopName} />
+                {/* shopName is derived from domain handle — Shopify API fetch wired in a later sprint */}
+                <Input defaultValue={merchant.shopName} readOnly />
               </label>
-              <label className="flex flex-col gap-6">
-                <span className="text-label text-ink-700">Owner</span>
-                <Input defaultValue={merchant.ownerName} />
-              </label>
+              <Suspense fallback={<SettingsSyncStatusSkeleton />}>
+                <SettingsSyncStatus merchantId={merchant.id} />
+              </Suspense>
             </div>
           </PanelBody>
         </Panel>
@@ -49,7 +60,7 @@ export default function SettingsPage() {
                 Used by the conversation engine to keep AI replies on-brand.
               </p>
               <textarea
-                defaultValue={merchant.brandVoice}
+                defaultValue={fixtureMerchant.brandVoice}
                 rows={4}
                 className="rounded-sm border border-cream-300 bg-cream-50 p-12 text-body text-ink-900 focus-visible:outline-none focus-visible:shadow-focus"
               />
@@ -69,7 +80,7 @@ export default function SettingsPage() {
                 immediately. STOP and STOPALL are reserved by Twilio.
               </p>
               <div className="flex flex-wrap gap-8">
-                {merchant.optOutKeywords.map((k) => (
+                {fixtureMerchant.optOutKeywords.map((k) => (
                   <Tag key={k} tone="stalled">
                     {k}
                   </Tag>
@@ -95,18 +106,14 @@ export default function SettingsPage() {
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Twilio</div>
-                  <div className="text-mini text-ink-500">
-                    Pending — connects in Sprint 05
-                  </div>
+                  <div className="text-mini text-ink-500">Pending — connects in Sprint 05</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Stripe</div>
-                  <div className="text-mini text-ink-500">
-                    Pending — connects in Sprint 06
-                  </div>
+                  <div className="text-mini text-ink-500">Pending — connects in Sprint 06</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>
