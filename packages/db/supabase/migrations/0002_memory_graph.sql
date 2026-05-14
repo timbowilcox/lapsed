@@ -23,6 +23,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 create extension if not exists vector;         -- pgvector
+create extension if not exists moddatetime;   -- updated_at auto-stamp (also in 0001; idempotent)
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Helper: prevent any mutation of an append-only table.
@@ -55,7 +56,12 @@ create table if not exists public.customer_events (
 
 comment on table public.customer_events is
   'Append-only event log. Every customer state change is inserted here. '
-  'No UPDATE or DELETE is permitted — enforced by triggers and RLS.';
+  'No UPDATE, DELETE, or TRUNCATE is permitted — enforced by triggers and RLS.';
+
+-- Dedup constraint: backfill may run multiple times; ON CONFLICT DO NOTHING on insert.
+alter table public.customer_events
+  add constraint customer_events_dedup_unique
+  unique (merchant_id, shopify_customer_gid, event_type, source, occurred_at);
 
 create index customer_events_merchant_customer_idx
   on public.customer_events (merchant_id, shopify_customer_gid);
@@ -70,6 +76,11 @@ create trigger customer_events_no_update
 create trigger customer_events_no_delete
   before delete on public.customer_events
   for each row execute function prevent_event_mutation();
+
+-- TRUNCATE fires neither row-level trigger; block it explicitly at statement level.
+create trigger customer_events_no_truncate
+  before truncate on public.customer_events
+  for each statement execute function prevent_event_mutation();
 
 alter table public.customer_events enable row level security;
 
@@ -162,6 +173,11 @@ comment on table public.order_events is
   'Append-only event log for order lifecycle events. Same append-only enforcement '
   'as customer_events. The orders table is materialised from these events.';
 
+-- Dedup constraint: backfill may run multiple times; ON CONFLICT DO NOTHING on insert.
+alter table public.order_events
+  add constraint order_events_dedup_unique
+  unique (merchant_id, shopify_order_gid, event_type, source, occurred_at);
+
 create index order_events_merchant_customer_idx
   on public.order_events (merchant_id, shopify_customer_gid);
 
@@ -175,6 +191,11 @@ create trigger order_events_no_update
 create trigger order_events_no_delete
   before delete on public.order_events
   for each row execute function prevent_event_mutation();
+
+-- TRUNCATE fires neither row-level trigger; block it explicitly at statement level.
+create trigger order_events_no_truncate
+  before truncate on public.order_events
+  for each statement execute function prevent_event_mutation();
 
 alter table public.order_events enable row level security;
 
@@ -303,11 +324,18 @@ create index conversations_merchant_customer_idx
 create index conversations_merchant_status_idx
   on public.conversations (merchant_id, status, last_message_at desc);
 
--- ivfflat index for approximate nearest-neighbour search over conversation embeddings.
+-- Partial ivfflat index — only rows with embeddings populated (Sprint 06 job).
+-- Partial predicate avoids NULL vectors polluting the ANN index and improves build time.
 -- lists=100 is appropriate for < 1M rows; tune upward when the dataset grows.
 create index conversations_embedding_idx
   on public.conversations using ivfflat (embedding vector_cosine_ops)
-  with (lists = 100);
+  with (lists = 100)
+  where embedding is not null;
+
+-- Attribution + campaign query path (FK to campaigns added Sprint 07; index here now).
+create index conversations_campaign_idx
+  on public.conversations (merchant_id, campaign_id)
+  where campaign_id is not null;
 
 alter table public.conversations enable row level security;
 
@@ -327,7 +355,9 @@ create policy conversations_merchant_read
 create table if not exists public.conversation_messages (
   id               uuid          primary key default gen_random_uuid(),
   conversation_id  uuid          not null references public.conversations(id) on delete cascade,
-  merchant_id      uuid          not null references public.merchants(id) on delete restrict,
+  -- ON DELETE CASCADE so that deleting a conversation cascades cleanly;
+  -- RESTRICT would conflict with the cascade from conversation_id FK above.
+  merchant_id      uuid          not null references public.merchants(id) on delete cascade,
   role             text          not null,
   channel          text          not null default 'sms',
   body             text          not null,
@@ -344,9 +374,11 @@ create index conversation_messages_conversation_idx
 create index conversation_messages_merchant_idx
   on public.conversation_messages (merchant_id);
 
+-- Partial ivfflat index — only rows with embeddings populated (Sprint 06 job).
 create index conversation_messages_embedding_idx
   on public.conversation_messages using ivfflat (embedding vector_cosine_ops)
-  with (lists = 100);
+  with (lists = 100)
+  where embedding is not null;
 
 alter table public.conversation_messages enable row level security;
 
@@ -384,9 +416,15 @@ comment on table public.webhook_deliveries is
 create index webhook_deliveries_merchant_idx
   on public.webhook_deliveries (merchant_id, received_at desc);
 
--- No RLS policies — no authenticated/anon access at all.
--- The service_role key (which bypasses RLS) is the only writer/reader.
+-- Explicit deny policy for authenticated role: intent is unambiguous and cannot be
+-- accidentally overridden by adding a permissive SELECT policy later. Payload contains
+-- customer PII (full Shopify webhook bodies); no merchant JWT may ever read this table.
 alter table public.webhook_deliveries enable row level security;
+
+create policy webhook_deliveries_deny_authenticated
+  on public.webhook_deliveries for all
+  to authenticated
+  using (false);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- merchants: add last_backfill_at column for the Settings page
