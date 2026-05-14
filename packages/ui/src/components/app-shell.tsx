@@ -53,6 +53,12 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="grid min-h-screen grid-cols-[248px_1fr]">
+      <a
+        href="#main-content"
+        className="absolute left-4 top-4 z-50 -translate-y-full rounded-sm bg-ink-900 px-12 py-8 text-cream-50 text-body-strong transition-transform focus:translate-y-0 focus-visible:translate-y-0"
+      >
+        Skip to content
+      </a>
       <aside className="flex flex-col border-r border-border bg-lavender-400 px-16 py-24">
         <div className="px-12 pb-32 pt-8 text-[28px] font-bold leading-none tracking-[-0.04em] text-ink-900">
           lapsed<span>.</span>
@@ -156,7 +162,7 @@ export function AppShell({
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-32">{children}</div>
+        <div id="main-content" className="flex-1 overflow-y-auto p-32">{children}</div>
       </main>
     </div>
   );

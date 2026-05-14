@@ -48,7 +48,7 @@ export function DropdownMenuItem({
       onSelect={onSelect}
       className={cn(
         "flex cursor-pointer select-none items-center rounded px-8 py-6 text-body text-ink-700 outline-none",
-        "transition-colors hover:bg-cream-200 focus:bg-cream-200",
+        "transition-colors hover:bg-cream-200 data-[highlighted]:bg-cream-200 data-[highlighted]:shadow-focus",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
         className,
       )}

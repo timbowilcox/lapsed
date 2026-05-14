@@ -19,7 +19,7 @@ export const SidebarItem = forwardRef<HTMLAnchorElement, SidebarItemProps>(funct
       ref={ref}
       href={href}
       className={cn(
-        "flex items-center gap-12 rounded-md px-12 py-10 text-body-strong text-ink-900 transition-colors",
+        "flex items-center gap-12 rounded-md px-12 py-10 text-body-strong text-ink-900 transition-colors focus-visible:outline-none focus-visible:shadow-focus",
         active
           ? "bg-ink-900 text-cream-50 opacity-100"
           : "opacity-[0.78] hover:bg-white/25 hover:opacity-100",
