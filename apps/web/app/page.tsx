@@ -3,7 +3,6 @@ import { verifyOAuthHmac } from "@lapsed/shopify";
 import { createServiceClient } from "@lapsed/db";
 import { serverEnv } from "./lib/env";
 import { resolveRootRedirect, toURLSearchParams } from "./lib/root-redirect";
-import { IframeBreakout } from "./_components/iframe-breakout";
 
 // Force per-request rendering — search params drive the redirect target,
 // and the merchant lookup hits Supabase. Caching would be wrong.
@@ -15,19 +14,23 @@ type RawSearchParams = Record<string, string | string[] | undefined>;
  * Root entry. Three cases:
  *
  *   1. Shopify embedded entry (merchant installed):
- *      /?shop=...&host=...&hmac=...&timestamp=...
+ *      /?shop=...&host=...&hmac=...&timestamp=...&id_token=...
  *      Server-side redirect to /app preserving the query string so App
- *      Bridge can read shop/host/id_token from the iframe URL.
+ *      Bridge can read shop/host/id_token.
  *
  *   2. Shopify embedded entry (merchant NOT installed):
- *      Same URL shape, but the merchant lookup says they're not in our
- *      DB (or uninstalled_at is set). We CANNOT server-side redirect to
- *      /api/shopify/install from here — that would run the install
- *      endpoint inside the Shopify Admin iframe, making the state cookie
- *      a third-party cookie which Chrome drops. Instead we render a tiny
- *      client-side break-out page that does `window.top.location.href`
- *      to start OAuth as a top-level navigation. The install endpoint
- *      then sets the state cookie in first-party context.
+ *      Same URL shape, but the merchant isn't in our DB (or uninstalled).
+ *      Redirect to /app/auth/install?shop=...&host=... — the install
+ *      screen renders the "Install on Shopify" button inside the iframe,
+ *      and the user's click does a top-window redirect to OAuth.
+ *
+ *      We cannot auto-redirect to /api/shopify/install from here:
+ *      a) Server-side redirect inside the iframe would set the state
+ *         cookie in third-party context (admin.shopify.com is the top
+ *         frame, app.lapsed.ai is the iframe), and Chrome drops it.
+ *      b) Client-side window.top.location.href in useEffect is blocked
+ *         by Chrome's user-gesture requirement for cross-origin iframe
+ *         → top-window navigation.
  *
  *   3. Direct visit (no shop) or invalid HMAC:
  *      Redirect to /app, which will redirect to install if no session.
@@ -45,7 +48,7 @@ export default async function RootPage({
   }
 
   const env = serverEnv();
-  const result = await resolveRootRedirect({
+  const { target } = await resolveRootRedirect({
     searchParams: params,
     verifyHmac: (p) => verifyOAuthHmac(p, env.shopifyApiSecret),
     lookupMerchant: async (shop) => {
@@ -61,9 +64,5 @@ export default async function RootPage({
       return { installed: !!data && data.uninstalled_at === null };
     },
   });
-
-  if (result.kind === "iframeBreakout") {
-    return <IframeBreakout target={result.target} />;
-  }
-  redirect(result.target);
+  redirect(target);
 }

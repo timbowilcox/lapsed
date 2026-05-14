@@ -6,6 +6,47 @@
 
 ---
 
+## Post-Sprint-02 polish (PR `fix/install-user-gesture`)
+
+Manual testing of `fix/oauth-cookie-iframe` revealed the auto-redirect approach can't work: opening the app from Shopify Admin produced a client-side `SecurityError: Failed to set a named property 'href' on 'Location': The current window does not have permission to navigate the target frame` plus the Chrome warning `Unsafe attempt to initiate navigation … is neither same-origin with its target nor has it received a user gesture` (https://www.chromestatus.com/feature/5851021045661696). The `IframeBreakout` component's `useEffect` did `window.top.location.href = …` automatically on mount — with no user gesture, Chrome's cross-origin-frame-navigation policy blocks it. App Bridge's `redirectTo` is not a clean alternative for unauthenticated install: it requires App Bridge to be initialised against an authenticated merchant, which the fresh-install case doesn't have.
+
+The Shopify-recommended pattern is: render an install screen with a user-clickable button. The user's click IS the gesture browsers need to allow the top-window navigation. This PR reverts to that pattern.
+
+Changes:
+
+1. **`apps/web/app/lib/root-redirect.ts`** — dropped the discriminated union. Install case now targets `/app/auth/install?shop=<derived>&host=<host>` instead of `/api/shopify/install?…`. The install screen renders inside the iframe; its existing button handler does `window.top.location.href` on click (user gesture → browser allows it).
+
+2. **`apps/web/app/page.tsx`** — no longer renders `<IframeBreakout>`; just `redirect(target)` for every case (direct visit, installed merchant, missing merchant). Root `/` is back to 132 B in the route bundle (was 728 B with the client component).
+
+3. **`apps/web/app/_components/iframe-breakout.tsx`** — deleted. The empty `_components` dir was also removed.
+
+4. **`apps/web/app/app/auth/install/page.tsx`** — removed the server-side auto-redirect to `/api/shopify/install` that `fix/install-embedded-context` added. That redirect was also broken in iframe context (server-side redirect inside iframe → state cookie still set as third-party). The install screen is now always rendered when the user lands on `/app/auth/install`. The button click handles the top-window break-out.
+
+5. **Cookie attribute hardening (`SameSite=None; Secure; Partitioned`) is kept** as defense-in-depth — the user-clicked top-window navigation already runs first-party, so the partitioned attribute isn't strictly required for the install endpoint hit, but it costs nothing and protects against edge cases (e.g., browsers with stricter cookie policies, or future flows that hit the install endpoint from a different context).
+
+6. **`apps/web/__tests__/root-redirect.test.ts`** — updated assertions. The install case now expects `target.startsWith("/app/auth/install?")`. Added a new regression-defence test: `install case targets /app/auth/install — NEVER /api/shopify/install directly` to lock in this contract and prevent re-introduction of either of the two broken patterns (server-side redirect or useEffect-driven top nav). The `host-decode.ts` helper and its 11 tests remain unchanged — the install button still uses `shopFromParams` to derive shop from the URL.
+
+Flow now:
+
+```
+/?shop=…&host=…&hmac=…&id_token=…   ← Shopify embedded entry, inside iframe
+  ↓ HMAC verified server-side, merchant looked up
+  ↓ merchant not in DB → redirect (302, in-iframe) to:
+/app/auth/install?shop=…&host=…     ← still inside iframe, install screen renders
+  ↓ user clicks "Install on Shopify"  ← user gesture
+  ↓ button handler: window.top.location.href = "/api/shopify/install?…"
+/api/shopify/install                 ← TOP-LEVEL, first-party
+  ↓ state cookie set (SameSite=Lax works fine here; None+Partitioned anyway)
+  ↓ 307 redirect to Shopify OAuth consent (Shopify itself is top-level)
+  ↓ user approves
+/api/shopify/callback?code=…&state=… ← TOP-LEVEL, first-party
+  ↓ state cookie read successfully ✓
+  ↓ exchange code → encrypt token → upsert merchant → mint session cookie
+  ↓ redirect to /app
+```
+
+---
+
 ## Post-Sprint-02 polish (PR `fix/oauth-cookie-iframe`)
 
 After `fix/root-embedded-entry` shipped, the OAuth flow fired but the callback returned `{"error":"state_missing"}`. Root cause: the state cookie set by `/api/shopify/install` was being lost because the install endpoint was hit from inside the Shopify Admin iframe — Chrome treats cookies set on `app.lapsed.ai` while the parent frame is `admin.shopify.com` as third-party and silently drops them without explicit `SameSite=None; Secure; Partitioned` attributes. Even with those attributes, the callback comes back top-level (Shopify's consent screen refuses to embed), so the iframe-set partitioned cookie isn't necessarily readable in the top-level context.
