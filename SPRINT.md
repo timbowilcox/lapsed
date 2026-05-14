@@ -1,222 +1,412 @@
-# Sprint 02.5 — UI Polish
+# Sprint 03 — Data Ingestion and Customer Memory Graph
 
 Date: 2026-05-14
 Repo: timbowilcox/lapsed
-Branch: `sprint-02.5/ui-polish`
-Estimated effort: 3–4 days, single PR
+Branch: `sprint-03/data-ingestion-and-memory-graph`
+Estimated effort: 5–7 days, single PR
+
+---
+
+## Required reading
+
+Before any implementation, read in order:
+
+1. `CLAUDE.md` — full file, especially "Architectural load-bearing decisions" (six decisions, two of which *land in this sprint*) and "Failure modes encoded so far"
+2. `PRODUCT.md` — full file, especially Module 1 (Win-back engine) and Module 5 (Revenue attribution) for data shape understanding
+3. `DESIGN-SYSTEM.md` — empty / loading / error state visual patterns
+4. `.claude/agents/README.md` — dispatch patterns for the six specialist subagents
+5. `.claude/agents/architecture-guardian.md` — read twice; its verdict is binding every chunk this sprint
+
+The two architectural load-bearing decisions that land here:
+
+- **Decision 1**: Event-sourced customer memory graph. Append-only event log with timestamp + source. Materialised customer profile regenerated from events. No snapshot mutations — no UPDATE on event tables, ever.
+- **Decision 2**: pgvector for conversation memory. Embedding column on `conversations` and `conversation_messages` tables from day one. ivfflat index. Not added later.
+
+---
 
 ## Scope
 
-A focused cosmetic + accessibility sprint sitting between Sprint 02 (OAuth) and Sprint 03 (data ingestion). Every issue surfaced in the post-Sprint-02 UI review of the six embedded app screens (Dashboard, Campaigns, Conversations, Attribution, Billing, Settings) is fixed here. No backend changes, no fixture-to-real-data sweep, no new features. Goal: when the user opens the app, the surfaces look finished. Goal is NOT: the surfaces are wired to real merchant data — that's Sprint 03.
+Sprint 03 is the foundational data layer. It lands exactly two things:
 
-Single PR against `main`. Squash merge after green CI + evaluator pass.
+1. **Data ingestion**: A complete schema (event-sourced), Shopify webhooks for live updates, and a backfill job for historical data. By end of sprint, a newly-installed merchant's historical customers and orders are ingested and stored in the memory graph.
+
+2. **Fixture-to-real-data sweep**: Every screen that can show real data does. Campaigns, conversations, and attribution remain as fixtures (those ship in Sprints 06–08), but Dashboard, Lapsed customers, and Settings show real DB values.
+
+Loading, empty, and error states are added for every route that has a real data fetch.
+
+No scoring, no classification, no SMS — that is Sprint 04 and beyond.
+
+---
 
 ## In scope
 
-### 1. Primary button contrast — currently invisible
+### 1. Database migration 0002 — full schema
 
-`packages/ui/src/components/button.tsx` primary variant renders dark text on dark background everywhere except the install page (which got a one-off fix in PR #3). Swap the token for the primary variant globally.
+New extension and all new tables in a single migration file `packages/db/supabase/migrations/0002_memory_graph.sql`:
 
-- Primary variant: `bg-ink-900 text-cream-50` (not `text-ink-900`)
-- Secondary variant: keep as-is (`bg-cream-100 text-ink-900 border border-ink-200`)
-- Add a Storybook story per variant with the actual computed contrast ratio visible
-- Add a unit test that mounts `<Button variant="primary">Test</Button>` and asserts `getComputedStyle` `color` matches the cream token
+**Extensions**:
+- `vector` (pgvector) for `vector(1536)` embedding columns
 
-### 2. Topbar — broken layout + non-functional icons
+**customer_events** (append-only, event-sourced, the canonical record):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
+event_type text not null, source text not null, payload jsonb not null default '{}',
+occurred_at timestamptz not null, ingested_at timestamptz not null default now()
+```
+Append-only enforced by: RLS (SELECT only for authenticated; INSERT via service_role only) + trigger that raises an exception on any UPDATE or DELETE on this table, even from service_role.
 
-Topbar component at `packages/ui/src/components/topbar.tsx` (or `apps/web/app/(app)/_components/topbar.tsx` — check current location). Fixes:
+**customers** (materialised profile, regenerated from events by the nightly job):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
+email text, phone text, first_name text, last_name text, tags text[] default '{}',
+total_order_count int not null default 0, total_ltv_cents bigint not null default 0,
+last_order_at timestamptz, last_order_days_ago int,
+lapsed_score numeric, lapsed_at timestamptz, restored_at timestamptz,
+sms_opt_out boolean not null default false, sms_opt_out_at timestamptz,
+profile_version int not null default 1,
+created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+unique(merchant_id, shopify_customer_gid)
+```
+RLS: SELECT by merchant_id; mutations via service_role only.
 
-- **Height**: explicit `h-14` (56px). Icons should not exceed this.
-- **Icon size**: 20px (`size-5`). Currently appears 24px+, spilling vertically.
-- **Notification dot**: 8px (`size-2`), red-error token, positioned `absolute -top-0.5 -right-0.5` relative to the bell button (currently oversized and floating in negative space).
-- **? button (help)**: opens `https://docs.lapsed.ai` in a new tab via `target="_blank" rel="noopener"`. The docs site doesn't exist yet — that's fine; it 404s gracefully. Placeholder is acceptable.
-- **Bell button**: opens a Radix dropdown panel. Empty state for now: "No notifications yet" + small caption "We'll let you know when campaigns finish or customers reply." No badge / dot until Sprint 03 wires real events.
-- **Avatar (TW) button**: opens dropdown menu with three items: "Account settings" (links to `/app/settings`), "Switch shop" (disabled with tooltip "Coming soon"), "Sign out" (clears session, redirects to Shopify Admin). Real sign-out flow.
-- **Page title duplication**: drop the page title from the topbar. Keep only branding + actions in topbar. Page H1 lives in page content.
+**order_events** (append-only, same enforcement as customer_events):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
+shopify_order_gid text not null, event_type text not null, source text not null,
+payload jsonb not null default '{}', occurred_at timestamptz not null,
+ingested_at timestamptz not null default now()
+```
 
-### 3. Unified chart component
+**orders** (materialised from order_events):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_order_gid text not null,
+shopify_customer_gid text not null, total_price_cents bigint not null,
+financial_status text not null, fulfilled_at timestamptz, shopify_created_at timestamptz not null,
+created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+unique(merchant_id, shopify_order_gid)
+```
 
-Dashboard hero chart and Attribution chart currently use different implementations and rendering styles. Replace both with a single component.
+**products** (denormalised snapshot — products don't need event-sourcing for v1):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_product_gid text not null,
+title text not null, handle text not null, product_type text not null default '',
+price_cents bigint not null default 0, inventory_quantity int not null default 0,
+created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+unique(merchant_id, shopify_product_gid)
+```
 
-- Create `packages/ui/src/components/revenue-chart.tsx` using Recharts `AreaChart`
-- Smooth `monotone` curve, lavender gradient fill, no jagged steps
-- X-axis: date labels with appropriate tick density for the date range
-- Y-axis: currency-formatted (using new format helpers)
-- Hover tooltip: shows date + currency value for that day
-- Props: `data: Array<{ date: string; value: number }>`, `height?: number`, `range?: 'auto' | 'compact'`
-- Storybook story showing both compact (Dashboard hero) and full (Attribution) variants
-- Replace usages in `apps/web/app/(app)/dashboard/page.tsx` and `apps/web/app/(app)/attribution/page.tsx`
+**conversations** (with pgvector embedding, channel-agnostic):
+```
+id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
+campaign_id uuid, channel text not null default 'sms',
+status text not null default 'active', last_message_at timestamptz,
+message_count int not null default 0, attributed_order_gid text,
+attributed_revenue_cents bigint,
+embedding vector(1536),
+created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+```
+ivfflat index on embedding column with `lists = 100`.
 
-### 4. Format helpers — single source of truth
+**conversation_messages**:
+```
+id uuid pk, conversation_id uuid fk→conversations, merchant_id uuid fk→merchants,
+role text not null, channel text not null default 'sms', body text not null,
+sent_at timestamptz not null default now(),
+embedding vector(1536)
+```
+ivfflat index on embedding column.
 
-New module `packages/ui/src/lib/format.ts`:
+**webhook_deliveries** (idempotency log — no RLS, service_role only):
+```
+id uuid pk, merchant_id uuid fk→merchants, topic text not null,
+shopify_webhook_id text unique not null, payload jsonb not null,
+status text not null default 'pending', processed_at timestamptz,
+error_message text, received_at timestamptz not null default now()
+```
 
-- `formatCurrency(cents: number, opts?: { locale?: string; currency?: string }): string` — default `en-US` + `USD`, thousands separator, no decimals unless cents > 0
-- `formatDate(input: string | Date, format: 'short' | 'long' | 'iso'): string` — `short` → "5 May 2026", `long` → "Tuesday, 5 May 2026", `iso` → "2026-05-05"
-- `formatRelativeTime(input: string | Date): string` — "2m", "1h", "yesterday", "3d", "Mon 5 May" (anything older than 7 days renders as `short`)
-- Unit tests for every branch in `packages/ui/src/lib/format.test.ts`
+### 2. TypeScript types
 
-Sweep every surface in `apps/web/app/(app)/**` and replace inline formatting (`${value}`, `value.toLocaleString()`, etc.) with the helpers. CI should grep-fail if `toLocaleString` or hardcoded `$` interpolation appears outside `format.ts`.
+Regenerate `packages/db/src/types.ts` to reflect the new tables. Since `supabase gen types` requires a live connection that may not be available, types are written to exactly match the migration schema and committed. A `pnpm db:types` script runs `gen-types.mjs` and should produce an identical file when run against the live DB.
 
-### 5. Number typography — Instrument Serif for hero only
+### 3. Webhook HMAC verification for topic payloads
 
-- New component `packages/ui/src/components/hero-metric.tsx`: large Instrument Serif numeral with a label above. Used only for the single largest metric per page (e.g., "Total recovered $47,283" on Dashboard, "Total recovered $47,283" on Attribution).
-- Everything else (secondary metrics, table values, inline counts) uses Geist Sans with `font-variant-numeric: tabular-nums`.
-- Update Dashboard, Attribution, Billing, Campaigns pages: identify the one hero metric, wrap in `<HeroMetric>`, everything else uses default body type.
-- Document the rule in `DESIGN-SYSTEM.md` under "Typography".
+Shopify webhook payloads use a different HMAC scheme than OAuth callbacks:
+- Header: `X-Shopify-Hmac-Sha256` (Base64 of HMAC-SHA256 of the raw body)
+- Secret: `SHOPIFY_API_SECRET`
+- Must compare with timing-safe equality
 
-### 6. Card padding audit
+Add `verifyWebhookHmac(rawBody: Buffer, hmacHeader: string, secret: string): boolean` to `packages/shopify/src/hmac.ts`. Unit test: valid signature passes, tampered body fails, missing header fails, wrong secret fails.
 
-- Audit every card in `packages/ui/src/components/card.tsx` consumers
-- Standardize on `p-6` for elevated cards, `p-4` for inline / list-item cards
-- Fix the Billing "Usage this period" overflow (the visible clipping of the heading text)
-- Card body should never abut card edge — minimum `pr-6` for content
+### 4. Webhook delivery infrastructure
 
-### 7. Sidebar — counts policy + plan badge
+New file `apps/web/app/api/shopify/webhooks/route.ts`:
+- Reads raw body (disables body parser via `export const config`)
+- Verifies HMAC — returns 401 on failure, no processing
+- Reads `X-Shopify-Topic` header
+- Looks up `merchant_id` from `shopify_shop_domain` header (`X-Shopify-Domain`)
+- Writes a `webhook_deliveries` row (idempotency check: if `shopify_webhook_id` already exists, return 200 immediately)
+- Dispatches to topic-specific handler
+- Updates `webhook_deliveries.status` to `processed` or `failed`
+- Always returns 200 (Shopify retries on non-200; a processing error should not cause retries)
 
-- Counts shown only on data-bearing nav items where the count is meaningful: Lapsed, Campaigns, Conversations
-- No counts on: Dashboard, Attribution, Billing, Settings
-- Document the rule as a code comment in the sidebar component
-- Remove the "Lapsed Test / Starter · 5k msgs" plan badge from the Conversations page sidebar. Sprint 03 will reintroduce it as a global sidebar footer once real plan data is wired.
+### 5. Webhook handlers — customers
 
-### 8. Accessibility
+Topic handlers in `apps/web/app/api/shopify/webhooks/handlers/`:
 
-- Visible focus ring on every interactive element: `focus-visible:ring-2 ring-lavender-500 ring-offset-2 ring-offset-cream-50`
-- `aria-label` on every icon-only button (help, bell, avatar)
-- Skip-to-content link at the top of `apps/web/app/(app)/layout.tsx`, visible on focus only
-- Run `pnpm test:a11y` (axe-core integration) as part of CI for the six app routes. No serious or critical violations allowed; moderate violations get a tracked issue.
+`customers-create.ts` and `customers-update.ts`:
+- Parse Shopify customer payload
+- Write a `customer_events` row (`event_type: 'customer_created'` or `'customer_updated'`, `source: 'shopify_webhook'`, `payload: <raw shopify payload>`)
+- Upsert into `customers` (INSERT ... ON CONFLICT DO UPDATE) with current values from the event payload
+- Upsert into `orders` table for any orders included in the payload
 
-### 9. Tests
+### 6. Webhook handlers — orders
 
-- Storybook stories updated / added for: Button (all variants with contrast assertions), HeroMetric, RevenueChart (compact + full), Topbar (with all three dropdowns open), Card (all padding variants)
-- New Playwright e2e in `apps/web/e2e/topbar.spec.ts`: opens each topbar dropdown, asserts contents, asserts keyboard navigation works
-- Visual regression diff via Playwright `toHaveScreenshot` for Dashboard, Billing, Attribution, Conversations — baseline screenshots updated and committed
-- `pnpm test` includes new format helper unit tests
-- a11y scan via `@axe-core/playwright` for the six app routes
+`orders-paid.ts`:
+- Parse Shopify order payload
+- Write an `order_events` row (`event_type: 'order_paid'`, `source: 'shopify_webhook'`)
+- Upsert into `orders`
+- Update `customers` row: increment `total_order_count`, add order total to `total_ltv_cents`, update `last_order_at`
+- Write a `customer_events` row (`event_type: 'order_placed'`) — order activity is a customer memory event
 
-## Out of scope (do not touch — these are later sprints)
+`app-uninstalled.ts`:
+- Marks `merchants.uninstalled_at = now()`
+- Does not delete data (data retained for potential reinstall)
 
-- **Settings page fixture leak** (`bondi-goods.myshopify.com` showing instead of real shop) — Sprint 03 (data wiring)
-- **Empty states** for any screen — Sprint 03
-- **Loading skeletons / error states** for fetch boundaries — Sprint 03
-- **Onboarding flow refresh** — Sprint 05
-- **Brand voice character count + AI suggestion** — Sprint 05
-- **Email as channel** — post-v1 backlog
-- **Mobile responsive pass** — post-v1 backlog
-- **Cmd+K global search** — post-v1 backlog
-- **Dark mode** — post-v1 backlog
-- Any change to API routes, server actions, database schema, Shopify webhooks, encryption, or auth flow
-- Real plan data in sidebar footer (deferred to Sprint 03)
-- Real notification feed in bell dropdown (deferred to Sprint 03)
+### 7. Shopify backfill
+
+New API route `apps/web/app/api/shopify/backfill/route.ts` (POST, authenticated as merchant):
+- Requires a valid merchant session (same auth as other merchant routes)
+- Accepts `{ resource: 'customers' | 'orders', cursor?: string }` body
+- Fetches one page (250 items) from Shopify Admin REST API using the merchant's decrypted access token
+- For customers: writes `customer_events` + upserts `customers`
+- For orders: writes `order_events` + upserts `orders`
+- Returns `{ nextCursor: string | null, count: number }` for the caller to paginate
+- Rate-limit aware: Shopify REST is 40 req/min; the route does not self-throttle but returns the `Retry-After` header if Shopify responds 429
+
+Backfill trigger: called from the onboarding flow's "Connect Shopify" step completion (onboarding page fires `POST /api/shopify/backfill` for both resources sequentially, polling until `nextCursor` is null).
+
+### 8. Customer event write helpers
+
+`packages/core/src/customer-events.ts`:
+- `appendCustomerEvent(opts): Promise<void>` — validates and writes to `customer_events`
+- `appendOrderEvent(opts): Promise<void>` — writes to `order_events`
+- Typed event schemas via Zod: `CustomerEventType`, `OrderEventType` enums
+- All event writes go through these helpers — no direct table inserts scattered across handlers
+
+### 9. Materialised customer profile regeneration
+
+`packages/core/src/materialize-customer.ts`:
+- `materializeCustomer(merchantId, shopifyCustomerGid, serviceClient)`: reads all `customer_events` and `order_events` for a customer, rebuilds the `customers` row from scratch, increments `profile_version`
+- Called synchronously after each webhook handler (Sprint 03: eager-refresh on event receipt; Sprint 04 will add nightly batch)
+- Returns the new `customers` row
+
+### 10. DB read helpers for merchant pages
+
+`packages/db/src/queries.ts`:
+- `getLapsedCustomers(merchantClient, { limit, cursor }): Promise<{data, nextCursor}>`
+- `getCustomer(merchantClient, shopifyCustomerGid): Promise<CustomerRow | null>`
+- `getMerchantSummary(serviceClient, merchantId): Promise<MerchantSummaryRow>`
+
+These are thin wrappers over Supabase queries. No business logic here.
+
+### 11. Fixture-to-real-data sweep — lapsed customers
+
+`apps/web/app/app/lapsed/page.tsx` and `apps/web/app/app/lapsed/[id]/page.tsx`:
+- Replace `@lapsed/fixtures` imports with DB queries via `getLapsedCustomers` / `getCustomer`
+- Pass Suspense boundary around the data-dependent section
+- Loading skeleton: `<LapsedCustomersSkeleton />` (new component in `packages/ui/src/components/skeletons/`)
+- Empty state: "No lapsed customers identified yet." with a sub-caption explaining when the agent classifies customers (Sprint 04)
+
+### 12. Fixture-to-real-data sweep — dashboard and settings
+
+`apps/web/app/app/page.tsx`:
+- `getMerchantSummary` for total lapsed count, last-updated timestamp
+- Campaigns and conversations panels remain fixture-backed with a visible `[demo data]` caption until Sprint 06 wires them
+- Loading skeleton on the hero metric section
+
+`apps/web/app/app/settings/page.tsx`:
+- Replace hardcoded `bondi-goods.myshopify.com` with real shop domain from merchant session
+- Show `last_backfill_at` from merchant row (add this column in the migration) and a "Re-sync" button that triggers backfill
+
+### 13. Loading and empty states — remaining routes
+
+For every route that still uses fixtures (campaigns, conversations, attribution, billing):
+- Add a `[demo data]` caption on the panel header so the merchant understands the data is illustrative
+- Ensure these routes render without errors when the real DB tables exist but are empty
+
+For routes with real data fetches (lapsed, dashboard, settings):
+- Suspense loading skeletons per section
+- Error boundary component: `apps/web/app/app/_components/data-error.tsx` — shown when a DB query throws
+
+### 14. Tests
+
+- `packages/db/__tests__/rls.test.ts` extended: cross-merchant isolation tests for `customers`, `orders`, `customer_events`, `order_events` tables
+- `packages/shopify/__tests__/hmac.test.ts` extended: `verifyWebhookHmac` tests — valid passes, tampered body fails, missing header fails, wrong secret fails
+- `packages/core/__tests__/customer-events.test.ts`: unit tests for `appendCustomerEvent`, `appendOrderEvent` — validates event structure, rejects invalid payloads
+- `packages/core/__tests__/materialize-customer.test.ts`: unit tests for `materializeCustomer` — event log with 3 orders produces correct profile row
+- Webhook handler integration tests (vitest): valid payload + valid HMAC → processes; tampered HMAC → 401; duplicate `shopify_webhook_id` → 200 idempotent skip
+
+### 15. HANDOFF.md
+
+Written at sprint end: rubric scores, any deferred items, failure modes encountered, and the exact `psql` command to apply the migrations.
+
+---
+
+## Out of scope
+
+Do not touch these in Sprint 03. They are explicitly later sprints.
+
+- **Sprint 04**: Cadence calculation, lapsed classification, scoring engine (Haiku batch). `lapsed_score`, `lapsed_at` columns exist in the schema but are null — Sprint 04 populates them.
+- **Sprint 05**: Onboarding flow refresh, AI-suggested brand voice, storefront crawl.
+- **Sprint 06**: SMS sending, two-way conversation engine, opt-out registry, Twilio inbound webhooks. Conversations table exists but messages are not generated.
+- **Sprint 07**: AI Campaign Designer, bandit state, Thompson sampling. Campaign tables are post-v1 schema additions.
+- **Sprint 08**: Attribution reconciliation, Stripe billing, holdout control groups, usage metering. `attributed_order_gid` and `attributed_revenue_cents` columns exist but are null.
+- **Sprint 09**: Performance pricing math, incrementality factor. Not touched here.
+- **Webhook handlers for GDPR mandatory topics** (`customers/data_request`, `customers/redact`, `shop/redact`): post-v1 backlog.
+- **pgvector background embedding job**: columns and indices exist; the actual embedding generation from Voyage AI / OpenAI is wired in Sprint 06 when conversation messages first exist.
+- **Conversation messages**: no messages are created in Sprint 03. The table and embedding column exist for Sprint 06.
+
+---
 
 ## Acceptance criteria
 
-Every box must be checked with evidence in the PR description (screenshot, test output, or file path).
+Every box must be checked with evidence in the PR description.
 
-- [ ] Primary button text is cream on ink (not ink on ink) across all six app routes — screenshot of each
-- [ ] Topbar height is 56px exactly — DOM inspector screenshot
-- [ ] Topbar icons are 20px — DOM inspector screenshot
-- [ ] Notification dot is 8px, positioned top-right of bell, not floating outside — screenshot
-- [ ] ? button opens new tab to `https://docs.lapsed.ai` — e2e test
-- [ ] Bell button opens dropdown with empty-state copy — e2e test + screenshot
-- [ ] Avatar button opens dropdown with Account / Switch shop (disabled) / Sign out — e2e test + screenshot
-- [ ] Sign out clears session and redirects appropriately — e2e test
-- [ ] Page title appears only as H1 in page content, never in topbar — screenshot of every route
-- [ ] Single `<RevenueChart>` component used in both Dashboard hero and Attribution — file diff
-- [ ] Chart renders smooth curve (no stair-step), with axes and hover tooltip — screenshot
-- [ ] `formatCurrency`, `formatDate`, `formatRelativeTime` exist in `packages/ui/src/lib/format.ts` with full unit test coverage — test output
-- [ ] No inline currency / date / timestamp formatting remains in `apps/web/app/(app)/**` — grep output proving zero matches
-- [ ] `<HeroMetric>` component exists and is used exactly once per page (the largest single metric) — file diff
-- [ ] All non-hero numbers render in Geist tabular — visual verification
-- [ ] Billing "Usage this period" card no longer clips heading text — screenshot
-- [ ] All elevated cards have consistent padding — visual review
-- [ ] Sidebar counts present only on Lapsed, Campaigns, Conversations — screenshot
-- [ ] Plan badge removed from Conversations sidebar — screenshot
-- [ ] Every interactive element has a visible focus ring when tabbed to — keyboard nav video or screenshot sequence
-- [ ] Every icon-only button has `aria-label` — code search proving 100% coverage
-- [ ] Skip-to-content link present and works — keyboard nav test
-- [ ] `pnpm test:a11y` reports zero serious/critical violations on all six routes — test output
-- [ ] Visual regression baselines committed for Dashboard, Billing, Attribution, Conversations — file diff
-- [ ] Storybook updated with new and changed stories — screenshot of Storybook nav
+**Schema and architecture:**
+- [ ] `pgvector` extension enabled in migration 0002 — show migration file
+- [ ] `customer_events` table is append-only: UPDATE trigger raises exception — show trigger SQL and test output proving it fires
+- [ ] `order_events` table is append-only: same enforcement — same evidence
+- [ ] `conversations.embedding` column is `vector(1536)` with ivfflat index — show `\d conversations` output
+- [ ] `conversation_messages.embedding` column is `vector(1536)` with ivfflat index — same
+- [ ] `channel` column in `conversations` and `conversation_messages` is `text` (not hardcoded enum), default `'sms'` — show column definition
+- [ ] RLS enabled on every new table — show `\d+` output or policy list
+
+**Cross-merchant isolation:**
+- [ ] Customer from merchant A cannot be read by a JWT scoped to merchant B — test output from `packages/db/__tests__/rls.test.ts`
+- [ ] Same isolation verified for `orders`, `customer_events`, `order_events` — test output
+
+**Webhook security:**
+- [ ] `verifyWebhookHmac` rejects tampered body — unit test output
+- [ ] `verifyWebhookHmac` rejects missing `X-Shopify-Hmac-Sha256` header — unit test output
+- [ ] Webhook route returns 401 on bad HMAC, 200 on valid HMAC — integration test output
+- [ ] Duplicate `shopify_webhook_id` returns 200 without reprocessing — test output
+
+**Data ingestion:**
+- [ ] `customers/create` webhook writes a `customer_events` row and upserts `customers` — test output
+- [ ] `orders/paid` webhook writes an `order_events` row, upserts `orders`, and updates `customers.total_ltv_cents` — test output
+- [ ] Backfill route paginates correctly and respects cursor — test output
+- [ ] `materializeCustomer` produces correct `customers` row from a sequence of events — unit test output
+
+**UI states:**
+- [ ] Lapsed customers list shows real DB data (empty state when no customers) — screenshot
+- [ ] Dashboard shows real `total_order_count` and `total_ltv_cents` from DB — screenshot
+- [ ] Settings page shows real shop domain (no hardcoded `bondi-goods.myshopify.com`) — screenshot
+- [ ] Loading skeleton renders on lapsed list while data fetches — screenshot
+- [ ] Error boundary renders on lapsed list when DB throws — screenshot
+- [ ] Fixture-backed routes (campaigns, conversations, attribution, billing) show `[demo data]` caption — screenshot
+
+**CI gates:**
+- [ ] `pnpm typecheck` exits 0
+- [ ] `pnpm lint` exits 0
+- [ ] `pnpm test` all passing (including new RLS, HMAC, and core tests)
+- [ ] `pnpm build` exits 0 for all three apps
+- [ ] `pnpm grep:pii` clean — no phone numbers, access tokens, or shop domains in logs
+
+---
 
 ## Definition of done
 
-- [ ] All acceptance criteria above checked with evidence in the PR description
+- [ ] All acceptance criteria checked with evidence in PR description
 - [ ] `pnpm typecheck` exits 0
 - [ ] `pnpm lint` exits 0
 - [ ] `pnpm test` all passing
 - [ ] `pnpm build` exits 0 for all three apps
-- [ ] `pnpm test:e2e` all passing including new topbar.spec.ts
-- [ ] `pnpm test:a11y` zero serious/critical violations
 - [ ] `pnpm grep:pii` clean
-- [ ] `pnpm vercel:env:check` clean (no env changes expected this sprint)
-- [ ] No new dependencies added without justification in PR description
-- [ ] No hardcoded colors / fonts / radii outside `packages/ui` — verified by grep
-- [ ] HANDOFF.md committed at sprint end with rubric scores
-- [ ] PR opened, evaluator session run, every rubric criterion scored 3, then squash-merged to main
+- [ ] `pnpm vercel:env:check` clean (new env vars declared in turbo.json)
+- [ ] `HANDOFF.md` committed with rubric scores and migration instructions
+- [ ] PR opened, evaluator session run, every rubric criterion scored 3, squash-merged to main
 
-## Quality rubric for this sprint
+---
+
+## Quality rubric (10 criteria, scored 0–3)
 
 Scored 0–3 by the evaluator session. All must score 3 before merge.
 
-1. **Token discipline** — Every visual change uses Vellum tokens; no hardcoded values
-2. **Format helpers used everywhere** — Zero inline currency / date / timestamp formatting in `apps/web/app/(app)/**`
-3. **Chart unification** — Both Dashboard and Attribution use the same component; no two implementations
-4. **Accessibility** — Focus rings visible, aria-labels present, skip-to-content works, axe scan clean
-5. **Storybook coverage** — Every new or changed component has a story
-6. **Test coverage** — Format helpers have unit tests for every branch; topbar interactions have e2e tests
-7. **Visual regression** — Baselines committed; diffs reviewed; no unintended changes
-8. **Scope discipline** — Nothing from "Out of scope" was touched. No data wiring, no backend, no Sprint 03 work.
-9. **PR hygiene** — Conventional commits, clean diff, no unrelated changes, no console.log left behind
-10. **No regressions** — All existing tests still pass; no new TypeScript errors
+1. **Event-sourcing correctness** — `customer_events` and `order_events` are truly append-only. Trigger prevents UPDATE/DELETE. No code path mutates an event row. Profile regeneration reads events and writes the `customers` snapshot, never patching events.
+2. **pgvector correctness** — `vector(1536)` column exists on `conversations` and `conversation_messages`. ivfflat index created. `channel` column is text, not enum. No hardcoded "sms" in table definitions or schema constraints.
+3. **Webhook HMAC** — Every webhook entry point verifies the Shopify HMAC before any processing. Tampered-signature test exists and passes. 401 on failure, 200 on success.
+4. **Tenancy isolation** — RLS enabled on all 8 new tables. Cross-merchant tests exist and pass for `customers`, `orders`, `customer_events`, `order_events`.
+5. **Backfill correctness** — Cursor-based pagination produces no duplicates (upsert-safe). Backfill and webhook ingest produce identical `customers` rows for the same customer.
+6. **TypeScript types** — `packages/db/src/types.ts` reflects all new tables. Strict TypeScript compiles without errors. Zero `any`.
+7. **No PII in logs** — grep:pii clean. No phone, email, access token, shop domain, or order detail in any `console.log` or structured log output.
+8. **UI loading/empty/error states** — Every route with a real data fetch has a Suspense boundary, a loading skeleton, an empty state, and an error boundary. No route crashes on empty DB.
+9. **Scope discipline** — Nothing from "Out of scope" was touched. No scoring logic, no SMS, no campaign creation, no attribution math, no billing.
+10. **New env vars declared** — Any new environment variables are in `turbo.json` `@lapsed/web#build.env` and in `pnpm vercel:env:check`'s expected list.
+
+---
+
+## 15-chunk implementation sequence
+
+Each chunk is one commit. Architecture-guardian + code-reviewer + test-coverage-analyzer run in parallel after every chunk. Any Critical or High finding blocks the next chunk.
+
+**Foundation:**
+1. `feat(db): migration 0002 — pgvector, memory graph schema, append-only triggers, RLS` — SQL migration + updated TypeScript types
+2. `test(db): cross-merchant RLS isolation tests for all Sprint 03 tables` — extend `packages/db/__tests__/rls.test.ts`
+3. `feat(shopify): verifyWebhookHmac + unit tests` — extend `packages/shopify/src/hmac.ts` + `__tests__/hmac.test.ts`
+
+**Data ingestion:**
+4. `feat(webhooks): delivery infrastructure — route, HMAC gate, idempotency log` — `apps/web/app/api/shopify/webhooks/route.ts`
+5. `feat(webhooks): customers/create and customers/update handlers` — handler files + integration tests
+6. `feat(webhooks): orders/paid handler + app/uninstalled handler` — handler files + integration tests
+7. `feat(backfill): Shopify historical data backfill route + onboarding trigger` — `apps/web/app/api/shopify/backfill/route.ts`
+
+**Memory graph:**
+8. `feat(core): customer and order event write helpers (appendCustomerEvent, appendOrderEvent)` — `packages/core/src/customer-events.ts` + tests
+9. `feat(core): materializeCustomer — profile regeneration from event log` — `packages/core/src/materialize-customer.ts` + tests
+
+**Query layer + env:**
+10. `feat(db): DB read helpers for merchant pages (getLapsedCustomers, getCustomer, getMerchantSummary)` — `packages/db/src/queries.ts`
+11. `chore(env): declare new env vars in turbo.json + vercel:env:check` — SHOPIFY_WEBHOOK_SECRET, SUPABASE_SERVICE_ROLE_KEY (if not already present)
+
+**Fixture sweep:**
+12. `feat(web): lapsed customers list + detail — real data, Suspense, skeleton, empty state` — replace fixture imports
+13. `feat(web): dashboard + settings — real data, merchant summary, shop domain, backfill trigger`
+14. `feat(web): loading/empty/error states on all 6 routes; demo-data captions on fixture-backed panels`
+
+**Close:**
+15. `docs(sprint-03): HANDOFF.md — rubric scores, migration instructions, failure modes`
+
+---
 
 ## Evaluator session prompt
 
 After implementation, open a fresh Claude Code session with this exact prompt:
 
 ```
-You are a skeptical senior engineer doing QA on Sprint 02.5 (UI Polish) of lapsed.ai. Your job is to find everything wrong, incomplete, or inconsistent. Do not approve anything unless you are certain it meets the standard.
+You are a skeptical senior engineer doing QA on Sprint 03 (Data Ingestion and Customer Memory Graph) of lapsed.ai. Your job is to find everything wrong, incomplete, or inconsistent. Do not approve anything unless you are certain it meets the standard.
 
-Read in order: CLAUDE.md, DESIGN-SYSTEM.md, SPRINT.md, HANDOFF.md.
+Read in order: CLAUDE.md, DESIGN-SYSTEM.md, PRODUCT.md, SPRINT.md, HANDOFF.md.
 
 Then run and report exact output:
 - pnpm typecheck
 - pnpm lint
 - pnpm test
 - pnpm build
-- pnpm test:e2e
-- pnpm test:a11y
 - pnpm grep:pii
 - pnpm vercel:env:check
-- git diff main --stat (to see scope of changes)
-- grep -rE "\\.toLocaleString\\(|\\$\\{.*\\.toFixed" apps/web/app (to verify format helpers are used)
+- git diff main --stat
 
-Then verify EVERY acceptance criterion in SPRINT.md against actual code — do not trust HANDOFF.md claims. Open the relevant files, check the actual implementation, and confirm.
+Then verify EVERY acceptance criterion in SPRINT.md against actual code — do not trust HANDOFF.md claims.
 
-Score each of the 10 rubric criteria 0-3 with justification. Pay special attention to:
-- Did the sprint touch anything in "Out of scope"? (Especially: no data wiring, no backend, no empty states, no onboarding changes.)
-- Are the format helpers actually used everywhere, or just defined and partially adopted?
-- Does the chart unification mean one component, or two components that look similar?
-- Are aria-labels real and descriptive, or copy-pasted "button"?
+Pay special attention to:
+1. Are customer_events and order_events truly append-only? Show the trigger SQL and a test that fires it.
+2. Does the webhook route return 401 on a tampered HMAC before any DB write? Show the test.
+3. Does materializeCustomer read from events (not mutate them)? Trace the code path.
+4. Does conversations.embedding exist as vector(1536)? Run \d conversations.
+5. Is channel stored as text, never as a hardcoded enum or 'sms'-only constraint?
+6. Do all new tables have RLS enabled? Do the cross-merchant tests pass?
+7. Is there any "Lapsed AI", "Recovered revenue", "Lapsed cohort" copy in the new UI states? (Those were Sprint 02.6 fixes — ensure they didn't regress here.)
 
-Report PASS or REMEDIATE per criterion. If any criterion is below 3, list the exact files and lines that need fixing. Do not suggest the sprint is complete unless every criterion scores 3.
+Score each of the 10 rubric criteria 0–3 with justification. Report PASS or REMEDIATE per criterion.
+Do not suggest the sprint is complete unless every criterion scores 3.
 ```
-
-## Exact next action
-
-Open Claude Code in worktree mode pointed at `C:\dev\lapsed`, create branch `sprint-02.5/ui-polish`, and start with criterion 1 (primary button contrast fix in `packages/ui/src/components/button.tsx`) since it's the smallest change, has the highest visual impact, and unblocks visual regression baseline capture for the rest of the sprint.
-
-Suggested chunking, in order:
-
-1. Button contrast fix + Storybook story + unit test → commit
-2. Format helpers module + unit tests → commit
-3. Sweep inline formatting in app routes to use helpers → commit
-4. HeroMetric component + sweep pages → commit
-5. RevenueChart component + replace Dashboard + Attribution usages → commit
-6. Topbar height + icon + dot fixes → commit
-7. Topbar dropdown wiring (?, bell, avatar) + e2e tests → commit
-8. Card padding audit + Billing fix → commit
-9. Sidebar counts + plan badge cleanup → commit
-10. Focus rings + aria-labels + skip-to-content + a11y test pass → commit
-11. Visual regression baselines + final sweep → commit
-12. HANDOFF.md → commit, open PR
