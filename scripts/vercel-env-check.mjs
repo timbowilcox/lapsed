@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 // Verify that the Vercel project `lapsed-web` has every env var that
-// the production app expects. Fails CI when a value is missing on any
-// of development, preview, or production.
+// the production app expects AND that turbo.json's @lapsed/web#build env
+// array declares them all. Fails CI on either gap.
 //
-// Reads the expected list from EXPECTED below — keep in sync with
-// apps/web/app/lib/env.ts's required() calls.
+// Reads the expected list from EXPECTED_ALL — keep in sync with
+// apps/web/app/lib/env.ts's required() calls and turbo.json.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const PROJECT_NAME = "lapsed-web";
+
+// ── turbo.json parity check ────────────────────────────────────────────────
+// Fail immediately if turbo.json's @lapsed/web#build env array doesn't
+// declare every var in EXPECTED_ALL. This prevents the Vercel warning
+// "env var stripped by Turborepo" from silently reappearing.
+
+const turboPath = join(process.cwd(), "turbo.json");
+const turbo = JSON.parse(readFileSync(turboPath, "utf8"));
+const turboEnv = new Set(turbo.tasks?.["@lapsed/web#build"]?.env ?? []);
 
 const EXPECTED_ALL = [
   "SHOPIFY_API_KEY",
@@ -26,6 +35,18 @@ const EXPECTED_ALL = [
   "SUPABASE_DB_URL",
   "TOKEN_ENCRYPTION_KEY",
 ];
+
+const missingFromTurbo = EXPECTED_ALL.filter((k) => !turboEnv.has(k));
+if (missingFromTurbo.length > 0) {
+  console.error("turbo.json @lapsed/web#build env is missing:");
+  for (const k of missingFromTurbo) console.error(`  ✗ ${k}`);
+  console.error(
+    "\nAdd these to turbo.json tasks[\"@lapsed/web#build\"].env to prevent " +
+      "Turborepo from stripping them from the Vercel build environment."
+  );
+  process.exit(4);
+}
+console.log("turbo:env:check — @lapsed/web#build env array matches EXPECTED_ALL ✓\n");
 
 const ENVIRONMENTS = ["development", "preview", "production"];
 
