@@ -76,11 +76,33 @@ export async function getMerchantFromSession(): Promise<SessionMerchant | null> 
  * Server-side guard: load the merchant or redirect to the install
  * screen. Server components for authenticated routes await this
  * before rendering.
+ *
+ * Callers should pass their page's `searchParams` so that any
+ * Shopify-supplied params (`shop`, `host`, `embedded`, …) survive the
+ * redirect — the install page reads them to drive the embedded-context
+ * auto-redirect to OAuth.
  */
-export async function requireMerchant(): Promise<SessionMerchant> {
+export async function requireMerchant(opts?: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}): Promise<SessionMerchant> {
   const merchant = await getMerchantFromSession();
-  if (!merchant) redirect("/app/auth/install");
+  if (!merchant) {
+    const qs = buildInstallQueryString(opts?.searchParams);
+    redirect(qs ? `/app/auth/install?${qs}` : "/app/auth/install");
+  }
   return merchant;
+}
+
+function buildInstallQueryString(
+  searchParams?: Record<string, string | string[] | undefined>,
+): string {
+  if (!searchParams) return "";
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams)) {
+    if (typeof v === "string") out.set(k, v);
+    else if (Array.isArray(v) && typeof v[0] === "string") out.set(k, v[0]);
+  }
+  return out.toString();
 }
 
 function prettifyShopName(domain: string): string {
