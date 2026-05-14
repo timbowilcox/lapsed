@@ -7,6 +7,14 @@ export type LapsedSupabaseClient = SupabaseClient<Database>;
 
 export { encryptToken, decryptToken, decodeEncryptionKey } from "./encryption";
 
+export {
+  getLapsedCustomers,
+  getCustomer,
+  getMerchantSummary,
+  type LapsedCustomersPage,
+  type MerchantSummaryRow,
+} from "./queries";
+
 const ROLE = "authenticated";
 const SESSION_TTL_SECONDS = 3600; // align with Supabase auth.jwt_exp
 
