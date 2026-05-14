@@ -16,8 +16,14 @@ import { requireMerchant } from "@/app/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  await requireMerchant();
+type RawSearchParams = Record<string, string | string[] | undefined>;
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<RawSearchParams>;
+}) {
+  await requireMerchant({ searchParams: await searchParams });
   const totalRevenue = attribution.totalRecoveredRevenue.toLocaleString();
   const totalOrders = attribution.totalRecoveredOrders;
   const liveCampaigns = campaigns.filter((c) => c.status === "live").length;

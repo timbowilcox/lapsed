@@ -6,6 +6,24 @@
 
 ---
 
+## Post-Sprint-02 polish (PR `fix/root-embedded-entry`)
+
+Shopify loads the embedded app iframe at `https://app.lapsed.ai/?shop=...&host=...&embedded=1&hmac=...&timestamp=...` — the **root path** with query params, not `/app/auth/install`. The Sprint 01 root page was `redirect("/app")` (no async, no searchParams), which stripped every query param. `/app` then called `requireMerchant()` which redirected to `/app/auth/install` — also without params — so by the time the install page rendered, `?shop=` and `?host=` were gone and the previous `fix/install-embedded-context` auto-redirect never triggered.
+
+The fix has four parts:
+
+1. **`apps/web/app/lib/root-redirect.ts`** — pure `resolveRootRedirect({ searchParams, verifyHmac, lookupMerchant })` returning a redirect target. Branches: no shop or invalid HMAC → `/app` (unchanged direct-visit behavior); valid HMAC + merchant installed → `/app?<full query>` so App Bridge can read shop/host/id_token; valid HMAC + merchant missing or uninstalled → `/api/shopify/install?shop=...&host=...`. Crucially, the merchant lookup is **never called** for untrusted `?shop=`, so attackers can't probe shop existence via a redirect oracle.
+
+2. **`apps/web/app/page.tsx`** — now an async server component that reads `searchParams`, fast-paths to `/app` when no `?shop=` is present, and otherwise delegates to `resolveRootRedirect` with the real `verifyOAuthHmac` (from `@lapsed/shopify`) and a Supabase secret-key `maybeSingle` lookup on `merchants` filtered by `shopify_shop_domain` (matching the pattern in `session.ts:getMerchantFromSession`). `installed = !!data && data.uninstalled_at === null`.
+
+3. **`apps/web/app/lib/session.ts`** — `requireMerchant()` gains an optional `{ searchParams }` arg. When the session is missing it now builds a query string from those params and appends it to `/app/auth/install`, so the install page can see `?shop=` / `?host=` and run its existing embedded-context auto-redirect to OAuth. `apps/web/app/app/page.tsx` (the dashboard) is updated to pass its own searchParams through. Swept the whole `apps/web` tree for other `redirect("/app/auth/install")` call sites — only the one in `session.ts` exists.
+
+4. **`apps/web/__tests__/root-redirect.test.ts`** — 10 tests covering: shop+installed → `/app` with all 5 params preserved, shop+missing → `/api/shopify/install` with shop+host only (no hmac/embedded leakage), shop+uninstalled → install, no shop → `/app` (lookup never called), invalid HMAC → `/app` (lookup never called, prevents oracle attack), and the `toURLSearchParams` helper for Next's raw searchParams shape.
+
+The HMAC check uses `verifyOAuthHmac` from `packages/shopify/src/hmac.ts` — the same verifier the OAuth callback uses. Shopify's embedded-entry HMAC scheme matches the OAuth-callback scheme (sorted query string excluding `hmac`, HMAC-SHA256 with API secret), so no new verifier was needed.
+
+---
+
 ## Post-Sprint-02 polish (PR `fix/install-embedded-context`)
 
 When a merchant opens the embedded app via the Shopify Admin sidebar (`admin.shopify.com/store/<shop>/apps/<app>`), Shopify passes `?host=` (a base64-encoded admin URL) but **not** `?shop=`. The Sprint 02 install button only read `?shop=`, so it rendered disabled and App Bridge threw `missing required configuration fields: shop`, producing cross-origin postMessage failures between `app.lapsed.ai` and `admin.shopify.com`.
