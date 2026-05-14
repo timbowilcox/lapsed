@@ -1,6 +1,13 @@
 // Foundations
 export { Icon, type IconName, type IconProps } from "./components/icon";
 export { cn } from "./lib/cn";
+export {
+  formatCurrency,
+  formatDate,
+  formatRelativeTime,
+  type CurrencyOptions,
+  type DateFormat,
+} from "./lib/format";
 
 // shadcn-style primitives with Vellum overrides
 export { Button, buttonVariants, type ButtonProps } from "./components/button";
