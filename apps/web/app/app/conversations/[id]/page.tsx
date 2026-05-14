@@ -59,7 +59,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
                       {m.role === "customer"
                         ? conversation.customerName
                         : m.role === "ai"
-                          ? "Lapsed AI"
+                          ? "lapsed.ai"
                           : "Merchant"}
                     </div>
                     <div className="text-body">{m.body}</div>

@@ -5,7 +5,7 @@ const features = [
   {
     icon: BarChart3,
     title: "Cadence, not guesses",
-    body: "We compute each shop's actual purchase cadence — so lapsed means lapsed for your customers, not a generic 60-day threshold.",
+    body: "lapsed.ai computes each shop's actual purchase cadence — so lapsed means lapsed for your customers, not a generic 60-day threshold.",
   },
   {
     icon: MessageCircle,

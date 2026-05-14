@@ -8,7 +8,7 @@ const steps = [
   {
     key: "connect",
     title: "Connect Shopify",
-    description: "We'll back-fill the last 24 months of orders, customers and products.",
+    description: "lapsed.ai back-fills the last 24 months of orders, customers and products.",
     icon: Plug,
     cta: "Confirm connection",
   },
@@ -16,7 +16,7 @@ const steps = [
     key: "cadence",
     title: "Set purchase cadence",
     description:
-      "We computed your repeat-buyer cadence at 38 days. Adjust if your category needs a different threshold.",
+      "Detected repeat-buyer cadence: 38 days. Adjust if your category needs a different threshold.",
     icon: Clock4,
     cta: "Use 38 days",
   },
@@ -24,7 +24,7 @@ const steps = [
     key: "first-campaign",
     title: "Launch your first campaign",
     description:
-      "We've drafted a 60-day win-back targeting 812 repeat buyers with a $20 offer.",
+      "The agent has drafted a 60-day win-back targeting 812 repeat buyers with a $20 offer.",
     icon: Send,
     cta: "Launch (mock)",
   },
