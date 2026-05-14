@@ -53,7 +53,7 @@ const SHOP_A = `rls-test-a-${Date.now()}.myshopify.com`;
 const SHOP_B = `rls-test-b-${Date.now()}.myshopify.com`;
 const ENCRYPTION_KEY = randomBytes(32);
 
-let env: Env;
+let env!: Env;
 let merchantIdA: string;
 let merchantIdB: string;
 
@@ -165,13 +165,52 @@ afterAll(async () => {
   const pg = new PgClient({ connectionString: env.dbUrl });
   await pg.connect();
   try {
-    // Cascade deletes: merchants → customers, orders, events, conversations, messages
+    // session_replication_role = 'replica' disables non-replica triggers for this
+    // session so that the append-only BEFORE DELETE triggers on customer_events and
+    // order_events don't block cleanup. Revert immediately after event-table deletes.
+    await pg.query(`set session_replication_role = 'replica'`);
+
+    // Delete in FK dependency order (leaf tables before parent tables).
+    // conversation_messages cascades from conversations, but explicit delete is safe.
     await pg.query(
-      `delete from public.merchants where shopify_shop_domain = any($1)`,
-      [[SHOP_A, SHOP_B]],
+      `delete from public.conversation_messages
+       where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.conversations where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.customer_events where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.order_events where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.orders where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.customers where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.products where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
     );
     await pg.query(
       `delete from public.webhook_deliveries where shopify_webhook_id = 'whid_test_rls'`,
+    );
+
+    await pg.query(`set session_replication_role = 'origin'`);
+
+    // Merchants last — all RESTRICT FKs are now satisfied.
+    await pg.query(
+      `delete from public.merchants where shopify_shop_domain = any($1)`,
+      [[SHOP_A, SHOP_B]],
     );
   } finally {
     await pg.end();
@@ -258,6 +297,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_events", () => {
       .from("customer_events")
       .select("shopify_customer_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_customer_gid === GID_A)).toBe(true);
   });
 
@@ -388,6 +428,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customers", () => {
       .from("customers")
       .select("shopify_customer_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_customer_gid === GID_A)).toBe(true);
   });
 
@@ -425,6 +466,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — order_events", () => {
       .from("order_events")
       .select("shopify_order_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_order_gid === ORDER_GID_A)).toBe(true);
   });
 
@@ -462,6 +504,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — orders", () => {
       .from("orders")
       .select("shopify_order_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_order_gid === ORDER_GID_A)).toBe(true);
   });
 
@@ -499,6 +542,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — products", () => {
       .from("products")
       .select("shopify_product_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_product_gid === PRODUCT_GID_A)).toBe(true);
   });
 
@@ -536,6 +580,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversations", () => {
       .from("conversations")
       .select("shopify_customer_gid");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.shopify_customer_gid === GID_A)).toBe(true);
   });
 
@@ -573,6 +618,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversation_messages", () => {
       .from("conversation_messages")
       .select("merchant_id");
     expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
     expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
   });
 
