@@ -34,7 +34,7 @@ Run both via `psql "$SUPABASE_DB_URL"` in order (0002 then 0003). The `supabase 
 
 ### Backfill route
 
-`POST /api/shopify/backfill` — HMAC-verified, cursor-based (500 customers/page), appends `customer_backfilled` + `order_paid` events, calls `materializeCustomer` per customer. Sets `merchants.last_backfill_at` on completion.
+`POST /api/shopify/backfill` — HMAC-verified, cursor-based (250 customers/page), appends `customer_backfilled` + `order_backfilled` events via `appendCustomerEvent`/`appendOrderEvent` helpers, calls `materializeCustomer` per customer. Sets `merchants.last_backfill_at` on completion.
 
 ### DB read helpers (`packages/db/src/queries.ts`)
 
@@ -65,7 +65,7 @@ Run both via `psql "$SUPABASE_DB_URL"` in order (0002 then 0003). The `supabase 
 
 ## Rubric scores (12 criteria, 0–3)
 
-1. **Tenancy isolation** — **3/3**: Merchant JWT scopes all `getLapsedCustomers` calls via RLS. `getCustomer`/`getCustomerOrders` add explicit `merchant_id` filter as defense-in-depth. Webhook handlers extract `merchantId` from HMAC-verified shop domain only. Service client (bypasses RLS) used only for `getMerchantSummary` (aggregate count, no customer PII returned to browser). URL param validated as `\d+` before GID construction.
+1. **Tenancy isolation** — **2/3**: Merchant JWT scopes all `getLapsedCustomers` calls via RLS. `getCustomer`/`getCustomerOrders` add explicit `merchant_id` filter as defense-in-depth. Webhook handlers extract `merchantId` from HMAC-verified shop domain only. Service client (bypasses RLS) used only for `getMerchantSummary` (aggregate count, no customer PII returned to browser). URL param validated as `\d+` before GID construction. Score is 2/3 rather than 3/3 because the 33 RLS tests in `packages/db/__tests__/rls.test.ts` skip in standard CI — they require a live Supabase project (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`). Score returns to 3/3 when these tests run against the dev project in CI or as part of evaluator runs. Command to run locally: `pnpm --filter @lapsed/db test:rls` (with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set).
 
 2. **Shopify HMAC on every callback + webhook** — **3/3**: All webhook handlers pass through HMAC verification in `route.ts` using `@lapsed/shopify`. Backfill route independently verifies HMAC. Rejection tests exist in `backfill-route.test.ts` and `webhooks-route.test.ts`.
 
@@ -117,6 +117,10 @@ Run both via `psql "$SUPABASE_DB_URL"` in order (0002 then 0003). The `supabase 
 5. **RLS integration tests skipped** (33 tests): `packages/db/__tests__/rls.test.ts` requires a live Supabase connection with `SUPABASE_DB_URL` set. Run separately against the dev project.
 
 6. **Cadence column** (`—` everywhere): Average inter-order gap is Sprint 04 scope.
+
+## Deliberate architectural deviations
+
+1. **`orders/paid` handler uses `increment_customer_order` RPC instead of `materializeCustomer`**: The SPRINT.md pattern says "call `materializeCustomer` synchronously after each webhook handler." The `orders/paid` handler intentionally deviates: it calls `increment_customer_order` (a SQL function that does `INSERT … ON CONFLICT DO UPDATE` with arithmetic) instead. This avoids a TOCTOU race under concurrent webhook deliveries for the same customer — if two `orders/paid` webhooks arrive simultaneously, a read-modify-write cycle through `materializeCustomer` would produce incorrect LTV totals. The nightly `materializeCustomer` batch (Sprint 04) recalculates from the full event log and self-corrects any transient drift. This deviation is correct and intentional; do not replace it with a `materializeCustomer` call without first adding a database-level advisory lock.
 
 ## Failure modes encoded (add to CLAUDE.md)
 

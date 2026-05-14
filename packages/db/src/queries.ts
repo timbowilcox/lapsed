@@ -100,7 +100,7 @@ export async function getMerchantSummary(
       .not("lapsed_at", "is", null),
     serviceClient
       .from("merchants")
-      .select("last_backfill_at, updated_at")
+      .select("last_backfill_at")
       .eq("id", merchantId)
       .maybeSingle(),
   ]);

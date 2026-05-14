@@ -39,7 +39,7 @@ export default async function DashboardPage({
   return (
     <MerchantShell pageTitle="Dashboard">
       <HeroMetric
-        label="Recovered revenue · last 30 days [demo data]"
+        label="Restored revenue · last 30 days [demo data]"
         pulse
         currency="$"
         value={totalRevenue}
@@ -104,7 +104,7 @@ export default async function DashboardPage({
                   status={c.status}
                   statusLabel={c.statusLabel}
                   revenue={c.recoveredRevenueDisplay}
-                  revenueLabel={c.status === "draft" ? "pending" : "recovered"}
+                  revenueLabel={c.status === "draft" ? "pending" : "restored"}
                 />
               </Link>
             ))}

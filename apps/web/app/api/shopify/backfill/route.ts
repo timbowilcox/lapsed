@@ -7,8 +7,8 @@ import {
   createServiceClient,
   decodeEncryptionKey,
   decryptToken,
-  type Json,
 } from "@lapsed/db";
+import { appendCustomerEvent, appendOrderEvent, materializeCustomer } from "@lapsed/core";
 import { serverEnv } from "@/app/lib/env";
 
 export const runtime = "nodejs";
@@ -84,10 +84,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let apiUrl: string;
 
   if (resource === "customers") {
+    // Shopify encodes the original query params (including fields=...) into the
+    // opaque cursor token — do not add &fields again on cursor pages or Shopify
+    // returns 400.
     apiUrl = cursor
       ? `${baseUrl}/customers.json?limit=${PAGE_SIZE}&page_info=${cursor}`
       : `${baseUrl}/customers.json?limit=${PAGE_SIZE}&fields=id,email,phone,first_name,last_name,tags,orders_count,total_spent,created_at,updated_at`;
   } else {
+    // Same cursor encoding behaviour applies to orders.
     apiUrl = cursor
       ? `${baseUrl}/orders.json?limit=${PAGE_SIZE}&page_info=${cursor}`
       : `${baseUrl}/orders.json?limit=${PAGE_SIZE}&status=any&fields=id,customer,total_price,financial_status,fulfilled_at,created_at`;
@@ -133,52 +137,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (resource === "customers") {
     const customers = (data.customers ?? []) as Array<{
       id: number;
-      email?: string | null;
-      phone?: string | null;
-      first_name?: string | null;
-      last_name?: string | null;
-      tags?: string;
-      orders_count?: number;
-      total_spent?: string;
       created_at?: string;
+      [key: string]: unknown;
     }>;
 
     for (const customer of customers) {
       if (!customer.id) continue;
       const gid = `gid://shopify/Customer/${customer.id}`;
-      const tags = customer.tags
-        ? customer.tags.split(",").map((t) => t.trim()).filter(Boolean)
-        : [];
-      const occurredAt = customer.created_at ?? now;
+      const occurredAt = (customer.created_at as string | undefined) ?? now;
 
-      await serviceClient.from("customer_events").upsert(
-        {
-          merchant_id: merchant.id,
-          shopify_customer_gid: gid,
-          event_type: "customer_backfilled",
+      try {
+        await appendCustomerEvent(serviceClient, {
+          merchantId: merchant.id,
+          shopifyCustomerGid: gid,
+          eventType: "customer_backfilled",
           source: "shopify_backfill",
-          payload: customer as unknown as Json,
-          occurred_at: occurredAt,
-        },
-        { onConflict: "merchant_id,shopify_customer_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-      );
+          payload: customer as unknown as Record<string, unknown>,
+          occurredAt,
+        });
 
-      await serviceClient.from("customers").upsert(
-        {
-          merchant_id: merchant.id,
-          shopify_customer_gid: gid,
-          email: customer.email ?? null,
-          phone: customer.phone ?? null,
-          first_name: customer.first_name ?? null,
-          last_name: customer.last_name ?? null,
-          tags,
-          total_order_count: customer.orders_count ?? 0,
-          total_ltv_cents: Math.round(parseFloat(customer.total_spent ?? "0") * 100),
-        },
-        { onConflict: "merchant_id,shopify_customer_gid" },
-      );
-
-      count++;
+        await materializeCustomer(serviceClient, merchant.id, gid);
+        count++;
+      } catch (err) {
+        console.warn(`backfill_customer_error gid=${gid} err=${(err as Error).message}`);
+      }
     }
   } else {
     const orders = (data.orders ?? []) as Array<{
@@ -197,33 +179,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const occurredAt = order.created_at ?? now;
       const totalCents = Math.round(parseFloat(order.total_price ?? "0") * 100);
 
-      await serviceClient.from("order_events").upsert(
-        {
-          merchant_id: merchant.id,
-          shopify_customer_gid: customerGid,
-          shopify_order_gid: orderGid,
-          event_type: "order_backfilled",
+      try {
+        await appendOrderEvent(serviceClient, {
+          merchantId: merchant.id,
+          shopifyCustomerGid: customerGid,
+          shopifyOrderGid: orderGid,
+          eventType: "order_backfilled",
           source: "shopify_backfill",
-          payload: order as unknown as Json,
-          occurred_at: occurredAt,
-        },
-        { onConflict: "merchant_id,shopify_order_gid,event_type,source,occurred_at", ignoreDuplicates: true },
-      );
+          payload: order as unknown as Record<string, unknown>,
+          occurredAt,
+        });
 
-      await serviceClient.from("orders").upsert(
-        {
-          merchant_id: merchant.id,
-          shopify_order_gid: orderGid,
-          shopify_customer_gid: customerGid,
-          total_price_cents: totalCents,
-          financial_status: order.financial_status ?? "paid",
-          fulfilled_at: order.fulfilled_at ?? null,
-          shopify_created_at: occurredAt,
-        },
-        { onConflict: "merchant_id,shopify_order_gid" },
-      );
+        const { error: orderUpsertErr } = await serviceClient.from("orders").upsert(
+          {
+            merchant_id: merchant.id,
+            shopify_order_gid: orderGid,
+            shopify_customer_gid: customerGid,
+            total_price_cents: totalCents,
+            financial_status: order.financial_status ?? "paid",
+            fulfilled_at: order.fulfilled_at ?? null,
+            shopify_created_at: occurredAt,
+          },
+          { onConflict: "merchant_id,shopify_order_gid" },
+        );
+        if (orderUpsertErr) throw orderUpsertErr;
 
-      count++;
+        count++;
+      } catch (err) {
+        console.warn(`backfill_order_error gid=${orderGid} err=${(err as Error).message}`);
+      }
     }
   }
 

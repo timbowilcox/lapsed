@@ -59,6 +59,11 @@ function makeMockClient(opts: { merchantId?: string | null } = {}) {
   return { client, upserts, updates };
 }
 
+// Captured @lapsed/core mock functions — reset in importWithMocks.
+let mockAppendCustomerEvent: ReturnType<typeof vi.fn>;
+let mockAppendOrderEvent: ReturnType<typeof vi.fn>;
+let mockMaterializeCustomer: ReturnType<typeof vi.fn>;
+
 function makeShopifyFetchResponse(
   body: unknown,
   opts: { status?: number; linkHeader?: string; retryAfter?: string } = {},
@@ -111,6 +116,10 @@ async function importWithMocks(opts: { merchantId?: string | null; session?: { o
   const { merchantId = MERCHANT_ID, session = { ok: true, shopDomain: SHOP_DOMAIN } } = opts;
   const { client, upserts, updates } = makeMockClient({ merchantId });
 
+  mockAppendCustomerEvent = vi.fn().mockResolvedValue(undefined);
+  mockAppendOrderEvent = vi.fn().mockResolvedValue(undefined);
+  mockMaterializeCustomer = vi.fn().mockResolvedValue(null);
+
   vi.doMock("@lapsed/shopify", async (orig) => {
     const original = await orig<typeof import("@lapsed/shopify")>();
     return {
@@ -128,6 +137,12 @@ async function importWithMocks(opts: { merchantId?: string | null; session?: { o
       decryptToken: vi.fn(() => FAKE_ACCESS_TOKEN),
     };
   });
+
+  vi.doMock("@lapsed/core", () => ({
+    appendCustomerEvent: mockAppendCustomerEvent,
+    appendOrderEvent: mockAppendOrderEvent,
+    materializeCustomer: mockMaterializeCustomer,
+  }));
 
   const { POST } = await import("../app/api/shopify/backfill/route");
   const { NextRequest } = await import("next/server");
@@ -292,8 +307,8 @@ describe("POST /api/shopify/backfill — cursor extraction", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("POST /api/shopify/backfill — customers resource", () => {
-  it("writes customer_events and customers upsert for each customer", async () => {
-    const { POST, NextRequest, upserts } = await importWithMocks();
+  it("calls appendCustomerEvent and materializeCustomer for each customer", async () => {
+    const { POST, NextRequest } = await importWithMocks();
     const customers = [
       { id: 1001, email: "a@example.com", total_spent: "100.00", orders_count: 2, created_at: "2024-01-01T00:00:00Z" },
       { id: 1002, email: "b@example.com", total_spent: "50.50", orders_count: 1, created_at: "2024-02-01T00:00:00Z" },
@@ -305,20 +320,26 @@ describe("POST /api/shopify/backfill — customers resource", () => {
     const json = await res.json() as { count: number };
     expect(json.count).toBe(2);
 
-    const eventUpserts = upserts.filter((u) => u.table === "customer_events");
-    expect(eventUpserts).toHaveLength(2);
-    expect(eventUpserts[0]?.row.event_type).toBe("customer_backfilled");
-    expect(eventUpserts[0]?.row.source).toBe("shopify_backfill");
-    expect(eventUpserts[0]?.row.shopify_customer_gid).toBe("gid://shopify/Customer/1001");
-
-    const profileUpserts = upserts.filter((u) => u.table === "customers");
-    expect(profileUpserts).toHaveLength(2);
-    expect(profileUpserts[0]?.row.total_ltv_cents).toBe(10000);
-    expect(profileUpserts[1]?.row.total_ltv_cents).toBe(5050);
+    expect(mockAppendCustomerEvent).toHaveBeenCalledTimes(2);
+    expect(mockAppendCustomerEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        merchantId: MERCHANT_ID,
+        shopifyCustomerGid: "gid://shopify/Customer/1001",
+        eventType: "customer_backfilled",
+        source: "shopify_backfill",
+      }),
+    );
+    expect(mockMaterializeCustomer).toHaveBeenCalledTimes(2);
+    expect(mockMaterializeCustomer).toHaveBeenCalledWith(
+      expect.anything(),
+      MERCHANT_ID,
+      "gid://shopify/Customer/1001",
+    );
   });
 
   it("skips customers with missing id and does not count them", async () => {
-    const { POST, NextRequest, upserts } = await importWithMocks();
+    const { POST, NextRequest } = await importWithMocks();
     global.fetch = vi.fn().mockResolvedValue(makeShopifyFetchResponse({
       customers: [{ id: 0, email: "x@x.com" }, { id: 500, email: "y@y.com", created_at: "2024-01-01T00:00:00Z" }],
     }));
@@ -326,9 +347,12 @@ describe("POST /api/shopify/backfill — customers resource", () => {
     const res = await POST(new NextRequest(buildRequest({ resource: "customers" })));
     const json = await res.json() as { count: number };
     expect(json.count).toBe(1);
-    const profileUpserts = upserts.filter((u) => u.table === "customers");
-    expect(profileUpserts).toHaveLength(1);
-    expect(profileUpserts[0]?.row.shopify_customer_gid).toBe("gid://shopify/Customer/500");
+    expect(mockAppendCustomerEvent).toHaveBeenCalledTimes(1);
+    expect(mockMaterializeCustomer).toHaveBeenCalledWith(
+      expect.anything(),
+      MERCHANT_ID,
+      "gid://shopify/Customer/500",
+    );
   });
 
   it("updates merchant last_backfill_at after processing", async () => {
@@ -348,7 +372,7 @@ describe("POST /api/shopify/backfill — customers resource", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("POST /api/shopify/backfill — orders resource", () => {
-  it("writes order_events and orders upsert for each order", async () => {
+  it("calls appendOrderEvent and upserts orders for each order", async () => {
     const { POST, NextRequest, upserts } = await importWithMocks();
     const orders = [
       { id: 5001, customer: { id: 111 }, total_price: "200.00", financial_status: "paid", created_at: "2024-01-01T00:00:00Z" },
@@ -360,10 +384,17 @@ describe("POST /api/shopify/backfill — orders resource", () => {
     const json = await res.json() as { count: number };
     expect(json.count).toBe(1);
 
-    const orderEvent = upserts.find((u) => u.table === "order_events");
-    expect(orderEvent?.row.event_type).toBe("order_backfilled");
-    expect(orderEvent?.row.shopify_order_gid).toBe("gid://shopify/Order/5001");
-    expect(orderEvent?.row.shopify_customer_gid).toBe("gid://shopify/Customer/111");
+    expect(mockAppendOrderEvent).toHaveBeenCalledTimes(1);
+    expect(mockAppendOrderEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        merchantId: MERCHANT_ID,
+        shopifyOrderGid: "gid://shopify/Order/5001",
+        shopifyCustomerGid: "gid://shopify/Customer/111",
+        eventType: "order_backfilled",
+        source: "shopify_backfill",
+      }),
+    );
 
     const orderUpsert = upserts.find((u) => u.table === "orders");
     expect(orderUpsert?.row.total_price_cents).toBe(20000);
@@ -387,7 +418,7 @@ describe("POST /api/shopify/backfill — orders resource", () => {
   });
 
   it("skips orders with missing order id", async () => {
-    const { POST, NextRequest, upserts } = await importWithMocks();
+    const { POST, NextRequest } = await importWithMocks();
     global.fetch = vi.fn().mockResolvedValue(makeShopifyFetchResponse({
       orders: [{ id: 0, customer: { id: 1 } }],
     }));
@@ -395,6 +426,6 @@ describe("POST /api/shopify/backfill — orders resource", () => {
     const res = await POST(new NextRequest(buildRequest({ resource: "orders" })));
     const json = await res.json() as { count: number };
     expect(json.count).toBe(0);
-    expect(upserts.filter((u) => u.table === "order_events")).toHaveLength(0);
+    expect(mockAppendOrderEvent).not.toHaveBeenCalled();
   });
 });
