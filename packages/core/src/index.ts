@@ -44,3 +44,14 @@ export {
   type ScoreCustomersResult,
   type ScoreCustomersOpts,
 } from "./score-customers";
+
+export {
+  redact,
+  redactSnapshot,
+  assertNoPii,
+  PiiLeakError,
+  SnapshotShapeError,
+  type PiiKind,
+  type PiiMatch,
+  type RedactResult,
+} from "./pii-redactor";
