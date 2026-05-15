@@ -645,6 +645,190 @@ export type Database = {
           },
         ]
       }
+      storefront_snapshots: {
+        Row: {
+          created_at: string
+          fetched_at: string
+          id: string
+          merchant_id: string
+          pii_match_summary: Json
+          raw_content: Json
+          redacted_content: Json
+          source_hash: string
+        }
+        Insert: {
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          merchant_id: string
+          pii_match_summary?: Json
+          raw_content: Json
+          redacted_content: Json
+          source_hash: string
+        }
+        Update: {
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          merchant_id?: string
+          pii_match_summary?: Json
+          raw_content?: Json
+          redacted_content?: Json
+          source_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storefront_snapshots_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      voice_events: {
+        Row: {
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          occurred_at: string
+          payload: Json
+          source: string
+        }
+        Insert: {
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          occurred_at: string
+          payload?: Json
+          source: string
+        }
+        Update: {
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          occurred_at?: string
+          payload?: Json
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      voice_versions: {
+        Row: {
+          created_at: string
+          extracted_at: string
+          id: string
+          merchant_id: string
+          model_version: string
+          profile: Json
+          prompt_version: string
+          retries: number
+          source_snapshot_id: string
+          tokens_input: number
+          tokens_output: number
+          version_number: number
+        }
+        Insert: {
+          created_at?: string
+          extracted_at?: string
+          id?: string
+          merchant_id: string
+          model_version: string
+          profile: Json
+          prompt_version: string
+          retries?: number
+          source_snapshot_id: string
+          tokens_input?: number
+          tokens_output?: number
+          version_number: number
+        }
+        Update: {
+          created_at?: string
+          extracted_at?: string
+          id?: string
+          merchant_id?: string
+          model_version?: string
+          profile?: Json
+          prompt_version?: string
+          retries?: number
+          source_snapshot_id?: string
+          tokens_input?: number
+          tokens_output?: number
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_versions_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_versions_source_snapshot_id_fkey"
+            columns: ["source_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_profiles: {
+        Row: {
+          active_voice_version_id: string | null
+          channel_prefs: Json
+          created_at: string
+          fallback_criteria: Json
+          merchant_id: string
+          role_descriptor: string
+          updated_at: string
+        }
+        Insert: {
+          active_voice_version_id?: string | null
+          channel_prefs?: Json
+          created_at?: string
+          fallback_criteria?: Json
+          merchant_id: string
+          role_descriptor?: string
+          updated_at?: string
+        }
+        Update: {
+          active_voice_version_id?: string | null
+          channel_prefs?: Json
+          created_at?: string
+          fallback_criteria?: Json
+          merchant_id?: string
+          role_descriptor?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_profiles_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: true
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_profiles_active_voice_version_id_fkey"
+            columns: ["active_voice_version_id"]
+            isOneToOne: false
+            referencedRelation: "voice_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_inferred_state: {
         Row: {
           created_at: string
