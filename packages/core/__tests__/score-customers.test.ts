@@ -42,6 +42,7 @@ interface MockOptions {
   customers?: object[];
   inferredStates?: object[];
   rfmStates?: object[];
+  rfmStatesError?: Error;
   dailyTokenCap?: number;
   tokensUsedToday?: number;
   orderEvents?: object[];
@@ -160,8 +161,8 @@ function makeServiceClient(opts: MockOptions = {}): LapsedSupabaseClient {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               in: vi.fn().mockResolvedValue({
-                data: opts.rfmStates ?? [],
-                error: null,
+                data: opts.rfmStatesError ? null : (opts.rfmStates ?? []),
+                error: opts.rfmStatesError ?? null,
               }),
             }),
           }),
@@ -256,6 +257,32 @@ describe("scoreCustomers — idempotency", () => {
     ];
     const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }]; // matches state
     const serviceClient = makeServiceClient({ inferredStates: alreadyScoredState, rfmStates });
+
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(0);
+    expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+
+  it("skips a customer with no RFM row when engagement is stale (null lifecycle treated as unchanged)", async () => {
+    // No RFM row → rfmLifecycle is null. Before the null-fix, null !== "lapsed" would force a rescore.
+    // After the fix, null is treated as "lifecycle unknown/unchanged" and the customer is skipped.
+    const alreadyScoredState = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    // No RFM rows — rfmLifecycle will be null for this GID
+    const serviceClient = makeServiceClient({ inferredStates: alreadyScoredState, rfmStates: [] });
     const anthropicClient = makeAnthropicClient();
 
     const result = await scoreCustomers(serviceClient, anthropicClient, {
@@ -532,16 +559,17 @@ describe("scoreCustomers — lifecycle-change rescore", () => {
       medianAovCents: 8000,
     });
 
+    interface MockWithUpsert { value: { upsert: ReturnType<typeof vi.fn> } }
     const fromMock = serviceClient.from as ReturnType<typeof vi.fn>;
-    const inferredResults = fromMock.mock.calls
-      .map((c: string[], i: number) => c[0] === "customer_inferred_state" ? fromMock.mock.results[i] : null)
-      .filter(Boolean);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upsertResult = inferredResults.find((r: any) => r.value?.upsert?.mock?.calls?.length > 0);
+    const upsertResult = (fromMock.mock.calls as string[][])
+      .map((c, i) =>
+        c[0] === "customer_inferred_state"
+          ? (fromMock.mock.results[i] as unknown as MockWithUpsert | null)
+          : null,
+      )
+      .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
     expect(upsertResult).toBeDefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upsertMock = (upsertResult as any).value.upsert as ReturnType<typeof vi.fn>;
-    const payload = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.lifecycle_stage).toBe("lapsed");
   });
 });
@@ -609,5 +637,80 @@ describe("scoreCustomers — batch success log", () => {
     });
     expect(typeof batchLog?.latency_ms).toBe("number");
     expect(typeof batchLog?.merchant_id).toBe("string");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Churned exclusion via RFM lifecycle (265c4c5 fix)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — churned exclusion via RFM lifecycle", () => {
+  it("excludes a customer whose customer_rfm lifecycle is churned even if inferred state is stale/non-churned", async () => {
+    // customer_rfm says churned; inferred state says lapsed (stale — hasn't been updated yet)
+    const staleInferredState = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "churned" }];
+    const serviceClient = makeServiceClient({ inferredStates: staleInferredState, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(0);
+    expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+
+  it("excludes a customer whose inferred lifecycle is churned even when no RFM row exists", async () => {
+    const churnedInferredState = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "churned",
+        last_scored_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    // No RFM row — rfmLifecycle falls back to null, but inferred state is churned
+    const serviceClient = makeServiceClient({ inferredStates: churnedInferredState, rfmStates: [] });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(0);
+    expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// customer_rfm DB error propagation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — customer_rfm error propagation", () => {
+  it("returns status:failed when customer_rfm fetch errors", async () => {
+    const serviceClient = makeServiceClient({
+      rfmStatesError: new Error("customer_rfm db error"),
+    });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.customersScored).toBe(0);
+    expect(anthropicClient.messages.create).not.toHaveBeenCalled();
   });
 });

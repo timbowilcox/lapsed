@@ -303,7 +303,7 @@ afterAll(async () => {
   }
 });
 
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — merchants_self_read", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — merchants_self_read", () => {
   it("merchant A sees their own row", async () => {
     const jwt = await mintMerchantJwt({ shopDomain: SHOP_A, jwtSecret: env.jwtSecret });
     const client = createMerchantClient({
@@ -377,7 +377,7 @@ async function clientFor(shop: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — customer_events
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customer_events", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_events", () => {
   it("merchant A sees only their own event", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("customer_events")
@@ -415,7 +415,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customer_events", 
 // ─────────────────────────────────────────────────────────────────────────────
 // Append-only — customer_events + order_events
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("Append-only triggers — customer_events", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — customer_events", () => {
   it("UPDATE raises append-only exception", async () => {
     const pg = new PgClient({ connectionString: env.dbUrl });
     await pg.connect();
@@ -460,7 +460,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("Append-only triggers — c
   });
 });
 
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("Append-only triggers — order_events", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — order_events", () => {
   it("UPDATE raises append-only exception", async () => {
     const pg = new PgClient({ connectionString: env.dbUrl });
     await pg.connect();
@@ -508,7 +508,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("Append-only triggers — o
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — customers
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customers", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customers", () => {
   it("merchant A sees only their own customer", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("customers")
@@ -546,7 +546,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customers", () => 
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — order_events
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — order_events", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — order_events", () => {
   it("merchant A sees only their own order event", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("order_events")
@@ -584,7 +584,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — order_events", () 
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — orders
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — orders", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — orders", () => {
   it("merchant A sees only their own order", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("orders")
@@ -622,7 +622,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — orders", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — products
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — products", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — products", () => {
   it("merchant A sees only their own product", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("products")
@@ -660,7 +660,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — products", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — conversations
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — conversations", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversations", () => {
   it("merchant A sees only their own conversation", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("conversations")
@@ -698,7 +698,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — conversations", ()
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — conversation_messages
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — conversation_messages", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversation_messages", () => {
   it("merchant A sees only their own messages", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("conversation_messages")
@@ -736,7 +736,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — conversation_messa
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — webhook_deliveries (no merchant may read; explicit deny policy)
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — webhook_deliveries (deny all authenticated)", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — webhook_deliveries (deny all authenticated)", () => {
   it("merchant A JWT cannot read webhook_deliveries", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("webhook_deliveries")
@@ -758,7 +758,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — webhook_deliveries
 // ─────────────────────────────────────────────────────────────────────────────
 // Sprint 04 RLS — customer_rfm
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customer_rfm (Sprint 04)", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_rfm (Sprint 04)", () => {
   it("merchant A sees only their own RFM row", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("customer_rfm")
@@ -796,7 +796,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customer_rfm (Spri
 // ─────────────────────────────────────────────────────────────────────────────
 // Sprint 04 RLS — scoring_runs
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — scoring_runs (Sprint 04)", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — scoring_runs (Sprint 04)", () => {
   it("merchant A sees only their own scoring runs", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("scoring_runs")
@@ -834,7 +834,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — scoring_runs (Spri
 // ─────────────────────────────────────────────────────────────────────────────
 // Sprint 04 RLS — merchant_scoring_caps
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — merchant_scoring_caps (Sprint 04)", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — merchant_scoring_caps (Sprint 04)", () => {
   it("merchant A sees only their own cap row", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("merchant_scoring_caps")
@@ -872,7 +872,7 @@ describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — merchant_scoring_c
 // ─────────────────────────────────────────────────────────────────────────────
 // Sprint 04 RLS — customer_inferred_state
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE || !schemaReady)("RLS — customer_inferred_state (Sprint 04)", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_inferred_state (Sprint 04)", () => {
   it("merchant A sees only their own inferred state", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("customer_inferred_state")

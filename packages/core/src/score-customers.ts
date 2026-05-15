@@ -294,7 +294,9 @@ async function findScorable(
     const lastEngaged = state.last_engagement_event_at
       ? new Date(state.last_engagement_event_at).getTime()
       : 0;
-    return lastEngaged > lastScored || rfmLifecycle !== state.lifecycle_stage;
+    // rfmLifecycle is null when no customer_rfm row exists yet — treat as "no lifecycle change"
+    // rather than "lifecycle changed", to avoid rescoring every run for un-materialized customers.
+    return lastEngaged > lastScored || (rfmLifecycle != null && rfmLifecycle !== state.lifecycle_stage);
   });
 
   if (scorable.length === 0) return [];

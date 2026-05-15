@@ -206,16 +206,17 @@ describe("runRfmBatch — lifecycle plumbing", () => {
     const client = makeClient();
     await runRfmBatch(client, MERCHANT_ID, CONTEXT);
 
+    interface MockWithUpsert { value: { upsert: ReturnType<typeof vi.fn> } }
     const fromMock = client.from as ReturnType<typeof vi.fn>;
-    const inferredResults = fromMock.mock.calls
-      .map((c: string[], i: number) => c[0] === "customer_inferred_state" ? fromMock.mock.results[i] : null)
-      .filter(Boolean);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upsertResult = inferredResults.find((r: any) => r.value?.upsert?.mock?.calls?.length > 0);
+    const upsertResult = (fromMock.mock.calls as string[][])
+      .map((c, i) =>
+        c[0] === "customer_inferred_state"
+          ? (fromMock.mock.results[i] as unknown as MockWithUpsert | null)
+          : null,
+      )
+      .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
     expect(upsertResult).toBeDefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upsertMock = (upsertResult as any).value.upsert as ReturnType<typeof vi.fn>;
-    const payload = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty("lifecycle_stage");
   });
 
