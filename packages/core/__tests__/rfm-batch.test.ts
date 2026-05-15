@@ -202,6 +202,23 @@ describe("runRfmBatch — lifecycle plumbing", () => {
     expect(first).toEqual(second);
   });
 
+  it("does not write lifecycle_stage to customer_inferred_state (scoring job owns that column)", async () => {
+    const client = makeClient();
+    await runRfmBatch(client, MERCHANT_ID, CONTEXT);
+
+    const fromMock = client.from as ReturnType<typeof vi.fn>;
+    const inferredResults = fromMock.mock.calls
+      .map((c: string[], i: number) => c[0] === "customer_inferred_state" ? fromMock.mock.results[i] : null)
+      .filter(Boolean);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upsertResult = inferredResults.find((r: any) => r.value?.upsert?.mock?.calls?.length > 0);
+    expect(upsertResult).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upsertMock = (upsertResult as any).value.upsert as ReturnType<typeof vi.fn>;
+    const payload = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("lifecycle_stage");
+  });
+
   it("handles null last_order_days_ago without throwing", async () => {
     const client = makeClient({
       customerPages: [[{ ...CUSTOMER, last_order_days_ago: null }]],

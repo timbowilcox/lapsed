@@ -156,7 +156,7 @@ async function buildSnapshot(
  *  2. Call classifyLifecycle — deterministic, pure.
  *  3. Write customer_scored event (Decision 1 — event-sourced memory graph).
  *  4. Upsert customer_rfm with raw RFM values + lifecycle_stage.
- *  5. Upsert customer_inferred_state with lifecycle_stage + group_memberships.
+ *  5. Upsert customer_inferred_state with group_memberships (lifecycle_stage owned by scoring job).
  *
  * Idempotent: re-running produces the same state.
  */

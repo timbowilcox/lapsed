@@ -275,13 +275,16 @@ async function findScorable(
   if (rfmErr) throw rfmErr;
 
   const rfmLifecycleMap = new Map(
-    ((rfmRows ?? []) as RfmEligibilityRow[]).map((r) => [r.shopify_customer_gid, r.lifecycle_stage]),
+    ((rfmRows ?? []) as RfmEligibilityRow[]).map(
+      (r) => [r.shopify_customer_gid, r.lifecycle_stage as LifecycleStage | null] as const,
+    ),
   );
 
   const scorable = customerList.filter((c) => {
     const state = stateMap.get(c.shopify_customer_gid);
-    // Exclude churned customers — scoring is ineffective for them.
-    if (state?.lifecycle_stage === "churned") return false;
+    // Exclude churned customers — use current RFM lifecycle, not stale inferred state.
+    const rfmLifecycle = rfmLifecycleMap.get(c.shopify_customer_gid) ?? null;
+    if (rfmLifecycle === "churned" || state?.lifecycle_stage === "churned") return false;
     if (forceFullRescore) return true;
     if (!state?.last_scored_at) return true; // never scored
     // Auto-rescore when score was produced by a stale model version.
@@ -291,7 +294,6 @@ async function findScorable(
     const lastEngaged = state.last_engagement_event_at
       ? new Date(state.last_engagement_event_at).getTime()
       : 0;
-    const rfmLifecycle = rfmLifecycleMap.get(c.shopify_customer_gid) ?? null;
     return lastEngaged > lastScored || rfmLifecycle !== state.lifecycle_stage;
   });
 
@@ -314,7 +316,7 @@ async function findScorable(
       totalLtvCents: c.total_ltv_cents,
       ordersInPast12Months: ev?.ordersInPast12Months ?? 0,
       engagementEventsInPast90Days: ev?.engagementEventsInPast90Days ?? 0,
-      lifecycleStage: rfmLifecycleMap.get(c.shopify_customer_gid) ?? state?.lifecycle_stage ?? "lapsed",
+      lifecycleStage: rfmLifecycleMap.get(c.shopify_customer_gid) ?? (state?.lifecycle_stage as LifecycleStage | undefined) ?? "lapsed",
       avgOrderValueCents,
     };
   });
@@ -475,7 +477,7 @@ export async function scoreCustomers(
               scoringRunId,
               score.shopifyCustomerGid,
               score,
-              (batchLifecycleMap.get(score.shopifyCustomerGid) ?? "lapsed") as LifecycleStage,
+              batchLifecycleMap.get(score.shopifyCustomerGid) ?? "lapsed",
               now,
             );
             customersScored++;

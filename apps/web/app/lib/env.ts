@@ -40,7 +40,7 @@ export function serverEnv(): ServerEnv {
     tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
     cronSecret: required("CRON_SECRET"),
     propensityReadyThreshold: parseFloat(process.env.PROPENSITY_READY_THRESHOLD ?? "0.4"),
-    scoringTokenCapDefault: parseInt(process.env.SCORING_TOKEN_CAP_DEFAULT ?? "10000000", 10),
+    scoringTokenCapDefault: parseInt(process.env.SCORING_TOKEN_CAP_DEFAULT ?? "10000000", 10) || 10_000_000,
     anthropicApiKey: required("ANTHROPIC_API_KEY"),
   };
   return cached;

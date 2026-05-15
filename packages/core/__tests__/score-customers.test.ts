@@ -512,6 +512,38 @@ describe("scoreCustomers — lifecycle-change rescore", () => {
     expect(result.customersScored).toBe(1);
     expect(anthropicClient.messages.create).toHaveBeenCalledOnce();
   });
+
+  it("writes the RFM lifecycle_stage to customer_inferred_state upsert", async () => {
+    const stateWithStaleEngagement = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "at_risk",
+        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }];
+    const serviceClient = makeServiceClient({ inferredStates: stateWithStaleEngagement, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    const fromMock = serviceClient.from as ReturnType<typeof vi.fn>;
+    const inferredResults = fromMock.mock.calls
+      .map((c: string[], i: number) => c[0] === "customer_inferred_state" ? fromMock.mock.results[i] : null)
+      .filter(Boolean);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upsertResult = inferredResults.find((r: any) => r.value?.upsert?.mock?.calls?.length > 0);
+    expect(upsertResult).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upsertMock = (upsertResult as any).value.upsert as ReturnType<typeof vi.fn>;
+    const payload = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.lifecycle_stage).toBe("lapsed");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

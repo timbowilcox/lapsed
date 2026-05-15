@@ -66,7 +66,7 @@ export interface CustomerScoringInput {
   totalLtvCents: number;
   ordersInPast12Months: number;
   engagementEventsInPast90Days: number;
-  lifecycleStage: string;
+  lifecycleStage: "new" | "engaged" | "at_risk" | "lapsed" | "churned" | "won_back";
   avgOrderValueCents: number;
 }
 
