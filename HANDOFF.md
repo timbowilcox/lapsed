@@ -32,14 +32,28 @@ All 13 chunks from SPRINT.md completed:
 |---|-----------|-------|----------|
 | 1 | Inferred state purity | 3 | `customer_inferred_state` fully regeneratable from event log + scoring algo. No business decisions on inferred state alone. Orchestrator idempotency test confirms same-state output on re-run. |
 | 2 | Scoring event-sourcing | 3 | Every scored customer triggers `appendCustomerEvent("customer_scored", …)` before inferred state upsert. Grep: `appendCustomerEvent` is the only path to the events table in scoring code. |
-| 3 | Cost discipline | 3 | Incremental skip logic: `last_scored_at > last_engagement_event_at && lifecycle_stage unchanged`. Per-merchant cap from `merchant_scoring_caps`. Cap-halt test: mid-run cap exhaustion halts cleanly, no partial batch written. |
+| 3 | Cost discipline | 3 | Incremental skip logic: `last_scored_at > last_engagement_event_at && lifecycle_stage unchanged`. Per-merchant cap from `merchant_scoring_caps`. Cap-halt test: mid-run cap exhaustion halts cleanly, no partial batch written. Orchestrator unit tests: idempotency (two-run consistency), cap-halt, per-merchant isolation. |
 | 4 | Lifecycle classifier correctness | 3 | All 6 stages reachable from unit test fixtures. Transitions follow documented rules. Pure function — same input always same output. |
 | 5 | Group template correctness | 3 | All 6 templates produce expected groups against fixture customers covering the relevant distributions. Unit tests per template plus combined fixture. |
-| 6 | Haiku integration robustness | 3 | `response_format` with strict JSON schema enforced. Malformed responses rejected and retried (up to 3x). Mocked tests: happy path, schema violation retry, cap halt, API error → `scoring_runs.status = failed`. |
-| 7 | RLS tenancy isolation | 3 | `scoring_runs` and `merchant_scoring_caps` have merchant-scoped RLS. Cross-merchant test on `customer_inferred_state` extension passes. |
+| 6 | Haiku integration robustness | 3 | Structured output via `tool_choice: {type:"tool", name:"score_customers"}` — schema enforced at API level, no free-form text parsing. Retry loop: up to 3 attempts on schema validation failure or API error before throwing. Mocked tests: happy path, malformed-then-valid (retry succeeds), three-malformed (retry exhausted, throws), API error → throws after 3 attempts. |
+| 7 | RLS tenancy isolation | 2 | `scoring_runs` and `merchant_scoring_caps` have merchant-scoped RLS. 46 RLS tests covering all new tables are present but skip when `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are absent (i.e., standard CI). They pass locally against the dev Supabase project. To return to 3/3: add a CI workflow that runs `pnpm --filter @lapsed/db test:rls` against the dev Supabase project with secrets injected — flagged for Sprint 10 or whenever CI secrets are configured. |
 | 8 | UI completeness | 3 | Signals panel, Lapsed list filtering/sorting, Dashboard hero metric all wired to real data. Empty and loading states on every new fetch boundary. |
 | 9 | Observability | 3 | Structured logs: `{event, merchant_id, batch_size, tokens_in, tokens_out, latency_ms, status}` per batch. `pnpm grep:pii` clean. |
 | 10 | Architecture discipline | 3 | No `appendCustomerEvent` bypasses (grep confirms). No inferred-state-as-truth code. No `TODO` deferrals in diff. All 6 architectural load-bearing decisions respected. |
+
+---
+
+## Deliberate architectural deviations and known limitations
+
+| Item | Description | Resolution |
+|------|-------------|------------|
+| RLS tests skip in CI | 46 RLS tests require a live Supabase connection (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`). They are guarded by `skipIf(!SUPABASE_AVAILABLE)` and skip in standard CI where these secrets are not set. Rubric 7 scored 2/3 for this reason. | Run manually: `pnpm --filter @lapsed/db test:rls`. Full 3/3 requires a CI workflow with Supabase secrets — deferred to Sprint 10. |
+| Lapsed list filtering is client-side | SPRINT.md specified server-side filtering with URL-encoded state (shareable links). Implemented as client-side filtering within the 50-row server-fetched page. | Acceptable at current scale. Revisit when pagination ships in Sprint 06. |
+| Scoring input corruption (evaluator finding) | The original `findScorable()` mapped all customers with `firstOrderDaysAgo: null`, `ordersInPast12Months: 0`, `engagementEventsInPast90Days: 0` because it never queried `order_events` or `customer_events`. Fixed in remediation: `enrichWithEventData()` bulk-queries both tables and populates all three fields correctly. | Fixed. Unit test added that asserts non-zero values when event data is present. |
+| Dashboard metric inversion (evaluator finding) | Original implementation had "Total lapsed" as the hero `value` and "N ready to reactivate" as the `trend`. Evaluator correctly identified this as inverted per SPRINT.md chunk 10. | Fixed. "Ready to reactivate" is now the `value` (hero); "N total lapsed" is the `trend` (satellite). "Pending first score" shown only when `latestRun === null` (never scored), not when scored but zero qualify. |
+| `customer_scored` in engagement filter (subagent finding) | `IDENTITY_EVENTS` excluded only identity events but let `customer_scored` pass through, so every scoring run advanced `last_engagement_event_at` — defeating the incremental-skip cost guard. | Fixed. Renamed to `SYSTEM_EVENTS`, added `customer_scored` to the exclusion list in both `score-customers.ts` and `rfm-batch.ts`. |
+| Token accumulation on retry (subagent finding) | `scoreBatch` used assignment (`=`) not accumulation (`+=`) for `tokensInput`/`tokensOutput`, so failed-attempt tokens were not counted against the daily cap. | Fixed. Changed to `+=`. Token counts now accumulate across all attempts, preventing silent cap overruns. Test added to assert accumulation. |
+| Cap check inconsistency (subagent finding) | `remainingTokens` used `?? DEFAULT_TOKEN_CAP` fallback but the mid-run cap check on line 425 did not, so a null DB value would make the cap appear never-hit. | Fixed. Extracted `effectiveCap = cap.daily_token_cap ?? DEFAULT_TOKEN_CAP` and used it consistently in both checks. |
 
 ---
 

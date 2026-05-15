@@ -74,7 +74,7 @@ async function buildSnapshot(
     ? Math.floor((now.getTime() - firstOrderAt.getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
-  const IDENTITY_EVENTS = "(customer_created,customer_updated,customer_backfilled)";
+  const SYSTEM_EVENTS = "(customer_created,customer_updated,customer_backfilled,customer_scored)";
 
   // Count engagement events (non-identity) in past 180 days.
   const cutoff180d = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
@@ -83,7 +83,7 @@ async function buildSnapshot(
     .select("*", { count: "exact", head: true })
     .eq("merchant_id", merchantId)
     .eq("shopify_customer_gid", gid)
-    .not("event_type", "in", IDENTITY_EVENTS)
+    .not("event_type", "in", SYSTEM_EVENTS)
     .gte("occurred_at", cutoff180d.toISOString());
 
   if (ceErr) throw ceErr;
@@ -95,7 +95,7 @@ async function buildSnapshot(
     .select("*", { count: "exact", head: true })
     .eq("merchant_id", merchantId)
     .eq("shopify_customer_gid", gid)
-    .not("event_type", "in", IDENTITY_EVENTS)
+    .not("event_type", "in", SYSTEM_EVENTS)
     .gte("occurred_at", cutoff30d.toISOString());
 
   if (ce30dErr) throw ce30dErr;

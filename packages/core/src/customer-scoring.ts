@@ -16,6 +16,43 @@ import { z } from "zod";
 
 export const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 export const BATCH_SIZE = 50;
+export const MAX_RETRIES = 3;
+
+// Structured output tool — forces Haiku to return valid JSON matching the schema
+// instead of free-form text, eliminating the need for fragile text parsing.
+const SCORING_TOOL_NAME = "score_customers";
+const SCORING_TOOL = {
+  name: SCORING_TOOL_NAME,
+  description: "Return structured propensity scores for each customer.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      scores: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            customer_id: { type: "string" },
+            propensity_30d: { type: "number" },
+            propensity_60d: { type: "number" },
+            propensity_90d: { type: "number" },
+            predicted_residual_ltv_cents: { type: "integer" },
+            top_signal: { type: "string" },
+          },
+          required: [
+            "customer_id",
+            "propensity_30d",
+            "propensity_60d",
+            "propensity_90d",
+            "predicted_residual_ltv_cents",
+            "top_signal",
+          ],
+        },
+      },
+    },
+    required: ["scores"],
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input / output types
@@ -101,15 +138,7 @@ Scoring guidelines:
 - Engagement events signal interest even without orders
 - LTV above median indicates retention potential
 
-Response format: JSON object with a "scores" array. Each score must have:
-- customer_id: exactly as provided
-- propensity_30d: 0.0–1.0 (probability of ordering in 30 days)
-- propensity_60d: 0.0–1.0 (must be ≥ propensity_30d)
-- propensity_90d: 0.0–1.0 (must be ≥ propensity_60d)
-- predicted_residual_ltv_cents: integer ≥ 0 (expected future spend in cents)
-- top_signal: ≤ 100 chars, one-line explanation for the score
-
-Respond ONLY with the JSON object. No markdown, no explanation.`;
+Use the score_customers tool to return your scores. Include every customer_id provided.`;
 }
 
 function buildUserPrompt(customers: CustomerScoringInput[]): string {
@@ -165,30 +194,44 @@ export async function scoreBatch(
     throw new Error(`scoreBatch: cannot score more than ${BATCH_SIZE} customers at once`);
   }
 
-  const response = await client.messages.create({
-    model: HAIKU_MODEL,
-    max_tokens: 4096,
-    system: buildSystemPrompt(medianAovCents),
-    messages: [{ role: "user", content: buildUserPrompt(customers) }],
-  });
+  let parsed: ScoringResponse | null = null;
+  let tokensInput = 0;
+  let tokensOutput = 0;
+  let lastError: Error | null = null;
 
-  const tokensInput = response.usage.input_tokens;
-  const tokensOutput = response.usage.output_tokens;
-  const costCents = calculateCostCents(tokensInput, tokensOutput);
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model: HAIKU_MODEL,
+        max_tokens: 4096,
+        system: buildSystemPrompt(medianAovCents),
+        messages: [{ role: "user", content: buildUserPrompt(customers) }],
+        tools: [SCORING_TOOL],
+        tool_choice: { type: "tool", name: SCORING_TOOL_NAME },
+      });
 
-  const rawText = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join("");
+      tokensInput += response.usage.input_tokens;
+      tokensOutput += response.usage.output_tokens;
 
-  let parsed: ScoringResponse;
-  try {
-    parsed = ScoringResponseSchema.parse(JSON.parse(rawText));
-  } catch (err) {
+      const toolBlock = response.content.find((b) => b.type === "tool_use");
+      if (!toolBlock || toolBlock.type !== "tool_use") {
+        throw new Error("scoreBatch: no tool_use block in response");
+      }
+
+      parsed = ScoringResponseSchema.parse(toolBlock.input);
+      break;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  if (!parsed) {
     throw new Error(
-      `scoreBatch: failed to parse Haiku response: ${err instanceof Error ? err.message : String(err)}`,
+      `scoreBatch: failed after ${MAX_RETRIES} attempts: ${lastError?.message ?? "unknown error"}`,
     );
   }
+
+  const costCents = calculateCostCents(tokensInput, tokensOutput);
 
   // Build a lookup map so we can return scores in input order.
   const scoreMap = new Map(parsed.scores.map((s) => [s.customer_id, s]));

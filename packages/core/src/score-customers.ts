@@ -53,6 +53,21 @@ interface InferredStateEligibilityRow {
   last_engagement_event_at: string | null;
 }
 
+interface OrderEventEnrichmentRow {
+  shopify_customer_gid: string;
+  occurred_at: string;
+}
+
+interface CustomerEventEnrichmentRow {
+  shopify_customer_gid: string;
+}
+
+interface CustomerEventEnrichment {
+  firstOrderDaysAgo: number | null;
+  ordersInPast12Months: number;
+  engagementEventsInPast90Days: number;
+}
+
 interface TokenCapRow {
   id: string;
   daily_token_cap: number;
@@ -61,6 +76,87 @@ interface TokenCapRow {
 }
 
 const DEFAULT_TOKEN_CAP = 10_000_000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event data enrichment
+// ─────────────────────────────────────────────────────────────────────────────
+
+// customer_scored is a system event written by the scoring run itself — excluding it
+// prevents the incremental-skip guard from treating a prior score as fresh engagement.
+const SYSTEM_EVENTS = "(customer_created,customer_updated,customer_backfilled,customer_scored)";
+
+/**
+ * Bulk-fetches order_events and customer_events for a list of GIDs and
+ * returns per-customer enrichment data needed to populate the scoring input.
+ * A single query per event table avoids N+1 queries across a 50-customer batch.
+ */
+async function enrichWithEventData(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  gids: string[],
+  now: Date,
+): Promise<Map<string, CustomerEventEnrichment>> {
+  if (gids.length === 0) return new Map();
+
+  const cutoff12m = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  const cutoff90d = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  // Fetch all order events for the batch in one query.
+  const { data: orderEvents, error: oeErr } = await serviceClient
+    .from("order_events")
+    .select("shopify_customer_gid,occurred_at")
+    .eq("merchant_id", merchantId)
+    .in("shopify_customer_gid", gids)
+    .in("event_type", ["order_paid", "order_backfilled"]);
+
+  if (oeErr) throw oeErr;
+
+  // Fetch engagement events (non-identity) in past 90 days for the batch.
+  const { data: engagementEvents, error: eeErr } = await serviceClient
+    .from("customer_events")
+    .select("shopify_customer_gid")
+    .eq("merchant_id", merchantId)
+    .in("shopify_customer_gid", gids)
+    .not("event_type", "in", SYSTEM_EVENTS)
+    .gte("occurred_at", cutoff90d.toISOString());
+
+  if (eeErr) throw eeErr;
+
+  // Aggregate order data per GID.
+  const orderData = new Map<string, { firstOrderAt: Date | null; ordersIn12m: number }>();
+  for (const gid of gids) orderData.set(gid, { firstOrderAt: null, ordersIn12m: 0 });
+
+  for (const ev of (orderEvents ?? []) as OrderEventEnrichmentRow[]) {
+    const d = new Date(ev.occurred_at);
+    const entry = orderData.get(ev.shopify_customer_gid) ?? { firstOrderAt: null, ordersIn12m: 0 };
+    if (!entry.firstOrderAt || d < entry.firstOrderAt) entry.firstOrderAt = d;
+    if (d >= cutoff12m) entry.ordersIn12m++;
+    orderData.set(ev.shopify_customer_gid, entry);
+  }
+
+  // Aggregate engagement event counts per GID.
+  const engagementCounts = new Map<string, number>();
+  for (const gid of gids) engagementCounts.set(gid, 0);
+  for (const ev of (engagementEvents ?? []) as CustomerEventEnrichmentRow[]) {
+    engagementCounts.set(ev.shopify_customer_gid, (engagementCounts.get(ev.shopify_customer_gid) ?? 0) + 1);
+  }
+
+  // Build result map.
+  const result = new Map<string, CustomerEventEnrichment>();
+  for (const gid of gids) {
+    const orders = orderData.get(gid)!;
+    const firstOrderDaysAgo = orders.firstOrderAt
+      ? Math.floor((now.getTime() - orders.firstOrderAt.getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+    result.set(gid, {
+      firstOrderDaysAgo,
+      ordersInPast12Months: orders.ordersIn12m,
+      engagementEventsInPast90Days: engagementCounts.get(gid) ?? 0,
+    });
+  }
+
+  return result;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Token cap management
@@ -157,36 +253,43 @@ async function findScorable(
     ((states ?? []) as InferredStateEligibilityRow[]).map((s) => [s.shopify_customer_gid, s]),
   );
 
-  return customerList
-    .filter((c) => {
-      const state = stateMap.get(c.shopify_customer_gid);
-      // Exclude churned customers — scoring is ineffective for them.
-      if (state?.lifecycle_stage === "churned") return false;
-      if (forceFullRescore) return true;
-      if (!state?.last_scored_at) return true; // never scored
-      // Skip if no new engagement signal since last score.
-      const lastScored = new Date(state.last_scored_at).getTime();
-      const lastEngaged = state.last_engagement_event_at
-        ? new Date(state.last_engagement_event_at).getTime()
-        : 0;
-      return lastEngaged > lastScored;
-    })
-    .map((c) => {
-      const avgOrderValueCents =
-        c.total_order_count > 0 ? Math.round(c.total_ltv_cents / c.total_order_count) : 0;
-      const state = stateMap.get(c.shopify_customer_gid);
-      return {
-        shopifyCustomerGid: c.shopify_customer_gid,
-        totalOrderCount: c.total_order_count,
-        lastOrderDaysAgo: c.last_order_days_ago,
-        firstOrderDaysAgo: null,
-        totalLtvCents: c.total_ltv_cents,
-        ordersInPast12Months: 0,
-        engagementEventsInPast90Days: 0,
-        lifecycleStage: state?.lifecycle_stage ?? "lapsed",
-        avgOrderValueCents,
-      };
-    });
+  const scorable = customerList.filter((c) => {
+    const state = stateMap.get(c.shopify_customer_gid);
+    // Exclude churned customers — scoring is ineffective for them.
+    if (state?.lifecycle_stage === "churned") return false;
+    if (forceFullRescore) return true;
+    if (!state?.last_scored_at) return true; // never scored
+    // Skip if no new engagement signal since last score.
+    const lastScored = new Date(state.last_scored_at).getTime();
+    const lastEngaged = state.last_engagement_event_at
+      ? new Date(state.last_engagement_event_at).getTime()
+      : 0;
+    return lastEngaged > lastScored;
+  });
+
+  if (scorable.length === 0) return [];
+
+  const scorableGids = scorable.map((c) => c.shopify_customer_gid);
+  const now = new Date();
+  const enrichment = await enrichWithEventData(serviceClient, merchantId, scorableGids, now);
+
+  return scorable.map((c) => {
+    const avgOrderValueCents =
+      c.total_order_count > 0 ? Math.round(c.total_ltv_cents / c.total_order_count) : 0;
+    const state = stateMap.get(c.shopify_customer_gid);
+    const ev = enrichment.get(c.shopify_customer_gid);
+    return {
+      shopifyCustomerGid: c.shopify_customer_gid,
+      totalOrderCount: c.total_order_count,
+      lastOrderDaysAgo: c.last_order_days_ago,
+      firstOrderDaysAgo: ev?.firstOrderDaysAgo ?? null,
+      totalLtvCents: c.total_ltv_cents,
+      ordersInPast12Months: ev?.ordersInPast12Months ?? 0,
+      engagementEventsInPast90Days: ev?.engagementEventsInPast90Days ?? 0,
+      lifecycleStage: state?.lifecycle_stage ?? "lapsed",
+      avgOrderValueCents,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +382,8 @@ export async function scoreCustomers(
   try {
     // Check token cap.
     const cap = await getOrCreateTokenCap(serviceClient, merchantId, today);
-    const remainingTokens = (cap.daily_token_cap ?? DEFAULT_TOKEN_CAP) - cap.tokens_used_today;
+    const effectiveCap = cap.daily_token_cap ?? DEFAULT_TOKEN_CAP;
+    const remainingTokens = effectiveCap - cap.tokens_used_today;
 
     if (remainingTokens <= 0) {
       capReached = true;
@@ -321,7 +425,7 @@ export async function scoreCustomers(
         );
 
         // Cap check for next iteration.
-        if (cap.tokens_used_today + totalTokensInput + totalTokensOutput >= cap.daily_token_cap) {
+        if (cap.tokens_used_today + totalTokensInput + totalTokensOutput >= effectiveCap) {
           capReached = true;
         }
 
