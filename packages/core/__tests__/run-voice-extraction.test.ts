@@ -810,6 +810,22 @@ describe("runVoiceExtraction — DB error paths", () => {
     expect(result.reason).toBe("materialize");
   });
 
+  it("gap 5c — agent_profiles lookup error in step 8 returns ok:false reason:materialize", async () => {
+    // The step-8 lookup of the prior active version (for voice_activated's
+    // previous_version_id) can fail; priorErr must surface as a materialize failure.
+    const { client, writes } = makeMockClient({
+      agentProfileLookupError: { message: "rls denied on agent_profiles" },
+    });
+    const { client: anthropic } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("materialize");
+    expect(writes.events.some((e) => e.event_type === "extraction_failed")).toBe(true);
+    // The failure is before voice_activated is appended.
+    expect(writes.events.some((e) => e.event_type === "voice_activated")).toBe(false);
+  });
+
   it("gap 6 — partial failures with all-empty snapshot returns ok:false (allFieldsEmpty second branch)", async () => {
     // 2 failures (not 5) + all-empty snapshot → second disjunct of the guard fires.
     vi.mocked(fetchStorefrontSnapshot).mockResolvedValue({
