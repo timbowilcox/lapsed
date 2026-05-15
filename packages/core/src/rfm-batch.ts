@@ -3,6 +3,7 @@ import type { LifecycleStage } from "./customer-lifecycle";
 import { classifyLifecycle } from "./customer-lifecycle";
 import { assignGroups } from "./customer-groups";
 import type { MerchantContext } from "./customer-groups";
+import { appendCustomerEvent } from "./customer-events";
 
 export interface RfmBatchResult {
   processed: number;
@@ -158,6 +159,18 @@ export async function runRfmBatch(
 
         const recencyDays = customer.last_order_days_ago;
         const totalLtv = Number(customer.total_ltv_cents);
+
+        // Write customer_scored event BEFORE touching inferred state.
+        // This is architectural decision 1: every customer state change is an
+        // appended event; customer_inferred_state is a regeneratable cache.
+        await appendCustomerEvent(serviceClient, {
+          merchantId,
+          shopifyCustomerGid: customer.shopify_customer_gid,
+          eventType: "customer_scored",
+          source: "rfm_batch",
+          payload: { lifecycle_stage: lifecycle, group_memberships: groups },
+          occurredAt: now.toISOString(),
+        });
 
         // Upsert customer_rfm — raw RFM values + lifecycle classification.
         const { error: rfmUpsertErr } = await serviceClient

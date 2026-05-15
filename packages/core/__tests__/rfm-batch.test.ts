@@ -3,7 +3,7 @@ import { runRfmBatch } from "../src/rfm-batch";
 import type { LapsedSupabaseClient } from "@lapsed/db";
 import type { MerchantContext } from "../src/customer-groups";
 
-const MERCHANT_ID = "merchant-uuid-0001";
+const MERCHANT_ID = "00000000-0000-0000-0000-000000000000"; // nil UUID — valid per Zod uuid()
 const CONTEXT: MerchantContext = { ltvP90Cents: 50000, medianAovCents: 8000 };
 
 const CUSTOMER = {
@@ -57,6 +57,7 @@ function makeClient(opts: MockOptions = {}): LapsedSupabaseClient {
       }
 
       // ── customer_events ────────────────────────────────────────────────────
+      // Used by buildSnapshot (select+count) and appendCustomerEvent (upsert).
       if (table === "customer_events") {
         return {
           select: vi.fn().mockReturnValue({
@@ -64,6 +65,7 @@ function makeClient(opts: MockOptions = {}): LapsedSupabaseClient {
             not: vi.fn().mockReturnThis(),
             gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
           }),
+          upsert: vi.fn().mockResolvedValue({ error: null }),
         };
       }
 
