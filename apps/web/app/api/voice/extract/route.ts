@@ -7,6 +7,7 @@
 // The route writes nothing to the response that surfaces to the caller —
 // success/failure is observable via the voice_events log on the merchant.
 
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import {
@@ -31,10 +32,14 @@ interface ExtractBody {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
 
-  // Auth: shared secret. Identical pattern to the scoring cron route.
+  // Auth: constant-time comparison prevents timing-based secret inference.
   const authHeader = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${env.cronSecret}`;
-  if (authHeader !== expected) {
+  const bufA = Buffer.from(authHeader);
+  const bufB = Buffer.from(expected);
+  const authed =
+    bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+  if (!authed) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 

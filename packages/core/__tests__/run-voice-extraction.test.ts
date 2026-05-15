@@ -532,6 +532,30 @@ describe("runVoiceExtraction — extraction failure paths", () => {
     if (result.ok) return;
     expect(result.reason).toBe("synthesize");
   });
+
+  it("returns ok:false with reason fetch when the 30s aggregate timeout fires (spec: fetch within 30s)", async () => {
+    // fetchStorefrontSnapshot never resolves — simulate a fully hung upstream.
+    vi.mocked(fetchStorefrontSnapshot).mockReturnValue(new Promise(() => undefined));
+    const { client, writes } = makeMockClient();
+    const { client: anthropic, createFn } = makeAnthropicClient();
+
+    vi.useFakeTimers();
+    const runPromise = runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    // Advance past the 30s wall-clock guard inside the orchestrator.
+    await vi.advanceTimersByTimeAsync(30_001);
+    vi.useRealTimers();
+
+    const result = await runPromise;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    // Sonnet must NOT be called — the timeout short-circuits before synthesis.
+    expect(createFn).not.toHaveBeenCalled();
+    // extraction_failed event must be written with phase:fetch.
+    const failEv = writes.events.find((e) => e.event_type === "extraction_failed");
+    expect(failEv).toBeDefined();
+    expect((failEv!.payload as { phase: string }).phase).toBe("fetch");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -574,6 +598,31 @@ describe("runVoiceExtraction — source field", () => {
     );
     const allSources = writes.events.map((e) => e.source);
     expect(allSources.every((s) => s === "settings_reextract")).toBe(true);
+  });
+
+  it("settings_reextract does NOT write identity defaults to agent_profiles (decision 11)", async () => {
+    // Re-extract must not clobber merchant-customized role_descriptor / channel_prefs.
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+    const { client, writes } = makeMockClient();
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(
+      makeInput({ serviceClient: client, anthropicClient: anthropic, source: "settings_reextract" }),
+    );
+    // The only agent_profiles write allowed on re-extract is the active-pointer
+    // upsert from materializeVoice — it must NOT include role_descriptor.
+    const identityUpsert = writes.agentProfiles.find((u) => "role_descriptor" in u);
+    expect(identityUpsert).toBeUndefined();
+  });
+
+  it("install_orchestrator DOES write identity defaults to agent_profiles (decision 11)", async () => {
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+    const { client, writes } = makeMockClient();
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(
+      makeInput({ serviceClient: client, anthropicClient: anthropic, source: "install_orchestrator" }),
+    );
+    const identityUpsert = writes.agentProfiles.find((u) => "role_descriptor" in u);
+    expect(identityUpsert).toBeDefined();
   });
 });
 

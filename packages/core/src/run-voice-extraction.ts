@@ -15,7 +15,7 @@
 // `{ ok: false, reason }`. Always idempotent — re-running with the same
 // merchant returns the existing snapshot via source_hash dedup.
 
-import type { LapsedSupabaseClient } from "@lapsed/db";
+import type { LapsedSupabaseClient, Json } from "@lapsed/db";
 import type Anthropic from "@anthropic-ai/sdk";
 import {
   fetchStorefrontSnapshot,
@@ -106,13 +106,24 @@ export async function runVoiceExtraction(
   }
 
   // ── Step 2: fetch storefront ────────────────────────────────────────────
+  // Aggregate 30s wall-clock guard (decision 8 + spec): if all 5 Shopify
+  // resource fetches collectively take longer than 30s, abort and fail fast.
+  // The inner per-request timeoutMs (15s) only bounds individual requests;
+  // concurrent retries or slow responses can still keep the promise open
+  // past 30s without this outer guard.
   let fetchResult: StorefrontFetchResult;
   try {
-    fetchResult = await fetchStorefrontSnapshot({
-      shopDomain: input.shopDomain,
-      accessToken: input.accessToken,
-      fetch: input.fetch,
-    });
+    const fetchTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("fetch_timeout_30s")), 30_000),
+    );
+    fetchResult = await Promise.race([
+      fetchStorefrontSnapshot({
+        shopDomain: input.shopDomain,
+        accessToken: input.accessToken,
+        fetch: input.fetch,
+      }),
+      fetchTimeout,
+    ]);
   } catch (err) {
     return await failExtraction(input, source, "fetch", err);
   }
@@ -242,22 +253,26 @@ export async function runVoiceExtraction(
   try {
     await materializeVoice(input.serviceClient, input.merchantId);
 
-    const defaults = deriveAgentIdentity(synthesisResult.profile);
-    // Persist the identity defaults — the materializer wrote only the
-    // active pointer; the orchestrator owns role + channel + fallback.
-    const { error: defaultsErr } = await input.serviceClient
-      .from("agent_profiles")
-      .upsert(
-        {
-          merchant_id: input.merchantId,
-          active_voice_version_id: versionId,
-          role_descriptor: defaults.role_descriptor,
-          channel_prefs: defaults.channel_prefs as never,
-          fallback_criteria: defaults.fallback_criteria as never,
-        },
-        { onConflict: "merchant_id" },
-      );
-    if (defaultsErr) throw defaultsErr;
+    // Identity defaults (role_descriptor, channel_prefs, fallback_criteria)
+    // are written only on the initial install extraction. A settings re-extract
+    // updates the active voice version pointer but must NOT clobber
+    // merchant-customized identity fields (decision 11).
+    if (source === "install_orchestrator") {
+      const defaults = deriveAgentIdentity(synthesisResult.profile);
+      const { error: defaultsErr } = await input.serviceClient
+        .from("agent_profiles")
+        .upsert(
+          {
+            merchant_id: input.merchantId,
+            active_voice_version_id: versionId,
+            role_descriptor: defaults.role_descriptor,
+            channel_prefs: defaults.channel_prefs as unknown as Json,
+            fallback_criteria: defaults.fallback_criteria as unknown as Json,
+          },
+          { onConflict: "merchant_id" },
+        );
+      if (defaultsErr) throw defaultsErr;
+    }
   } catch (err) {
     return await failExtraction(input, source, "materialize", err);
   }
@@ -331,9 +346,9 @@ async function upsertSnapshotRow(
     .from("storefront_snapshots")
     .insert({
       merchant_id: input.merchantId,
-      raw_content: input.raw as never,
-      redacted_content: input.redacted as never,
-      pii_match_summary: input.piiSummary as never,
+      raw_content: input.raw as unknown as Json,
+      redacted_content: input.redacted as unknown as Json,
+      pii_match_summary: input.piiSummary as unknown as Json,
       source_hash: input.sourceHash,
     })
     .select("id")

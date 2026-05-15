@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import {
   STATE_TOKEN_COOKIE,
   exchangeCodeForToken,
@@ -18,20 +18,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Fires the voice-extraction orchestrator as a fire-and-forget POST. We
- * deliberately do NOT await — Vercel functions can extend via waitUntil
- * for true backgrounding, but a simple unawaited fetch is sufficient
- * here: the orchestrator's only side-effects are DB writes that the
- * onboarding UI polls for via getExtractionStatus (chunk 8).
+ * Fires the voice-extraction orchestrator as a background POST using
+ * Next.js `after()` so the Vercel runtime keeps the function alive until
+ * the fetch resolves, even though the OAuth redirect response is already
+ * sent. Without `after`, an unawaited fetch is cancelled the moment the
+ * handler returns.
  */
 function triggerVoiceExtraction(opts: {
   appUrl: string;
   cronSecret: string;
   merchantId: string;
-}): void {
+}): Promise<void> {
   const url = `${opts.appUrl}/api/voice/extract`;
-  // No await — return immediately so the merchant redirect isn't blocked.
-  fetch(url, {
+  return fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${opts.cronSecret}`,
@@ -41,9 +40,11 @@ function triggerVoiceExtraction(opts: {
       merchantId: opts.merchantId,
       source: "install_orchestrator",
     }),
-  }).catch((err) => {
-    console.warn(`voice_extraction_trigger_failed err=${(err as Error).message}`);
-  });
+  })
+    .then(() => undefined)
+    .catch((err: unknown) => {
+      console.warn(`voice_extraction_trigger_failed err=${(err as Error).message}`);
+    });
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -109,15 +110,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "persistence_failed" }, { status: 500 });
   }
 
-  // Fire-and-forget trigger the voice-extraction orchestrator (chunk 7).
-  // Awaiting would delay the merchant-facing redirect by up to 30s; the
-  // orchestrator writes its own voice_events and the onboarding UI
-  // (chunk 9) polls them for progress.
-  triggerVoiceExtraction({
+  // Schedule background extraction via `after` (Next.js 15.1 stable API).
+  // `after` defers the callback until after the redirect response is fully
+  // flushed, extending the Vercel function lifetime so the fetch is not
+  // cancelled mid-flight. The onboarding UI polls voice_events for progress.
+  after(triggerVoiceExtraction({
     appUrl: env.shopifyAppUrl,
     cronSecret: env.cronSecret,
     merchantId: merchantRow.id,
-  });
+  }));
 
   const sessionToken = await mintSessionCookie({
     shopDomain: shop,
