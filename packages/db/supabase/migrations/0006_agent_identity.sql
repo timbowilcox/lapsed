@@ -101,11 +101,12 @@ revoke all on public.storefront_snapshots from anon;
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Event types (enforced in application layer, not the DB, to match the
 -- pattern of customer_events / merchant_events):
+--   extraction_started   — payload: {} (occurred_at + source are the signal)
 --   storefront_fetched   — payload: {snapshot_id, byte_count, source_hash}
 --   pii_redacted         — payload: {snapshot_id, pii_match_summary}
 --   voice_extracted      — payload: {version_id, model_version, tokens_input, tokens_output, retries}
 --   voice_edited         — payload: {version_id, previous_version_id, fields_changed: []}
---   voice_activated      — payload: {version_id, previous_version_id} (Settings -> Activate prior version)
+--   voice_activated      — payload: {version_id, previous_version_id} (install run + Settings -> Activate)
 --   extraction_failed    — payload: {phase, reason, attempt, error_class}
 --
 -- payload NEVER contains raw storefront text or LLM-generated content.

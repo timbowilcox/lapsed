@@ -95,6 +95,11 @@ interface MockClientConfig {
   eventUpsertErrorOnCall?: number;
   versionInsertError?: { message: string };
   agentProfileUpsertError?: { message: string };
+  /** active_voice_version_id returned by the agent_profiles lookup in step 8.
+   *  undefined → no agent_profiles row exists yet (first install). */
+  existingActiveVersionId?: string | null;
+  /** If set, the agent_profiles lookup (step 8) returns this error. */
+  agentProfileLookupError?: { message: string };
   /** If set, voice_events.maybeSingle() (used by materializeVoice) returns this error. */
   materializeVoiceEventsError?: { message: string };
 }
@@ -254,7 +259,23 @@ function makeMockClient(cfg: MockClientConfig = {}): {
   }
 
   function makeAgentProfilesChain() {
-    return {
+    // Supports both the step-8 lookup (.select().eq().maybeSingle()) and the
+    // materializeVoice + identity-defaults upserts.
+    const chain: Record<string, unknown> = {
+      select: () => chain,
+      eq: () => chain,
+      maybeSingle: () => {
+        if (cfg.agentProfileLookupError) {
+          return Promise.resolve({ data: null, error: cfg.agentProfileLookupError });
+        }
+        return Promise.resolve({
+          data:
+            cfg.existingActiveVersionId !== undefined
+              ? { active_voice_version_id: cfg.existingActiveVersionId }
+              : null,
+          error: null,
+        });
+      },
       upsert: (row: Record<string, unknown>) => {
         writes.agentProfiles.push(row);
         if (cfg.agentProfileUpsertError) {
@@ -263,6 +284,7 @@ function makeMockClient(cfg: MockClientConfig = {}): {
         return Promise.resolve({ data: null, error: null });
       },
     };
+    return chain;
   }
 
   const client = {
@@ -406,6 +428,40 @@ describe("runVoiceExtraction — happy path", () => {
     expect(profile.sample_sentences).toHaveLength(5);
   });
 
+  it("writes the full 5-event lifecycle in order (decision 12 + chunk-8 phase machine)", async () => {
+    const { client, writes } = makeMockClient();
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    // extraction_started backs `analyzing`, fetched/redacted back `extracting`,
+    // voice_extracted backs `generating`, voice_activated is the `ready` terminal.
+    expect(writes.events.map((e) => e.event_type)).toEqual([
+      "extraction_started",
+      "storefront_fetched",
+      "pii_redacted",
+      "voice_extracted",
+      "voice_activated",
+    ]);
+  });
+
+  it("writes voice_activated last, with null previous_version_id on first install", async () => {
+    const { client, writes } = makeMockClient();
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    const activated = writes.events.find((e) => e.event_type === "voice_activated");
+    expect(activated).toBeDefined();
+    expect((activated!.payload as { version_id: string }).version_id).toBe(VERSION_ID);
+    expect((activated!.payload as { previous_version_id: string | null }).previous_version_id).toBeNull();
+  });
+
+  it("extraction_started carries an empty payload (no PII can ride along)", async () => {
+    const { client, writes } = makeMockClient();
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    const started = writes.events.find((e) => e.event_type === "extraction_started");
+    expect(started).toBeDefined();
+    expect(started!.payload).toEqual({});
+  });
+
   it("deduplicates re-fetch: returns existing snapshot id without re-inserting", async () => {
     const { client, writes } = makeMockClient({ existingSnapshot: true });
     const { client: anthropic } = makeAnthropicClient();
@@ -461,6 +517,17 @@ describe("runVoiceExtraction — daily cap exhaustion", () => {
     const failEvent = writes.events.find((e) => e.event_type === "extraction_failed");
     expect(failEvent).toBeDefined();
     expect((failEvent!.payload as { reason: string }).reason).toBe("daily_cap_exhausted");
+  });
+
+  it("daily cap exhaustion writes NO extraction_started event", async () => {
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+    const { client, writes } = makeMockClient({ todayExtractionCount: 10 });
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(
+      makeInput({ serviceClient: client, anthropicClient: anthropic, dailyCapDefault: 10 }),
+    );
+    // extraction_started is emitted only after the cap check passes.
+    expect(writes.events.map((e) => e.event_type)).toEqual(["extraction_failed"]);
   });
 
   it("one below cap (count = cap - 1) proceeds normally", async () => {
@@ -600,6 +667,39 @@ describe("runVoiceExtraction — source field", () => {
     expect(allSources.every((s) => s === "settings_reextract")).toBe(true);
   });
 
+  it("settings_reextract writes the same 5-event lifecycle as install", async () => {
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+    const { client, writes } = makeMockClient({ existingActiveVersionId: VERSION_ID });
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(
+      makeInput({ serviceClient: client, anthropicClient: anthropic, source: "settings_reextract" }),
+    );
+    expect(writes.events.map((e) => e.event_type)).toEqual([
+      "extraction_started",
+      "storefront_fetched",
+      "pii_redacted",
+      "voice_extracted",
+      "voice_activated",
+    ]);
+  });
+
+  it("voice_activated records the prior active version as previous_version_id on re-extract", async () => {
+    // A prior install left an active version; the re-extract's voice_activated
+    // must capture it for audit (decision 7 — version history).
+    const PRIOR_VERSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+    const { client, writes } = makeMockClient({ existingActiveVersionId: PRIOR_VERSION_ID });
+    const { client: anthropic } = makeAnthropicClient();
+    await runVoiceExtraction(
+      makeInput({ serviceClient: client, anthropicClient: anthropic, source: "settings_reextract" }),
+    );
+    const activated = writes.events.find((e) => e.event_type === "voice_activated")!;
+    expect((activated.payload as { version_id: string }).version_id).toBe(VERSION_ID);
+    expect((activated.payload as { previous_version_id: string }).previous_version_id).toBe(
+      PRIOR_VERSION_ID,
+    );
+  });
+
   it("settings_reextract does NOT write identity defaults to agent_profiles (decision 11)", async () => {
     // Re-extract must not clobber merchant-customized role_descriptor / channel_prefs.
     vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
@@ -659,13 +759,25 @@ describe("runVoiceExtraction — DB error paths", () => {
   });
 
   it("gap 3 — storefront_fetched event upsert error returns ok:false reason:fetch", async () => {
-    // The 1st voice_events upsert is for storefront_fetched (step 5).
+    // Voice_events upsert order: 1 = extraction_started, 2 = storefront_fetched.
+    const { client } = makeMockClient({ eventUpsertErrorOnCall: 2 });
+    const { client: anthropic, createFn } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    expect(createFn).not.toHaveBeenCalled();
+  });
+
+  it("gap 3b — extraction_started event upsert error returns ok:false reason:fetch", async () => {
+    // The 1st voice_events upsert is extraction_started (step 1b).
     const { client } = makeMockClient({ eventUpsertErrorOnCall: 1 });
     const { client: anthropic, createFn } = makeAnthropicClient();
     const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe("fetch");
+    // Fetch + Sonnet must not run if the run cannot even be marked started.
     expect(createFn).not.toHaveBeenCalled();
   });
 

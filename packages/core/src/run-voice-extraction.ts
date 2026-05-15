@@ -1,15 +1,17 @@
 // Voice extraction orchestrator — single entry point that wires together
 // the chunks 2-6 building blocks for a complete extraction run.
 //
-// Sequence (all 8 steps, atomic at the event-log layer):
-//   1. Daily-cap check (decision 5 — cost discipline)
-//   2. Fetch storefront snapshot from Shopify
-//   3. PII-redact the snapshot (decision 10)
-//   4. Persist storefront_snapshots row (raw + redacted, source-hash deduped)
-//   5. Write storefront_fetched + pii_redacted events
-//   6. assertNoPii pre-flight + call voice synthesizer (decision 9)
-//   7. Insert voice_versions row + write voice_extracted event
-//   8. Materialize agent_profiles (active pointer + identity defaults)
+// Sequence (atomic at the event-log layer):
+//   1.  Daily-cap check (decision 5 — cost discipline)
+//   1b. Write extraction_started event (backs the chunk-8 `analyzing` phase)
+//   2.  Fetch storefront snapshot from Shopify
+//   3.  PII-redact the snapshot (decision 10)
+//   4.  Persist storefront_snapshots row (raw + redacted, source-hash deduped)
+//   5.  Write storefront_fetched + pii_redacted events
+//   6.  assertNoPii pre-flight + call voice synthesizer (decision 9)
+//   7.  Insert voice_versions row + write voice_extracted event
+//   8.  Write voice_activated event + materialize agent_profiles
+//       (active pointer + identity defaults)
 //
 // On any failure, writes an extraction_failed event and returns
 // `{ ok: false, reason }`. Always idempotent — re-running with the same
@@ -103,6 +105,26 @@ export async function runVoiceExtraction(
       cap: input.dailyCapDefault,
     });
     return { ok: false, reason: "cap_check", detail: "daily_cap_exhausted" };
+  }
+
+  // ── Step 1b: extraction_started event ───────────────────────────────────
+  // Written only AFTER the cap check passes, so a capped run never emits a
+  // started event it would immediately contradict with a cap-exhaustion
+  // failure. This event is the terminal-absence anchor for the chunk-8 phase
+  // machine: it backs the `analyzing` phase during the fetch window (which
+  // has no other event for up to 30s) and its occurred_at is the run's
+  // `startedAt`.
+  const startedAt = now().toISOString();
+  try {
+    await appendVoiceEvent(input.serviceClient, {
+      merchantId: input.merchantId,
+      eventType: "extraction_started",
+      source,
+      occurredAt: startedAt,
+      payload: {},
+    });
+  } catch (err) {
+    return await failExtraction(input, source, "fetch", err);
   }
 
   // ── Step 2: fetch storefront ────────────────────────────────────────────
@@ -257,8 +279,33 @@ export async function runVoiceExtraction(
     return await failExtraction(input, source, "materialize", err);
   }
 
-  // ── Step 8: materialize agent_profiles ─────────────────────────────────
+  // ── Step 8: activate + materialize agent_profiles ──────────────────────
   try {
+    // Read the previously-active version for the voice_activated audit
+    // payload. Null on a first install (no agent_profiles row yet).
+    const { data: priorProfile, error: priorErr } = await input.serviceClient
+      .from("agent_profiles")
+      .select("active_voice_version_id")
+      .eq("merchant_id", input.merchantId)
+      .maybeSingle();
+    if (priorErr) throw priorErr;
+    const previousVersionId =
+      (priorProfile?.active_voice_version_id as string | null | undefined) ?? null;
+
+    // voice_activated is written BEFORE materializeVoice. materializeVoice
+    // resolves the active version as "most-recent voice_activated wins" — so
+    // emitting it first guarantees the materializer picks THIS extraction's
+    // version. On a re-extract, a stale voice_activated from the install run
+    // would otherwise win. It is also the terminal event the chunk-8 phase
+    // machine reads as `ready`. Written for both install + re-extract.
+    await appendVoiceEvent(input.serviceClient, {
+      merchantId: input.merchantId,
+      eventType: "voice_activated",
+      source,
+      occurredAt: addMs(occurredAt, 3),
+      payload: { version_id: versionId, previous_version_id: previousVersionId },
+    });
+
     await materializeVoice(input.serviceClient, input.merchantId);
 
     // Identity defaults (role_descriptor, channel_prefs, fallback_criteria)

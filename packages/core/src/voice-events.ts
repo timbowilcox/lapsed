@@ -12,6 +12,7 @@ import { parseVoiceProfile } from "./voice-synthesizer";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const VoiceEventType = z.enum([
+  "extraction_started",
   "storefront_fetched",
   "pii_redacted",
   "voice_extracted",
@@ -42,6 +43,13 @@ export type VoiceEventSource = z.infer<typeof VoiceEventSource>;
 // persisted. Combined with the "write the parsed value" pattern in
 // appendVoiceEvent, this guarantees voice_events.payload contains only
 // fields enumerated below (decision 10).
+
+// extraction_started has no payload — the event's own `occurred_at` and
+// `source` columns are the entire signal. They back the chunk-8 phase
+// machine: extraction_started as the latest event = `analyzing` phase, and
+// its `occurred_at` is the run's `startedAt`. `.strict()` keeps the payload
+// empty so no field can ever ride along carrying PII (decision 10).
+const ExtractionStartedPayload = z.object({}).strict();
 
 const StorefrontFetchedPayload = z.object({
   snapshot_id: z.string().uuid(),
@@ -98,6 +106,7 @@ const ExtractionFailedPayload = z.object({
 
 // Discriminated union — each event type carries its own payload shape.
 export type VoiceEventInput =
+  | { eventType: "extraction_started"; source: VoiceEventSource; merchantId: string; occurredAt: string; payload: z.infer<typeof ExtractionStartedPayload> }
   | { eventType: "storefront_fetched"; source: VoiceEventSource; merchantId: string; occurredAt: string; payload: z.infer<typeof StorefrontFetchedPayload> }
   | { eventType: "pii_redacted"; source: VoiceEventSource; merchantId: string; occurredAt: string; payload: z.infer<typeof PiiRedactedPayload> }
   | { eventType: "voice_extracted"; source: VoiceEventSource; merchantId: string; occurredAt: string; payload: z.infer<typeof VoiceExtractedPayload> }
@@ -133,6 +142,9 @@ export async function appendVoiceEvent(
   // so the persisted row contains only the enumerated keys (decision 10).
   let parsedPayload: unknown;
   switch (event.eventType) {
+    case "extraction_started":
+      parsedPayload = ExtractionStartedPayload.parse(event.payload);
+      break;
     case "storefront_fetched":
       parsedPayload = StorefrontFetchedPayload.parse(event.payload);
       break;

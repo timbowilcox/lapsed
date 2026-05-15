@@ -94,6 +94,13 @@ describe("appendVoiceEvent — happy path", () => {
     const variants: VoiceEventInput[] = [
       {
         merchantId: MERCHANT_ID,
+        eventType: "extraction_started",
+        source: "install_orchestrator",
+        occurredAt: NOW,
+        payload: {},
+      },
+      {
+        merchantId: MERCHANT_ID,
         eventType: "voice_extracted",
         source: "install_orchestrator",
         occurredAt: NOW,
@@ -662,6 +669,20 @@ describe("decision 10 — strict payload schemas reject extra fields", () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           raw_emails: ["leak@example.com"],
         } as never,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("extraction_started payload with any extra field is rejected (empty .strict())", async () => {
+    const { client } = makeMockClient();
+    await expect(
+      appendVoiceEvent(client, {
+        merchantId: MERCHANT_ID,
+        eventType: "extraction_started",
+        source: "install_orchestrator",
+        occurredAt: NOW,
+        // Adversarial extra field — empty .strict() schema must reject it.
+        payload: { shop_domain: "leak.myshopify.com" } as never,
       }),
     ).rejects.toThrow();
   });
