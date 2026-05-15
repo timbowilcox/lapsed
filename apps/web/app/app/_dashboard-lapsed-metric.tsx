@@ -1,7 +1,7 @@
 import "server-only";
 
 import { MetricCard, formatCount } from "@lapsed/ui";
-import { createServiceClient, getMerchantSummary } from "@lapsed/db";
+import { createServiceClient, getMerchantSummary, getReadyToReactivateCount } from "@lapsed/db";
 import { serverEnv } from "@/app/lib/env";
 
 export async function DashboardLapsedMetric({ merchantId }: { merchantId: string }) {
@@ -10,14 +10,23 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
     url: env.supabaseUrl,
     serviceKey: env.supabaseSecretKey,
   });
-  const summary = await getMerchantSummary(serviceClient, merchantId);
+
+  const [summary, readyCount] = await Promise.all([
+    getMerchantSummary(serviceClient, merchantId),
+    getReadyToReactivateCount(serviceClient, merchantId, env.propensityReadyThreshold),
+  ]);
+
+  const trendText =
+    readyCount > 0
+      ? `${formatCount(readyCount)} ready to reactivate`
+      : "No scored customers yet";
 
   return (
     <MetricCard
       label="Lapsed group"
       value={formatCount(summary.total_lapsed_count)}
-      trend="Cadence scoring in Sprint 04"
-      trendDirection="flat"
+      trend={trendText}
+      trendDirection={readyCount > 0 ? "up" : "flat"}
     />
   );
 }

@@ -1,6 +1,10 @@
 import "server-only";
 
-import { mintMerchantJwt, createMerchantClient, getLapsedCustomers } from "@lapsed/db";
+import {
+  mintMerchantJwt,
+  createMerchantClient,
+  getLapsedCustomersWithSignals,
+} from "@lapsed/db";
 import { serverEnv } from "@/app/lib/env";
 import type { SessionMerchant } from "@/app/lib/session";
 import { LapsedCustomersList, type LapsedCustomerListItem } from "./_lapsed-customers-list";
@@ -11,7 +15,7 @@ function LapsedCustomersEmptyState() {
       <p className="text-body-strong text-ink-900">No lapsed customers identified yet.</p>
       <p className="mt-8 max-w-sm text-meta text-ink-500">
         Once your store data syncs, the agent will classify customers by purchase cadence and score
-        them. Check back after Sprint 04 scoring runs.
+        them. Check back after the nightly scoring run.
       </p>
     </div>
   );
@@ -30,35 +34,27 @@ export async function LapsedCustomersContent({ merchant }: { merchant: SessionMe
     merchantJwt: jwt,
   });
 
-  const { data: customers } = await getLapsedCustomers(merchantClient, { limit: 50 });
+  const { data: customers } = await getLapsedCustomersWithSignals(merchantClient, {
+    merchantId: merchant.id,
+    limit: 50,
+    sortBy: "propensity_90d",
+  });
 
   if (customers.length === 0) return <LapsedCustomersEmptyState />;
 
-  const items: LapsedCustomerListItem[] = customers.map(
-    ({
-      id,
-      shopify_customer_gid,
-      first_name,
-      last_name,
-      email,
-      tags,
-      total_order_count,
-      total_ltv_cents,
-      last_order_days_ago,
-      lapsed_score,
-    }) => ({
-      id,
-      shopify_customer_gid,
-      first_name,
-      last_name,
-      email,
-      tags,
-      total_order_count,
-      total_ltv_cents,
-      last_order_days_ago,
-      lapsed_score,
-    }),
-  );
+  const items: LapsedCustomerListItem[] = customers.map((c) => ({
+    id: c.id,
+    shopify_customer_gid: c.shopify_customer_gid,
+    first_name: c.first_name,
+    last_name: c.last_name,
+    email: c.email,
+    tags: c.tags,
+    total_order_count: c.total_order_count,
+    total_ltv_cents: c.total_ltv_cents,
+    last_order_days_ago: c.last_order_days_ago,
+    lapsed_score: c.lapsed_score,
+    inferred_state: c.inferred_state,
+  }));
 
   return <LapsedCustomersList customers={items} />;
 }
