@@ -25,7 +25,9 @@
         "SUPABASE_JWT_SECRET",
         "SUPABASE_DB_URL",
         "NEXT_PUBLIC_SHOPIFY_API_KEY",
-        "TOKEN_ENCRYPTION_KEY"
+        "TOKEN_ENCRYPTION_KEY",
+        "CRON_SECRET",
+        "PROPENSITY_READY_THRESHOLD"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },

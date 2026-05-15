@@ -719,9 +719,25 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      merchant_aggregates: {
+        Row: {
+          ltv_p75_cents: string | null
+          ltv_p90_cents: string | null
+          median_aov_cents: string | null
+          median_ltv_cents: string | null
+          merchant_id: string
+          refreshed_at: string
+          total_customers: string | null
+          total_lapsed: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      refresh_merchant_aggregates: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       increment_customer_order: {
         Args: {
           p_merchant_id: string

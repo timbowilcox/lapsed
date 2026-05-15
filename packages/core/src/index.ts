@@ -25,3 +25,5 @@ export {
   type CustomerForGrouping,
   type MerchantContext,
 } from "./customer-groups";
+
+export { runRfmBatch, type RfmBatchResult } from "./rfm-batch";

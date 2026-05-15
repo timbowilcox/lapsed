@@ -12,6 +12,8 @@ interface ServerEnv {
   supabaseSecretKey: string;
   supabaseJwtSecret: string;
   tokenEncryptionKey: string;
+  cronSecret: string;
+  propensityReadyThreshold: number;
 }
 
 function required(name: string): string {
@@ -34,6 +36,8 @@ export function serverEnv(): ServerEnv {
     supabaseSecretKey: required("SUPABASE_SECRET_KEY"),
     supabaseJwtSecret: required("SUPABASE_JWT_SECRET"),
     tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
+    cronSecret: required("CRON_SECRET"),
+    propensityReadyThreshold: parseFloat(process.env.PROPENSITY_READY_THRESHOLD ?? "0.4"),
   };
   return cached;
 }
