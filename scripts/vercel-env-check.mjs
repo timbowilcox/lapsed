@@ -34,6 +34,9 @@ const EXPECTED_ALL = [
   "SUPABASE_JWT_SECRET",
   "SUPABASE_DB_URL",
   "TOKEN_ENCRYPTION_KEY",
+  "ANTHROPIC_API_KEY",
+  "CRON_SECRET",
+  "PROPENSITY_READY_THRESHOLD",
 ];
 
 const missingFromTurbo = EXPECTED_ALL.filter((k) => !turboEnv.has(k));
