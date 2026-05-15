@@ -392,6 +392,13 @@ async function writeScoreForCustomer(
   // scoring run can compare inferred_state.lifecycle_stage (= last scored
   // lifecycle) against customer_rfm.lifecycle_stage (= current RFM lifecycle)
   // to detect transitions that occurred without new engagement events.
+  // Only write last_engagement_event_at when we found a non-system event.
+  // customer_events is append-only (Decision 1), so a null result here means
+  // "no events yet" not "events vanished" — but omitting the key on conflict
+  // preserves any prior non-null value rather than clobbering it with null.
+  const engagementFragment = lastNonSystemEventAt
+    ? { last_engagement_event_at: lastNonSystemEventAt.toISOString() }
+    : {};
   const { error } = await serviceClient
     .from("customer_inferred_state")
     .upsert(
@@ -407,7 +414,7 @@ async function writeScoreForCustomer(
         score_model_version: HAIKU_MODEL,
         score_run_id: scoringRunId,
         last_scored_at: now,
-        last_engagement_event_at: lastNonSystemEventAt?.toISOString() ?? null,
+        ...engagementFragment,
       },
       { onConflict: "merchant_id,shopify_customer_gid" },
     );

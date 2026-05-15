@@ -804,7 +804,10 @@ describe("scoreCustomers — last_engagement_event_at write path", () => {
     expect(payload.last_engagement_event_at).toBe(mostRecent);
   });
 
-  it("writes null when the customer has no non-system engagement events", async () => {
+  it("omits last_engagement_event_at from the upsert payload when no non-system events are found (preserves prior value on conflict)", async () => {
+    // customer_events is append-only (Decision 1), so a transient empty result
+    // must not clobber a previously-written non-null timestamp. The upsert key
+    // is omitted, leaving any existing column value intact.
     const serviceClient = makeServiceClient({ engagementEvents: [] });
     const anthropicClient = makeAnthropicClient();
 
@@ -824,7 +827,39 @@ describe("scoreCustomers — last_engagement_event_at write path", () => {
       .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
     expect(upsertResult).toBeDefined();
     const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
-    expect(payload.last_engagement_event_at).toBeNull();
+    expect("last_engagement_event_at" in payload).toBe(false);
+  });
+
+  it("captures a >90d-old engagement event as the MAX (cutoff removed for last_engagement_event_at)", async () => {
+    // The 90d filter was dropped so older events still establish a baseline
+    // last_engagement_event_at. Without this behavior, customers whose last
+    // engagement is older than 90d would have last_engagement_event_at = null
+    // forever, defeating the incremental-skip eligibility comparison.
+    const now = Date.now();
+    const veryOldEvent = new Date(now - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const engagementEvents = [
+      { shopify_customer_gid: GID, occurred_at: veryOldEvent },
+    ];
+    const serviceClient = makeServiceClient({ engagementEvents });
+    const anthropicClient = makeAnthropicClient();
+
+    await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    interface MockWithUpsert { value: { upsert: ReturnType<typeof vi.fn> } }
+    const fromMock = serviceClient.from as ReturnType<typeof vi.fn>;
+    const upsertResult = (fromMock.mock.calls as string[][])
+      .map((c, i) =>
+        c[0] === "customer_inferred_state"
+          ? (fromMock.mock.results[i] as unknown as MockWithUpsert | null)
+          : null,
+      )
+      .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
+    expect(upsertResult).toBeDefined();
+    const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.last_engagement_event_at).toBe(veryOldEvent);
   });
 });
 
