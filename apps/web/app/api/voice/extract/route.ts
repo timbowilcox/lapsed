@@ -7,7 +7,7 @@
 // The route writes nothing to the response that surfaces to the caller —
 // success/failure is observable via the voice_events log on the merchant.
 
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, createHmac } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import {
@@ -32,13 +32,16 @@ interface ExtractBody {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
 
-  // Auth: constant-time comparison prevents timing-based secret inference.
+  // Auth: HMAC-based constant-time comparison. Comparing raw buffers with
+  // `timingSafeEqual` requires a length pre-check that leaks the secret length.
+  // Hashing both sides with a fixed-length HMAC digest (32 bytes each) avoids
+  // that leak entirely — the comparison is always 32 bytes regardless of input.
   const authHeader = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${env.cronSecret}`;
-  const bufA = Buffer.from(authHeader);
-  const bufB = Buffer.from(expected);
-  const authed =
-    bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+  const authed = timingSafeEqual(
+    createHmac("sha256", env.cronSecret).update(authHeader).digest(),
+    createHmac("sha256", env.cronSecret).update(expected).digest(),
+  );
   if (!authed) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

@@ -111,19 +111,27 @@ export async function runVoiceExtraction(
   // The inner per-request timeoutMs (15s) only bounds individual requests;
   // concurrent retries or slow responses can still keep the promise open
   // past 30s without this outer guard.
+  // The timer handle is captured so it can be cleared in the finally block —
+  // without cleanup, a resolved race leaves a dangling 30s timer that causes
+  // "open handles" warnings in test runners and unnecessary timer queue load.
   let fetchResult: StorefrontFetchResult;
   try {
-    const fetchTimeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("fetch_timeout_30s")), 30_000),
-    );
-    fetchResult = await Promise.race([
-      fetchStorefrontSnapshot({
-        shopDomain: input.shopDomain,
-        accessToken: input.accessToken,
-        fetch: input.fetch,
-      }),
-      fetchTimeout,
-    ]);
+    let fetchTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const fetchTimeout = new Promise<never>((_, reject) => {
+      fetchTimeoutHandle = setTimeout(() => reject(new Error("fetch_timeout_30s")), 30_000);
+    });
+    try {
+      fetchResult = await Promise.race([
+        fetchStorefrontSnapshot({
+          shopDomain: input.shopDomain,
+          accessToken: input.accessToken,
+          fetch: input.fetch,
+        }),
+        fetchTimeout,
+      ]);
+    } finally {
+      clearTimeout(fetchTimeoutHandle);
+    }
   } catch (err) {
     return await failExtraction(input, source, "fetch", err);
   }
