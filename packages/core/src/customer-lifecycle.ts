@@ -76,7 +76,7 @@ export function classifyLifecycle(customer: CustomerSnapshot): LifecycleStage {
   if (
     baseStage === "engaged" &&
     previousLifecycleStage === "lapsed" &&
-    daysSinceLastScoredAsLapsed !== null &&
+    daysSinceLastScoredAsLapsed != null &&
     daysSinceLastScoredAsLapsed <= 90
   ) {
     return "won_back";

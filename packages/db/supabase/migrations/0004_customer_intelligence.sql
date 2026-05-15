@@ -293,6 +293,15 @@ comment on materialized view public.merchant_aggregates is
   'job after materializeCustomer completes. Must NOT be used for billing math '
   '(see CLAUDE.md decision 6 — billing uses incrementality-adjusted attribution).';
 
--- Unique index on merchant_id so REFRESH CONCURRENTLY is possible in the future.
+-- Unique index on merchant_id required for REFRESH CONCURRENTLY.
 create unique index if not exists merchant_aggregates_merchant_idx
   on public.merchant_aggregates (merchant_id);
+
+-- merchant_aggregates is SERVICE-ROLE ONLY.
+-- Materialized views do not support PostgreSQL RLS. Access is controlled via
+-- REVOKE: the authenticated and anon roles cannot read this view. Only
+-- service_role (the scoring job, the RFM batch) may query it.
+-- Merchant-facing reads go through customer_inferred_state and customer_rfm
+-- (both have RLS policies) — never directly through this view.
+revoke all on public.merchant_aggregates from authenticated;
+revoke all on public.merchant_aggregates from anon;

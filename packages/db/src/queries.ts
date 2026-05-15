@@ -135,65 +135,116 @@ export async function getLapsedCustomersWithSignals(
   const { limit, cursor = 0, groupFilter, sortBy = "propensity_90d" } = opts;
 
   if (groupFilter && groupFilter.length > 0) {
-    // Group-filter path: fetch from customer_inferred_state first (group_memberships
-    // is an array column only on that table), then join customer rows in-memory.
-    const { data: stateRows, error: stateErr } = await merchantClient
+    // Group-filter path: drive pagination from customer_inferred_state (the only table
+    // with group_memberships). Fetch a page of scored rows, then hydrate with customer
+    // identity data. The totalCount is from the inferred_state count query so it reflects
+    // the full group-filtered population, not just the current page's customer matches.
+    const stateCol =
+      sortBy === "propensity_90d" ? "propensity_90d" :
+      sortBy === "total_ltv_cents" ? "updated_at" : "updated_at";
+
+    const { data: stateRows, error: stateErr, count: stateCount } = await merchantClient
       .from("customer_inferred_state")
-      .select("*")
+      .select("*", { count: "exact" })
       .overlaps("group_memberships", groupFilter)
-      .order(
-        sortBy === "propensity_90d" ? "propensity_90d" : "updated_at",
-        { ascending: false, nullsFirst: false },
-      )
+      .order(stateCol, { ascending: false, nullsFirst: false })
       .range(cursor, cursor + limit - 1);
 
     if (stateErr) throw stateErr;
     const states = stateRows ?? [];
 
     if (states.length === 0) {
-      return { data: [], nextCursor: null, totalCount: 0 };
+      return { data: [], nextCursor: null, totalCount: stateCount ?? 0 };
     }
 
     const gids = states.map((s) => s.shopify_customer_gid);
-    const { data: customerRows, error: custErr, count } = await merchantClient
+    const { data: customerRows, error: custErr } = await merchantClient
       .from("customers")
-      .select("*", { count: "exact" })
+      .select("*")
       .in("shopify_customer_gid", gids)
       .not("lapsed_at", "is", null);
 
     if (custErr) throw custErr;
 
-    const stateByGid = new Map(states.map((s) => [s.shopify_customer_gid, s]));
-    const merged = (customerRows ?? []).map((c) => ({
-      ...c,
-      inferred_state: stateByGid.get(c.shopify_customer_gid) ?? null,
-    }));
+    const customerByGid = new Map((customerRows ?? []).map((c) => [c.shopify_customer_gid, c]));
+    const merged = states
+      .filter((s) => customerByGid.has(s.shopify_customer_gid))
+      .map((s) => ({ ...customerByGid.get(s.shopify_customer_gid)!, inferred_state: s }));
 
     return {
       data: merged,
       nextCursor: states.length === limit ? cursor + limit : null,
-      totalCount: count,
+      totalCount: stateCount,
     };
   }
 
-  // No group filter: sort customers directly by the requested column.
+  // No group filter. When scoring has run, drive sort from customer_inferred_state for
+  // propensity_90d (true total order). For other sorts, query customers directly.
   const from = cursor;
   const to = from + limit - 1;
 
+  if (sortBy === "propensity_90d") {
+    // Drive from inferred_state ordered by propensity_90d — gives true total order.
+    const { data: stateRows, error: stateErr, count: stateCount } = await merchantClient
+      .from("customer_inferred_state")
+      .select("*", { count: "exact" })
+      .order("propensity_90d", { ascending: false, nullsFirst: false })
+      .range(from, to);
+
+    if (stateErr) throw stateErr;
+    const states = stateRows ?? [];
+
+    if (states.length === 0) {
+      // Scoring hasn't run yet — fall back to lapsed_score order.
+      const { data: fbRows, error: fbErr, count: fbCount } = await merchantClient
+        .from("customers")
+        .select("*", { count: "exact" })
+        .not("lapsed_at", "is", null)
+        .order("lapsed_score", { ascending: false, nullsFirst: false })
+        .range(from, to);
+
+      if (fbErr) throw fbErr;
+      const rows = (fbRows ?? []).map((c) => ({ ...c, inferred_state: null as CustomerInferredStateRow | null }));
+      return {
+        data: rows,
+        nextCursor: rows.length === limit ? cursor + limit : null,
+        totalCount: fbCount,
+      };
+    }
+
+    const gids = states.map((s) => s.shopify_customer_gid);
+    const { data: customerRows, error: custErr } = await merchantClient
+      .from("customers")
+      .select("*")
+      .in("shopify_customer_gid", gids)
+      .not("lapsed_at", "is", null);
+
+    if (custErr) throw custErr;
+
+    const customerByGid = new Map((customerRows ?? []).map((c) => [c.shopify_customer_gid, c]));
+    const merged = states
+      .filter((s) => customerByGid.has(s.shopify_customer_gid))
+      .map((s) => ({ ...customerByGid.get(s.shopify_customer_gid)!, inferred_state: s }));
+
+    return {
+      data: merged,
+      nextCursor: states.length === limit ? cursor + limit : null,
+      totalCount: stateCount,
+    };
+  }
+
+  // last_order_at or total_ltv_cents — drive directly from customers table.
   let customerQuery = merchantClient
     .from("customers")
     .select("*", { count: "exact" })
     .not("lapsed_at", "is", null);
 
   if (sortBy === "last_order_at") {
-    customerQuery = customerQuery.order("last_order_at", { ascending: true, nullsFirst: false });
-  } else if (sortBy === "total_ltv_cents") {
-    customerQuery = customerQuery.order("total_ltv_cents", { ascending: false, nullsFirst: false });
+    // Most recently lapsed first (descending = purchased most recently = least urgent)
+    // Ascending = oldest lapse first = most urgent for reactivation.
+    customerQuery = customerQuery.order("last_order_at", { ascending: false, nullsFirst: false });
   } else {
-    // propensity_90d default: sort by lapsed_score (closest available proxy until scoring runs)
-    customerQuery = customerQuery
-      .order("lapsed_score", { ascending: false, nullsFirst: false })
-      .order("last_order_at", { ascending: true, nullsFirst: false });
+    customerQuery = customerQuery.order("total_ltv_cents", { ascending: false, nullsFirst: false });
   }
 
   const { data: customerRows, error: custErr, count } = await customerQuery.range(from, to);
@@ -204,7 +255,7 @@ export async function getLapsedCustomersWithSignals(
     return { data: [], nextCursor: null, totalCount: count };
   }
 
-  // Fetch inferred state for the page of customers.
+  // Hydrate with inferred state for the page.
   const gids = rows.map((c) => c.shopify_customer_gid);
   const { data: stateRows, error: stateErr } = await merchantClient
     .from("customer_inferred_state")
@@ -214,20 +265,10 @@ export async function getLapsedCustomersWithSignals(
   if (stateErr) throw stateErr;
 
   const stateByGid = new Map((stateRows ?? []).map((s) => [s.shopify_customer_gid, s]));
-
-  // If propensity sort is requested and scoring has run, re-sort by propensity_90d.
-  let merged = rows.map((c) => ({
+  const merged = rows.map((c) => ({
     ...c,
     inferred_state: stateByGid.get(c.shopify_customer_gid) ?? null,
   }));
-
-  if (sortBy === "propensity_90d") {
-    merged = merged.sort((a, b) => {
-      const ap = a.inferred_state?.propensity_90d ?? -1;
-      const bp = b.inferred_state?.propensity_90d ?? -1;
-      return Number(bp) - Number(ap);
-    });
-  }
 
   return {
     data: merged,

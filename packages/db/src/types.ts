@@ -565,7 +565,7 @@ export type Database = {
           merchant_id: string
           model_version: string
           started_at: string
-          status: string
+          status: "running" | "succeeded" | "failed"
           tokens_input: number
           tokens_output: number
         }
@@ -579,7 +579,7 @@ export type Database = {
           merchant_id: string
           model_version: string
           started_at?: string
-          status?: string
+          status?: "running" | "succeeded" | "failed"
           tokens_input?: number
           tokens_output?: number
         }
@@ -593,7 +593,7 @@ export type Database = {
           merchant_id?: string
           model_version?: string
           started_at?: string
-          status?: string
+          status?: "running" | "succeeded" | "failed"
           tokens_input?: number
           tokens_output?: number
         }
@@ -654,7 +654,7 @@ export type Database = {
           last_scored_at: string | null
           lifecycle_stage: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id: string
-          predicted_residual_ltv_cents: number | null
+          predicted_residual_ltv_cents: string | null  // bigint → string for precision safety
           propensity_30d: number | null
           propensity_60d: number | null
           propensity_90d: number | null
@@ -672,7 +672,7 @@ export type Database = {
           last_scored_at?: string | null
           lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id: string
-          predicted_residual_ltv_cents?: number | null
+          predicted_residual_ltv_cents?: string | null  // bigint → string
           propensity_30d?: number | null
           propensity_60d?: number | null
           propensity_90d?: number | null
@@ -690,7 +690,7 @@ export type Database = {
           last_scored_at?: string | null
           lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id?: string
-          predicted_residual_ltv_cents?: number | null
+          predicted_residual_ltv_cents?: string | null  // bigint → string
           propensity_30d?: number | null
           propensity_60d?: number | null
           propensity_90d?: number | null
