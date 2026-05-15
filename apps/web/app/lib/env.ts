@@ -14,6 +14,7 @@ interface ServerEnv {
   tokenEncryptionKey: string;
   cronSecret: string;
   propensityReadyThreshold: number;
+  anthropicApiKey: string;
 }
 
 function required(name: string): string {
@@ -38,6 +39,7 @@ export function serverEnv(): ServerEnv {
     tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
     cronSecret: required("CRON_SECRET"),
     propensityReadyThreshold: parseFloat(process.env.PROPENSITY_READY_THRESHOLD ?? "0.4"),
+    anthropicApiKey: required("ANTHROPIC_API_KEY"),
   };
   return cached;
 }

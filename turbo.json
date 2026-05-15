@@ -27,7 +27,8 @@
         "NEXT_PUBLIC_SHOPIFY_API_KEY",
         "TOKEN_ENCRYPTION_KEY",
         "CRON_SECRET",
-        "PROPENSITY_READY_THRESHOLD"
+        "PROPENSITY_READY_THRESHOLD",
+        "ANTHROPIC_API_KEY"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },
