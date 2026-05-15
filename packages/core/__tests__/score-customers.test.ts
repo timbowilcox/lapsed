@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { scoreCustomers } from "../src/score-customers";
+import { HAIKU_MODEL } from "../src/customer-scoring";
 import type { LapsedSupabaseClient } from "@lapsed/db";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -40,6 +41,7 @@ const VALID_SCORE_INPUT = {
 interface MockOptions {
   customers?: object[];
   inferredStates?: object[];
+  rfmStates?: object[];
   dailyTokenCap?: number;
   tokensUsedToday?: number;
   orderEvents?: object[];
@@ -152,6 +154,20 @@ function makeServiceClient(opts: MockOptions = {}): LapsedSupabaseClient {
         };
       }
 
+      if (table === "customer_rfm") {
+        // .select().eq().in() — batch RFM lifecycle fetch in findScorable
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: opts.rfmStates ?? [],
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+
       throw new Error(`Unexpected table in score-customers mock: ${table}`);
     }),
   } as unknown as LapsedSupabaseClient;
@@ -227,15 +243,19 @@ describe("scoreCustomers — idempotency", () => {
 
   it("skips already-scored customers when last_scored_at is more recent than last engagement", async () => {
     // Customer has been scored more recently than their last engagement event → skip.
+    // Must also provide matching rfmStates and current score_model_version so the
+    // lifecycle-change and model-version checks do not independently force a rescore.
     const alreadyScoredState = [
       {
         shopify_customer_gid: GID,
         lifecycle_stage: "lapsed",
         last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), // 1h ago
         last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+        score_model_version: HAIKU_MODEL, // current model — prevents auto-rescore
       },
     ];
-    const serviceClient = makeServiceClient({ inferredStates: alreadyScoredState });
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }]; // matches state
+    const serviceClient = makeServiceClient({ inferredStates: alreadyScoredState, rfmStates });
     const anthropicClient = makeAnthropicClient();
 
     const result = await scoreCustomers(serviceClient, anthropicClient, {
@@ -459,5 +479,103 @@ describe("scoreCustomers — DB error propagation", () => {
     expect(result.status).toBe("succeeded");
     // Counter not incremented since writeScoreForCustomer threw before completing.
     expect(result.customersScored).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Incremental skip — lifecycle change forces rescore
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — lifecycle-change rescore", () => {
+  it("rescores a customer whose lifecycle changed since last scoring even when engagement is stale", async () => {
+    // last_scored_at is more recent than last_engagement_event_at (stale engagement),
+    // but customer_rfm.lifecycle_stage = "lapsed" while state.lifecycle_stage = "at_risk".
+    // The lifecycle change must force a rescore.
+    const stateWithStaleEngagement = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "at_risk",
+        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }];
+    const serviceClient = makeServiceClient({ inferredStates: stateWithStaleEngagement, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(1);
+    expect(anthropicClient.messages.create).toHaveBeenCalledOnce();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Incremental skip — stale model version forces rescore
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — model-version rescore", () => {
+  it("rescores a customer whose score_model_version is stale even when engagement and lifecycle are unchanged", async () => {
+    const staleVersionState = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        score_model_version: "claude-haiku-4-5-old", // stale
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }]; // unchanged lifecycle
+    const serviceClient = makeServiceClient({ inferredStates: staleVersionState, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(1);
+    expect(anthropicClient.messages.create).toHaveBeenCalledOnce();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Observability — per-batch structured success log
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — batch success log", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("emits a scoring_batch_complete log after each successful batch", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const serviceClient = makeServiceClient();
+    const anthropicClient = makeAnthropicClient();
+
+    await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    // Find the batch-complete log call.
+    const batchLog = logSpy.mock.calls
+      .map((args) => { try { return JSON.parse(args[0] as string) as Record<string, unknown>; } catch { return null; } })
+      .find((obj) => obj?.event === "scoring_batch_complete");
+
+    expect(batchLog).toBeDefined();
+    expect(batchLog).toMatchObject({
+      event: "scoring_batch_complete",
+      batch_size: 1,
+      tokens_in: 100,
+      tokens_out: 50,
+      status: "succeeded",
+    });
+    expect(typeof batchLog?.latency_ms).toBe("number");
+    expect(typeof batchLog?.merchant_id).toBe("string");
   });
 });

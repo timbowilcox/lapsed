@@ -253,14 +253,19 @@ export async function runRfmBatch(
 
         if (rfmUpsertErr) throw rfmUpsertErr;
 
-        // Upsert customer_inferred_state — lifecycle + group memberships.
+        // Upsert customer_inferred_state — group memberships only.
+        // lifecycle_stage is intentionally omitted here: it is owned by the
+        // scoring job (score-customers.ts writeScoreForCustomer) so that
+        // customer_inferred_state.lifecycle_stage always reflects "lifecycle
+        // at time of last scoring" while customer_rfm.lifecycle_stage reflects
+        // "current RFM classification". The scoring job compares the two to
+        // detect lifecycle transitions that occurred without new engagement events.
         const { error: stateUpsertErr } = await serviceClient
           .from("customer_inferred_state")
           .upsert(
             {
               merchant_id: merchantId,
               shopify_customer_gid: customer.shopify_customer_gid,
-              lifecycle_stage: lifecycle,
               group_memberships: groups,
             },
             { onConflict: "merchant_id,shopify_customer_gid" },

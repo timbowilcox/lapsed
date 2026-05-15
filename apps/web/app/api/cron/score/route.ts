@@ -83,6 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const result = await scoreCustomers(serviceClient, anthropicClient, {
           merchantId: merchant.id,
           medianAovCents,
+          tokenCapDefault: env.scoringTokenCapDefault,
         });
         finalResult = {
           customersScored: result.customersScored,

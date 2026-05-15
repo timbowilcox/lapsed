@@ -37,6 +37,7 @@ const EXPECTED_ALL = [
   "ANTHROPIC_API_KEY",
   "CRON_SECRET",
   "PROPENSITY_READY_THRESHOLD",
+  "SCORING_TOKEN_CAP_DEFAULT",
 ];
 
 const missingFromTurbo = EXPECTED_ALL.filter((k) => !turboEnv.has(k));

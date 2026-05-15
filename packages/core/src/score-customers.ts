@@ -26,6 +26,7 @@ import {
   type CustomerScoringInput,
   type ScoringBatchResult,
 } from "./customer-scoring";
+import type { LifecycleStage } from "./customer-lifecycle";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export interface ScoreCustomersResult {
@@ -51,6 +52,12 @@ interface InferredStateEligibilityRow {
   lifecycle_stage: string | null;
   last_scored_at: string | null;
   last_engagement_event_at: string | null;
+  score_model_version: string | null;
+}
+
+interface RfmEligibilityRow {
+  shopify_customer_gid: string;
+  lifecycle_stage: string | null;
 }
 
 interface OrderEventEnrichmentRow {
@@ -243,7 +250,7 @@ async function findScorable(
   const gids = customerList.map((c) => c.shopify_customer_gid);
   const { data: states, error: statesErr } = await serviceClient
     .from("customer_inferred_state")
-    .select("shopify_customer_gid,lifecycle_stage,last_scored_at,last_engagement_event_at")
+    .select("shopify_customer_gid,lifecycle_stage,last_scored_at,last_engagement_event_at,score_model_version")
     .eq("merchant_id", merchantId)
     .in("shopify_customer_gid", gids);
 
@@ -253,18 +260,39 @@ async function findScorable(
     ((states ?? []) as InferredStateEligibilityRow[]).map((s) => [s.shopify_customer_gid, s]),
   );
 
+  // Fetch current RFM lifecycle stage for each candidate. The RFM job writes
+  // the freshly-computed lifecycle to customer_rfm nightly; the scoring job
+  // writes its own lifecycle snapshot to customer_inferred_state when it scores.
+  // Comparing the two detects lifecycle transitions that happened between scoring
+  // cycles but did not produce a new engagement event (e.g. at_risk → lapsed
+  // due to time passing), forcing a rescore even when engagement is stale.
+  const { data: rfmRows, error: rfmErr } = await serviceClient
+    .from("customer_rfm")
+    .select("shopify_customer_gid,lifecycle_stage")
+    .eq("merchant_id", merchantId)
+    .in("shopify_customer_gid", gids);
+
+  if (rfmErr) throw rfmErr;
+
+  const rfmLifecycleMap = new Map(
+    ((rfmRows ?? []) as RfmEligibilityRow[]).map((r) => [r.shopify_customer_gid, r.lifecycle_stage]),
+  );
+
   const scorable = customerList.filter((c) => {
     const state = stateMap.get(c.shopify_customer_gid);
     // Exclude churned customers — scoring is ineffective for them.
     if (state?.lifecycle_stage === "churned") return false;
     if (forceFullRescore) return true;
     if (!state?.last_scored_at) return true; // never scored
-    // Skip if no new engagement signal since last score.
+    // Auto-rescore when score was produced by a stale model version.
+    if (state.score_model_version !== HAIKU_MODEL) return true;
+    // Skip if no new engagement signal since last score AND lifecycle is unchanged.
     const lastScored = new Date(state.last_scored_at).getTime();
     const lastEngaged = state.last_engagement_event_at
       ? new Date(state.last_engagement_event_at).getTime()
       : 0;
-    return lastEngaged > lastScored;
+    const rfmLifecycle = rfmLifecycleMap.get(c.shopify_customer_gid) ?? null;
+    return lastEngaged > lastScored || rfmLifecycle !== state.lifecycle_stage;
   });
 
   if (scorable.length === 0) return [];
@@ -286,7 +314,7 @@ async function findScorable(
       totalLtvCents: c.total_ltv_cents,
       ordersInPast12Months: ev?.ordersInPast12Months ?? 0,
       engagementEventsInPast90Days: ev?.engagementEventsInPast90Days ?? 0,
-      lifecycleStage: state?.lifecycle_stage ?? "lapsed",
+      lifecycleStage: rfmLifecycleMap.get(c.shopify_customer_gid) ?? state?.lifecycle_stage ?? "lapsed",
       avgOrderValueCents,
     };
   });
@@ -302,6 +330,7 @@ async function writeScoreForCustomer(
   scoringRunId: string,
   gid: string,
   result: ScoringBatchResult["scores"][number],
+  lifecycleStage: LifecycleStage,
   now: string,
 ): Promise<void> {
   // Decision 1: write customer_scored event before touching inferred state.
@@ -322,12 +351,17 @@ async function writeScoreForCustomer(
   });
 
   // Update scoring columns in customer_inferred_state.
+  // lifecycle_stage is written here (not by rfm-batch) so that the next
+  // scoring run can compare inferred_state.lifecycle_stage (= last scored
+  // lifecycle) against customer_rfm.lifecycle_stage (= current RFM lifecycle)
+  // to detect transitions that occurred without new engagement events.
   const { error } = await serviceClient
     .from("customer_inferred_state")
     .upsert(
       {
         merchant_id: merchantId,
         shopify_customer_gid: gid,
+        lifecycle_stage: lifecycleStage,
         propensity_30d: result.propensity30d,
         propensity_60d: result.propensity60d,
         propensity_90d: result.propensity90d,
@@ -350,6 +384,7 @@ export interface ScoreCustomersOpts {
   merchantId: string;
   medianAovCents: number;
   forceFullRescore?: boolean;
+  tokenCapDefault?: number;
 }
 
 export async function scoreCustomers(
@@ -357,7 +392,7 @@ export async function scoreCustomers(
   anthropicClient: Anthropic,
   opts: ScoreCustomersOpts,
 ): Promise<ScoreCustomersResult> {
-  const { merchantId, medianAovCents, forceFullRescore = false } = opts;
+  const { merchantId, medianAovCents, forceFullRescore = false, tokenCapDefault = DEFAULT_TOKEN_CAP } = opts;
   const now = new Date().toISOString();
   const today = now.slice(0, 10); // YYYY-MM-DD
 
@@ -382,7 +417,7 @@ export async function scoreCustomers(
   try {
     // Check token cap.
     const cap = await getOrCreateTokenCap(serviceClient, merchantId, today);
-    const effectiveCap = cap.daily_token_cap ?? DEFAULT_TOKEN_CAP;
+    const effectiveCap = cap.daily_token_cap ?? tokenCapDefault;
     const remainingTokens = effectiveCap - cap.tokens_used_today;
 
     if (remainingTokens <= 0) {
@@ -398,8 +433,10 @@ export async function scoreCustomers(
         if (capReached) break;
 
         const batch = scorable.slice(i, i + BATCH_SIZE);
+        const batchLifecycleMap = new Map(batch.map((b) => [b.shopifyCustomerGid, b.lifecycleStage]));
         let batchResult: ScoringBatchResult;
 
+        const batchStart = Date.now();
         try {
           batchResult = await scoreBatch(anthropicClient, batch, medianAovCents);
         } catch (err) {
@@ -438,6 +475,7 @@ export async function scoreCustomers(
               scoringRunId,
               score.shopifyCustomerGid,
               score,
+              (batchLifecycleMap.get(score.shopifyCustomerGid) ?? "lapsed") as LifecycleStage,
               now,
             );
             customersScored++;
@@ -451,6 +489,18 @@ export async function scoreCustomers(
             );
           }
         }
+
+        console.log(
+          JSON.stringify({
+            event: "scoring_batch_complete",
+            merchant_id: merchantId.slice(0, 8),
+            batch_size: batch.length,
+            tokens_in: batchResult.tokensInput,
+            tokens_out: batchResult.tokensOutput,
+            latency_ms: Date.now() - batchStart,
+            status: "succeeded",
+          }),
+        );
       }
     }
   } catch (err) {
