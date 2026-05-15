@@ -88,6 +88,15 @@ interface DbWrites {
 interface MockClientConfig {
   todayExtractionCount?: number;
   existingSnapshot?: boolean;
+  // Error injection — allows targeted DB failure tests without separate mock modules.
+  snapshotLookupError?: { message: string };
+  snapshotInsertError?: { message: string };
+  /** 1-based: the Nth voice_events.upsert() call returns this error. */
+  eventUpsertErrorOnCall?: number;
+  versionInsertError?: { message: string };
+  agentProfileUpsertError?: { message: string };
+  /** If set, voice_events.maybeSingle() (used by materializeVoice) returns this error. */
+  materializeVoiceEventsError?: { message: string };
 }
 
 function makeMockClient(cfg: MockClientConfig = {}): {
@@ -103,6 +112,10 @@ function makeMockClient(cfg: MockClientConfig = {}): {
     versions: [],
     agentProfiles: [],
   };
+
+  // Shared counter across all from("voice_events") calls so
+  // eventUpsertErrorOnCall targets the globally Nth upsert.
+  let eventUpsertCount = 0;
 
   // State for the materializeVoice call: after voice_extracted event is
   // written, materializeVoice queries for the latest voice_extracted event.
@@ -144,6 +157,9 @@ function makeMockClient(cfg: MockClientConfig = {}): {
       limit: () => chain,
       // Terminal for materializeVoice selects.
       maybeSingle: () => {
+        if (cfg.materializeVoiceEventsError) {
+          return Promise.resolve({ data: null, error: cfg.materializeVoiceEventsError });
+        }
         if (eventTypeFilter === "voice_activated") {
           return Promise.resolve({ data: null, error: null });
         }
@@ -154,6 +170,10 @@ function makeMockClient(cfg: MockClientConfig = {}): {
       },
       // appendVoiceEvent uses upsert.
       upsert: (row: Record<string, unknown>) => {
+        eventUpsertCount++;
+        if (cfg.eventUpsertErrorOnCall !== undefined && eventUpsertCount === cfg.eventUpsertErrorOnCall) {
+          return Promise.resolve({ data: null, error: { message: "injected event upsert error" } });
+        }
         writes.events.push(row);
         return Promise.resolve({ data: null, error: null });
       },
@@ -166,18 +186,26 @@ function makeMockClient(cfg: MockClientConfig = {}): {
       // Lookup path: .select().eq().eq().maybeSingle()
       select: () => lookupInsertChain,
       eq: () => lookupInsertChain,
-      maybeSingle: () =>
-        Promise.resolve({
+      maybeSingle: () => {
+        if (cfg.snapshotLookupError) {
+          return Promise.resolve({ data: null, error: cfg.snapshotLookupError });
+        }
+        return Promise.resolve({
           data: existingSnapshot ? { id: SNAPSHOT_ID } : null,
           error: null,
-        }),
+        });
+      },
       // Insert path: .insert(row).select().single()
       insert: (row: Record<string, unknown>) => {
         writes.snapshots.push(row);
         const insertChain: Record<string, unknown> = {
           select: () => insertChain,
-          single: () =>
-            Promise.resolve({ data: { id: SNAPSHOT_ID }, error: null }),
+          single: () => {
+            if (cfg.snapshotInsertError) {
+              return Promise.resolve({ data: null, error: cfg.snapshotInsertError });
+            }
+            return Promise.resolve({ data: { id: SNAPSHOT_ID }, error: null });
+          },
         };
         return insertChain;
       },
@@ -209,11 +237,15 @@ function makeMockClient(cfg: MockClientConfig = {}): {
         writes.versions.push(row);
         const insertChain: Record<string, unknown> = {
           select: () => insertChain,
-          single: () =>
-            Promise.resolve({
+          single: () => {
+            if (cfg.versionInsertError) {
+              return Promise.resolve({ data: null, error: cfg.versionInsertError });
+            }
+            return Promise.resolve({
               data: { id: VERSION_ID, version_number: 1 },
               error: null,
-            }),
+            });
+          },
         };
         return insertChain;
       },
@@ -225,6 +257,9 @@ function makeMockClient(cfg: MockClientConfig = {}): {
     return {
       upsert: (row: Record<string, unknown>) => {
         writes.agentProfiles.push(row);
+        if (cfg.agentProfileUpsertError) {
+          return Promise.resolve({ data: null, error: cfg.agentProfileUpsertError });
+        }
         return Promise.resolve({ data: null, error: null });
       },
     };
@@ -539,5 +574,103 @@ describe("runVoiceExtraction — source field", () => {
     );
     const allSources = writes.events.map((e) => e.source);
     expect(allSources.every((s) => s === "settings_reextract")).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB error injection paths (gaps 2–5 from test-coverage analysis)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("runVoiceExtraction — DB error paths", () => {
+  beforeEach(() => {
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue(MOCK_FETCH_RESULT);
+  });
+
+  it("gap 2a — snapshot lookup DB error returns ok:false reason:fetch with extraction_failed event", async () => {
+    const { client, writes } = makeMockClient({ snapshotLookupError: { message: "rls denied" } });
+    const { client: anthropic, createFn } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    // Anthropic was never called.
+    expect(createFn).not.toHaveBeenCalled();
+    // extraction_failed event written via safeAppend.
+    expect(writes.events.some((e) => e.event_type === "extraction_failed")).toBe(true);
+  });
+
+  it("gap 2b — snapshot insert DB error returns ok:false reason:fetch", async () => {
+    const { client } = makeMockClient({ snapshotInsertError: { message: "insert failed" } });
+    const { client: anthropic, createFn } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    expect(createFn).not.toHaveBeenCalled();
+  });
+
+  it("gap 3 — storefront_fetched event upsert error returns ok:false reason:fetch", async () => {
+    // The 1st voice_events upsert is for storefront_fetched (step 5).
+    const { client } = makeMockClient({ eventUpsertErrorOnCall: 1 });
+    const { client: anthropic, createFn } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    expect(createFn).not.toHaveBeenCalled();
+  });
+
+  it("gap 4 — voice_versions insert error returns ok:false reason:materialize", async () => {
+    const { client } = makeMockClient({ versionInsertError: { message: "version insert failed" } });
+    const { client: anthropic } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("materialize");
+  });
+
+  it("gap 5a — materializeVoice voice_events query error returns ok:false reason:materialize", async () => {
+    const { client } = makeMockClient({
+      materializeVoiceEventsError: { message: "voice_events materialization error" },
+    });
+    const { client: anthropic } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("materialize");
+  });
+
+  it("gap 5b — agent_profiles upsert error returns ok:false reason:materialize", async () => {
+    const { client } = makeMockClient({ agentProfileUpsertError: { message: "agent profiles upsert failed" } });
+    const { client: anthropic } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("materialize");
+  });
+
+  it("gap 6 — partial failures with all-empty snapshot returns ok:false (allFieldsEmpty second branch)", async () => {
+    // 2 failures (not 5) + all-empty snapshot → second disjunct of the guard fires.
+    vi.mocked(fetchStorefrontSnapshot).mockResolvedValue({
+      snapshot: {
+        about: "",
+        products: [],
+        blog: [],
+        policies: { privacy: "", refund: "", shipping: "" },
+        footer: "",
+      },
+      failures: [
+        { resource: "about", reason: "http", status: 503 },
+        { resource: "products", reason: "http", status: 503 },
+      ],
+    });
+    const { client } = makeMockClient();
+    const { client: anthropic, createFn } = makeAnthropicClient();
+    const result = await runVoiceExtraction(makeInput({ serviceClient: client, anthropicClient: anthropic }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("fetch");
+    // Sonnet must not be called when snapshot is degraded beyond usefulness.
+    expect(createFn).not.toHaveBeenCalled();
   });
 });
