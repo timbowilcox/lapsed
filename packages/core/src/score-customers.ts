@@ -294,9 +294,18 @@ async function findScorable(
     const lastEngaged = state.last_engagement_event_at
       ? new Date(state.last_engagement_event_at).getTime()
       : 0;
-    // rfmLifecycle is null when no customer_rfm row exists yet — treat as "no lifecycle change"
-    // rather than "lifecycle changed", to avoid rescoring every run for un-materialized customers.
-    return lastEngaged > lastScored || (rfmLifecycle != null && rfmLifecycle !== state.lifecycle_stage);
+    // rfmLifecycle is null when no customer_rfm row exists yet (e.g. customer arrived between
+    // last night's RFM batch and tonight's scoring run). Treat as "needs rescore" only if the
+    // existing score is stale (> 25h old) — otherwise the nightly RFM batch will materialize
+    // the row before the next scoring cycle and the lifecycle comparison will take over.
+    // This avoids both: (a) permanent skip when the RFM row never materialises, and
+    // (b) rescoring every run for a customer scored just hours ago.
+    const STALE_NO_RFM_MS = 25 * 60 * 60 * 1000; // 25 hours > one nightly cycle
+    const scoredAt = state.last_scored_at ? new Date(state.last_scored_at).getTime() : 0;
+    const staleWithNoRfm = rfmLifecycle === null && Date.now() - scoredAt > STALE_NO_RFM_MS;
+    return lastEngaged > lastScored ||
+      staleWithNoRfm ||
+      (rfmLifecycle != null && rfmLifecycle !== state.lifecycle_stage);
   });
 
   if (scorable.length === 0) return [];

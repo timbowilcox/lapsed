@@ -269,20 +269,19 @@ describe("scoreCustomers — idempotency", () => {
     expect(anthropicClient.messages.create).not.toHaveBeenCalled();
   });
 
-  it("skips a customer with no RFM row when engagement is stale (null lifecycle treated as unchanged)", async () => {
-    // No RFM row → rfmLifecycle is null. Before the null-fix, null !== "lapsed" would force a rescore.
-    // After the fix, null is treated as "lifecycle unknown/unchanged" and the customer is skipped.
-    const alreadyScoredState = [
+  it("skips a customer with no RFM row when scored recently (< 25h) and engagement is stale", async () => {
+    // No RFM row, but scored 1h ago — the RFM batch will materialise the row within the next cycle.
+    // Skip to avoid rescoring on every run during the brief materialization window.
+    const recentlyScoredState = [
       {
         shopify_customer_gid: GID,
         lifecycle_stage: "lapsed",
-        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        last_scored_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), // 1h ago
+        last_engagement_event_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
         score_model_version: HAIKU_MODEL,
       },
     ];
-    // No RFM rows — rfmLifecycle will be null for this GID
-    const serviceClient = makeServiceClient({ inferredStates: alreadyScoredState, rfmStates: [] });
+    const serviceClient = makeServiceClient({ inferredStates: recentlyScoredState, rfmStates: [] });
     const anthropicClient = makeAnthropicClient();
 
     const result = await scoreCustomers(serviceClient, anthropicClient, {
@@ -292,6 +291,30 @@ describe("scoreCustomers — idempotency", () => {
 
     expect(result.customersScored).toBe(0);
     expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+
+  it("rescores a customer with no RFM row when score is stale (> 25h)", async () => {
+    // No RFM row AND last_scored_at is 48h ago — the RFM batch should have run by now.
+    // Rescore so lifecycle-drift detection is not permanently bypassed.
+    const staleNoRfmState = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), // 48h ago
+        last_engagement_event_at: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(), // 72h ago
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const serviceClient = makeServiceClient({ inferredStates: staleNoRfmState, rfmStates: [] });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(1);
+    expect(anthropicClient.messages.create).toHaveBeenCalledOnce();
   });
 });
 
