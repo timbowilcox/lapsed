@@ -78,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const result = await runRfmBatch(serviceClient, merchant.id, merchantContext);
       totalProcessed += result.processed;
       totalErrors += result.errors;
-      results.push({ merchantId: merchant.id, ...result });
+      results.push({ merchantId: merchant.id.slice(0, 8), ...result });
     } catch (err) {
       totalErrors++;
       console.error(

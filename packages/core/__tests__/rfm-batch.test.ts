@@ -57,13 +57,20 @@ function makeClient(opts: MockOptions = {}): LapsedSupabaseClient {
       }
 
       // ── customer_events ────────────────────────────────────────────────────
-      // Used by buildSnapshot (select+count) and appendCustomerEvent (upsert).
+      // Used by buildSnapshot for three queries (180d count, 30d count, last
+      // lapsed event) and by appendCustomerEvent (upsert). Each select path
+      // terminates at a different method: gte() for count queries, maybeSingle()
+      // for the event lookup — both are present so either chain resolves.
       if (table === "customer_events") {
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnThis(),
             not: vi.fn().mockReturnThis(),
             gte: vi.fn().mockResolvedValue({ count: 0, error: null }),
+            contains: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
           }),
           upsert: vi.fn().mockResolvedValue({ error: null }),
         };

@@ -1,5 +1,5 @@
 import type { LapsedSupabaseClient } from "@lapsed/db";
-import type { LifecycleStage } from "./customer-lifecycle";
+import type { LifecycleStage, CustomerSnapshot } from "./customer-lifecycle";
 import { classifyLifecycle } from "./customer-lifecycle";
 import { assignGroups } from "./customer-groups";
 import type { MerchantContext } from "./customer-groups";
@@ -26,19 +26,27 @@ interface RfmRow {
   lifecycle_stage: LifecycleStage | null;
 }
 
+interface LastEventRow {
+  occurred_at: string;
+}
+
+interface SnapshotResult {
+  snapshot: CustomerSnapshot;
+  engagementEventsInPast30Days: number;
+}
+
 /**
  * Build a CustomerSnapshot for a single customer by querying their events.
- * Reads order_events for financial + temporal metrics, customer_events for engagement.
+ * Also returns engagementEventsInPast30Days (needed by assignGroups but not
+ * by classifyLifecycle, which uses the 180-day window).
  */
 async function buildSnapshot(
   serviceClient: LapsedSupabaseClient,
   merchantId: string,
   customer: CustomerRow,
   now: Date,
-): Promise<Parameters<typeof classifyLifecycle>[0]> {
+): Promise<SnapshotResult> {
   const gid = customer.shopify_customer_gid;
-  const twelveMonthsAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() + 12 - 12); // 12-month window
 
   // Fetch all order_events for this customer (need first-order date + 12-month count).
   const { data: orderEvents, error: oeErr } = await serviceClient
@@ -66,6 +74,8 @@ async function buildSnapshot(
     ? Math.floor((now.getTime() - firstOrderAt.getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
+  const IDENTITY_EVENTS = "(customer_created,customer_updated,customer_backfilled)";
+
   // Count engagement events (non-identity) in past 180 days.
   const cutoff180d = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
   const { count: engagementCount, error: ceErr } = await serviceClient
@@ -73,10 +83,22 @@ async function buildSnapshot(
     .select("*", { count: "exact", head: true })
     .eq("merchant_id", merchantId)
     .eq("shopify_customer_gid", gid)
-    .not("event_type", "in", "(customer_created,customer_updated,customer_backfilled)")
+    .not("event_type", "in", IDENTITY_EVENTS)
     .gte("occurred_at", cutoff180d.toISOString());
 
   if (ceErr) throw ceErr;
+
+  // Count engagement events (non-identity) in past 30 days — for assignGroups.
+  const cutoff30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const { count: engagement30dCount, error: ce30dErr } = await serviceClient
+    .from("customer_events")
+    .select("*", { count: "exact", head: true })
+    .eq("merchant_id", merchantId)
+    .eq("shopify_customer_gid", gid)
+    .not("event_type", "in", IDENTITY_EVENTS)
+    .gte("occurred_at", cutoff30d.toISOString());
+
+  if (ce30dErr) throw ce30dErr;
 
   // Fetch previous lifecycle stage from customer_rfm (the last stable classification).
   const { data: rfmRow, error: rfmErr } = await serviceClient
@@ -90,14 +112,39 @@ async function buildSnapshot(
 
   const previousLifecycleStage = (rfmRow as RfmRow | null)?.lifecycle_stage ?? null;
 
+  // Derive daysSinceLastScoredAsLapsed from the event log. Needed by classifyLifecycle
+  // to detect won_back — how long ago was the customer last classified as lapsed?
+  const { data: lastLapsedEvent, error: llErr } = await serviceClient
+    .from("customer_events")
+    .select("occurred_at")
+    .eq("merchant_id", merchantId)
+    .eq("shopify_customer_gid", gid)
+    .eq("event_type", "customer_scored")
+    .contains("payload", { lifecycle_stage: "lapsed" })
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (llErr) throw llErr;
+
+  const daysSinceLastScoredAsLapsed = lastLapsedEvent
+    ? Math.floor(
+        (now.getTime() - new Date((lastLapsedEvent as LastEventRow).occurred_at).getTime()) /
+          (1000 * 60 * 60 * 24),
+      )
+    : null;
+
   return {
-    totalOrderCount: customer.total_order_count,
-    lastOrderDaysAgo: customer.last_order_days_ago,
-    firstOrderDaysAgo,
-    ordersInPast12Months,
-    previousLifecycleStage,
-    daysSinceLastScoredAsLapsed: null, // populated by scoring service in chunk 5
-    engagementEventsInPast180Days: engagementCount ?? 0,
+    snapshot: {
+      totalOrderCount: customer.total_order_count,
+      lastOrderDaysAgo: customer.last_order_days_ago,
+      firstOrderDaysAgo,
+      ordersInPast12Months,
+      previousLifecycleStage,
+      daysSinceLastScoredAsLapsed,
+      engagementEventsInPast180Days: engagementCount ?? 0,
+    },
+    engagementEventsInPast30Days: engagement30dCount ?? 0,
   };
 }
 
@@ -107,11 +154,11 @@ async function buildSnapshot(
  * For each customer:
  *  1. Build a CustomerSnapshot from order_events and customer_events.
  *  2. Call classifyLifecycle — deterministic, pure.
- *  3. Upsert customer_rfm with raw RFM values + lifecycle_stage.
- *  4. Upsert customer_inferred_state with lifecycle_stage + group_memberships.
+ *  3. Write customer_scored event (Decision 1 — event-sourced memory graph).
+ *  4. Upsert customer_rfm with raw RFM values + lifecycle_stage.
+ *  5. Upsert customer_inferred_state with lifecycle_stage + group_memberships.
  *
- * Idempotent: re-running produces the same state. The materialized view
- * (merchant_aggregates) is refreshed after all customer rows are updated.
+ * Idempotent: re-running produces the same state.
  */
 export async function runRfmBatch(
   serviceClient: LapsedSupabaseClient,
@@ -134,7 +181,18 @@ export async function runRfmBatch(
       .eq("merchant_id", merchantId)
       .range(offset, offset + PAGE - 1);
 
-    if (custErr) throw custErr;
+    if (custErr) {
+      // Page-level error — stop this merchant's batch, count as one error.
+      errors++;
+      console.error(
+        JSON.stringify({
+          event: "rfm_batch_page_error",
+          merchant_id: merchantId.slice(0, 8),
+          error: custErr.message,
+        }),
+      );
+      break;
+    }
 
     const page = (customers ?? []) as CustomerRow[];
     hasMore = page.length === PAGE;
@@ -142,7 +200,12 @@ export async function runRfmBatch(
 
     for (const customer of page) {
       try {
-        const snapshot = await buildSnapshot(serviceClient, merchantId, customer, now);
+        const { snapshot, engagementEventsInPast30Days } = await buildSnapshot(
+          serviceClient,
+          merchantId,
+          customer,
+          now,
+        );
         const lifecycle = classifyLifecycle(snapshot);
         const groupAssignments = assignGroups(
           {
@@ -151,7 +214,7 @@ export async function runRfmBatch(
             lastOrderDaysAgo: customer.last_order_days_ago,
             firstOrderDaysAgo: snapshot.firstOrderDaysAgo,
             lifecycle,
-            engagementEventsInPast30Days: 0,
+            engagementEventsInPast30Days,
           },
           merchantContext,
         );
@@ -161,8 +224,8 @@ export async function runRfmBatch(
         const totalLtv = Number(customer.total_ltv_cents);
 
         // Write customer_scored event BEFORE touching inferred state.
-        // This is architectural decision 1: every customer state change is an
-        // appended event; customer_inferred_state is a regeneratable cache.
+        // Decision 1: every customer state change is an appended event;
+        // customer_inferred_state is a regeneratable cache.
         await appendCustomerEvent(serviceClient, {
           merchantId,
           shopifyCustomerGid: customer.shopify_customer_gid,
@@ -208,7 +271,6 @@ export async function runRfmBatch(
         processed++;
       } catch (err) {
         errors++;
-        // Log structured error without PII (no customer GID in log, only merchant + count)
         console.error(
           JSON.stringify({
             event: "rfm_batch_customer_error",
