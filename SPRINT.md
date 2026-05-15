@@ -1,412 +1,293 @@
-# Sprint 03 — Data Ingestion and Customer Memory Graph
+# Sprint 04 â€” Customer Intelligence (Scoring + Group Auto-detection)
 
-Date: 2026-05-14
+Date: 2026-05-15
 Repo: timbowilcox/lapsed
-Branch: `sprint-03/data-ingestion-and-memory-graph`
-Estimated effort: 5–7 days, single PR
+Branch: `sprint-04/customer-intelligence`
+Estimated effort: 5â€“7 days (multiple sessions, suitable for overnight runs)
 
----
+## Required reading before starting
 
-## Required reading
+In order â€” not optional:
 
-Before any implementation, read in order:
-
-1. `CLAUDE.md` — full file, especially "Architectural load-bearing decisions" (six decisions, two of which *land in this sprint*) and "Failure modes encoded so far"
-2. `PRODUCT.md` — full file, especially Module 1 (Win-back engine) and Module 5 (Revenue attribution) for data shape understanding
-3. `DESIGN-SYSTEM.md` — empty / loading / error state visual patterns
-4. `.claude/agents/README.md` — dispatch patterns for the six specialist subagents
-5. `.claude/agents/architecture-guardian.md` — read twice; its verdict is binding every chunk this sprint
-
-The two architectural load-bearing decisions that land here:
-
-- **Decision 1**: Event-sourced customer memory graph. Append-only event log with timestamp + source. Materialised customer profile regenerated from events. No snapshot mutations — no UPDATE on event tables, ever.
-- **Decision 2**: pgvector for conversation memory. Embedding column on `conversations` and `conversation_messages` tables from day one. ivfflat index. Not added later.
-
----
+1. **CLAUDE.md** â€” architectural load-bearing decisions, sprint sequence, evaluator template
+2. **PRODUCT.md** â€” Module 2 (Customer intelligence) is the spec this sprint implements. Pay particular attention to the principle "inferred state is derived, never canonical â€” regeneratable from the event log + the scoring algorithm"
+3. **DESIGN-SYSTEM.md** â€” for the UI surfaces in chunks 9â€“11
+4. **Sprint 03 HANDOFF.md** (on main after Sprint 03 merge) â€” to understand the canonical event helpers, materializeCustomer pattern, and the architectural commitments already made
+5. **`.claude/agents/architecture-guardian.md`** â€” dispatch after every chunk, verdicts binding
 
 ## Scope
 
-Sprint 03 is the foundational data layer. It lands exactly two things:
+Build the customer intelligence layer on top of Sprint 03's memory graph. Score every customer's reactivation propensity (30/60/90-day) using Haiku 4.5. Detect customer groups algorithmically from RFM + engagement patterns. Classify lifecycle stage. Surface all three on the Lapsed list, customer detail, and dashboard. Idempotent, batched, cost-capped per merchant.
 
-1. **Data ingestion**: A complete schema (event-sourced), Shopify webhooks for live updates, and a backfill job for historical data. By end of sprint, a newly-installed merchant's historical customers and orders are ingested and stored in the memory graph.
+Sprint 03 built the *what* (customer data, events). Sprint 04 builds the *who's worth reaching out to* (propensity + groups + lifecycle). Sprint 06 will use this output to build campaigns. Sprint 07 will use it to prioritize the conversation queue.
 
-2. **Fixture-to-real-data sweep**: Every screen that can show real data does. Campaigns, conversations, and attribution remain as fixtures (those ship in Sprints 06–08), but Dashboard, Lapsed customers, and Settings show real DB values.
+## Architectural commitments (from CLAUDE.md, restated for this sprint)
 
-Loading, empty, and error states are added for every route that has a real data fetch.
+These are still in force from Sprint 03. No deferrals.
 
-No scoring, no classification, no SMS — that is Sprint 04 and beyond.
-
----
+- **Inferred state is derived, never canonical.** `customer_inferred_state` is a cache that can be fully regenerated from the event log + the scoring algorithm. Never make a business decision on inferred state alone â€” always cross-reference the event log when the decision matters.
+- **Scoring decisions are themselves events.** Each scoring run writes a `customer_scored` event to `customer_engagement_events`. This gives historical traceability of how scores changed and feeds the bandit's outcome learning loop in Sprint 06.
+- **Canonical event helpers.** All event writes go through `appendCustomerEvent` from `@lapsed/core`. No direct table inserts.
+- **RLS enforcement.** Every new table has merchant-scoped RLS. Cross-merchant tests required.
+- **Cost discipline.** Per-merchant daily token cap on Haiku spend. Default cap configurable. Skip customers with no engagement changes since last score (incremental scoring is the default; full re-score is opt-in).
 
 ## In scope
 
-### 1. Database migration 0002 — full schema
+### 1. Schema additions
 
-New extension and all new tables in a single migration file `packages/db/supabase/migrations/0002_memory_graph.sql`:
+Migration `0003_customer_intelligence.sql`:
 
-**Extensions**:
-- `vector` (pgvector) for `vector(1536)` embedding columns
+- Extend `customer_inferred_state` with: `score_model_version` text, `score_run_id` uuid (links to the scoring run that produced this row), `lifecycle_stage` enum, `last_scored_at` timestamptz
+- Add enum `lifecycle_stage`: `new`, `engaged`, `at_risk`, `lapsed`, `won_back`, `churned`
+- Add `customer_engagement_events.event_type` enum value: `customer_scored`
+- New table `scoring_runs` â€” id, merchant_id, started_at, finished_at, model_version, customers_scored int, tokens_input int, tokens_output int, cost_cents int, status (running/succeeded/failed), error_message text
+- New table `merchant_scoring_caps` â€” merchant_id, daily_token_cap int (default 10000000), period_start date, tokens_used_today int. Reset daily by the scoring job.
 
-**customer_events** (append-only, event-sourced, the canonical record):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
-event_type text not null, source text not null, payload jsonb not null default '{}',
-occurred_at timestamptz not null, ingested_at timestamptz not null default now()
-```
-Append-only enforced by: RLS (SELECT only for authenticated; INSERT via service_role only) + trigger that raises an exception on any UPDATE or DELETE on this table, even from service_role.
+All new tables have RLS policies. `customer_inferred_state` extension keeps the existing RLS.
 
-**customers** (materialised profile, regenerated from events by the nightly job):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
-email text, phone text, first_name text, last_name text, tags text[] default '{}',
-total_order_count int not null default 0, total_ltv_cents bigint not null default 0,
-last_order_at timestamptz, last_order_days_ago int,
-lapsed_score numeric, lapsed_at timestamptz, restored_at timestamptz,
-sms_opt_out boolean not null default false, sms_opt_out_at timestamptz,
-profile_version int not null default 1,
-created_at timestamptz not null default now(), updated_at timestamptz not null default now()
-unique(merchant_id, shopify_customer_gid)
-```
-RLS: SELECT by merchant_id; mutations via service_role only.
+### 2. Lifecycle stage classifier
 
-**order_events** (append-only, same enforcement as customer_events):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
-shopify_order_gid text not null, event_type text not null, source text not null,
-payload jsonb not null default '{}', occurred_at timestamptz not null,
-ingested_at timestamptz not null default now()
+Pure function in `packages/core/src/customer-lifecycle.ts`:
+
+```ts
+function classifyLifecycle(customer: MaterializedCustomer): LifecycleStage
 ```
 
-**orders** (materialised from order_events):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_order_gid text not null,
-shopify_customer_gid text not null, total_price_cents bigint not null,
-financial_status text not null, fulfilled_at timestamptz, shopify_created_at timestamptz not null,
-created_at timestamptz not null default now(), updated_at timestamptz not null default now()
-unique(merchant_id, shopify_order_gid)
-```
+Deterministic rules (no LLM):
+- `new` â€” first order â‰¤ 30 days ago, exactly 1 order
+- `engaged` â€” last order â‰¤ 60 days ago AND â‰¥ 2 orders in past 12 months
+- `at_risk` â€” last order 60â€“180 days ago AND previously classified as `engaged`
+- `lapsed` â€” last order > 180 days ago
+- `won_back` â€” current lifecycle is `engaged` AND was `lapsed` at any point in past 90 days (requires looking at the customer_scored event history)
+- `churned` â€” last order > 365 days AND no engagement events in past 180 days
 
-**products** (denormalised snapshot — products don't need event-sourcing for v1):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_product_gid text not null,
-title text not null, handle text not null, product_type text not null default '',
-price_cents bigint not null default 0, inventory_quantity int not null default 0,
-created_at timestamptz not null default now(), updated_at timestamptz not null default now()
-unique(merchant_id, shopify_product_gid)
-```
+Unit-tested across all edge cases. Idempotent (same input â†’ same output).
 
-**conversations** (with pgvector embedding, channel-agnostic):
-```
-id uuid pk, merchant_id uuid fk→merchants, shopify_customer_gid text not null,
-campaign_id uuid, channel text not null default 'sms',
-status text not null default 'active', last_message_at timestamptz,
-message_count int not null default 0, attributed_order_gid text,
-attributed_revenue_cents bigint,
-embedding vector(1536),
-created_at timestamptz not null default now(), updated_at timestamptz not null default now()
-```
-ivfflat index on embedding column with `lists = 100`.
+### 3. Group auto-detection
 
-**conversation_messages**:
-```
-id uuid pk, conversation_id uuid fk→conversations, merchant_id uuid fk→merchants,
-role text not null, channel text not null default 'sms', body text not null,
-sent_at timestamptz not null default now(),
-embedding vector(1536)
-```
-ivfflat index on embedding column.
+Pure function in `packages/core/src/customer-groups.ts`:
 
-**webhook_deliveries** (idempotency log — no RLS, service_role only):
-```
-id uuid pk, merchant_id uuid fk→merchants, topic text not null,
-shopify_webhook_id text unique not null, payload jsonb not null,
-status text not null default 'pending', processed_at timestamptz,
-error_message text, received_at timestamptz not null default now()
+```ts
+function assignGroups(customer: MaterializedCustomer, merchantContext: MerchantContext): GroupAssignment[]
 ```
 
-### 2. TypeScript types
+System-wide group templates applied per-merchant. Sprint 04 ships these templates:
 
-Regenerate `packages/db/src/types.ts` to reflect the new tables. Since `supabase gen types` requires a live connection that may not be available, types are written to exactly match the migration schema and committed. A `pnpm db:types` script runs `gen-types.mjs` and should produce an identical file when run against the live DB.
+- **Lapsed VIPs** â€” top 10% of merchant's LTV distribution AND `lapsed` lifecycle
+- **At-risk regulars** â€” `at_risk` lifecycle AND â‰¥ 3 prior orders
+- **Single-purchase converters** â€” exactly 1 order ever AND order > 60 days ago AND order value > merchant median AOV
+- **Price-sensitive lapsed** â€” `lapsed` AND avg order value < merchant median AOV AND â‰¥ 2 orders
+- **Recent first-purchasers** â€” `new` lifecycle AND first order â‰¥ 14 days ago (warming up for a second purchase nudge)
+- **Win-backs at risk** â€” `won_back` lifecycle with no engagement event in past 30 days
 
-### 3. Webhook HMAC verification for topic payloads
+Merchant context comes from a materialized view computed nightly: `merchant_aggregates` (median AOV, LTV deciles, total customers, etc.).
 
-Shopify webhook payloads use a different HMAC scheme than OAuth callbacks:
-- Header: `X-Shopify-Hmac-Sha256` (Base64 of HMAC-SHA256 of the raw body)
-- Secret: `SHOPIFY_API_SECRET`
-- Must compare with timing-safe equality
+Returns array of group memberships with confidence (deterministic 0/1 for Sprint 04 â€” fuzzy memberships defer to Sprint 06 if useful).
 
-Add `verifyWebhookHmac(rawBody: Buffer, hmacHeader: string, secret: string): boolean` to `packages/shopify/src/hmac.ts`. Unit test: valid signature passes, tampered body fails, missing header fails, wrong secret fails.
+### 4. RFM refresh extension
 
-### 4. Webhook delivery infrastructure
+Sprint 03's `customer_rfm` table needs the lifecycle stage written to it. Extend the nightly RFM job to call `classifyLifecycle` and persist. This is materialized state â€” full regeneration is supported.
 
-New file `apps/web/app/api/shopify/webhooks/route.ts`:
-- Reads raw body (disables body parser via `export const config`)
-- Verifies HMAC — returns 401 on failure, no processing
-- Reads `X-Shopify-Topic` header
-- Looks up `merchant_id` from `shopify_shop_domain` header (`X-Shopify-Domain`)
-- Writes a `webhook_deliveries` row (idempotency check: if `shopify_webhook_id` already exists, return 200 immediately)
-- Dispatches to topic-specific handler
-- Updates `webhook_deliveries.status` to `processed` or `failed`
-- Always returns 200 (Shopify retries on non-200; a processing error should not cause retries)
+### 5. Haiku propensity scoring service
 
-### 5. Webhook handlers — customers
+Module: `packages/core/src/customer-scoring.ts`
 
-Topic handlers in `apps/web/app/api/shopify/webhooks/handlers/`:
+Approach:
+- Batched scoring â€” 50 customers per Haiku call to amortize prompt overhead
+- Structured output via `response_format` with strict JSON schema (no free-form parsing)
+- Schema per customer in output: `propensity_30d` (0â€“1), `propensity_60d` (0â€“1), `propensity_90d` (0â€“1), `predicted_residual_ltv_cents` int, `top_signal` text (â‰¤ 100 chars for debugging)
+- Input per customer (compressed): RFM (R/F/M scores), order history summary (count, AOV, last_order_days_ago, lifecycle_stage), engagement event counts past 90 days (opens, clicks, web_views), top categories from order line items
+- Merchant context in system prompt (once per batch, not per customer): industry, AOV distribution, typical reactivation patterns
 
-`customers-create.ts` and `customers-update.ts`:
-- Parse Shopify customer payload
-- Write a `customer_events` row (`event_type: 'customer_created'` or `'customer_updated'`, `source: 'shopify_webhook'`, `payload: <raw shopify payload>`)
-- Upsert into `customers` (INSERT ... ON CONFLICT DO UPDATE) with current values from the event payload
-- Upsert into `orders` table for any orders included in the payload
+Cost-control rules:
+- Skip customers whose `last_scored_at` is more recent than their `last_engagement_event_at` AND whose `lifecycle_stage` hasn't changed (incremental scoring)
+- Force full re-score on model version change
+- Per-merchant daily token cap consulted before each batch â€” if cap reached, halt scoring for that merchant, log, retry tomorrow
 
-### 6. Webhook handlers — orders
+Tests use a mock Anthropic client. Determinism: given the same input bytes, the prompt is identical and the structured output schema is enforced.
 
-`orders-paid.ts`:
-- Parse Shopify order payload
-- Write an `order_events` row (`event_type: 'order_paid'`, `source: 'shopify_webhook'`)
-- Upsert into `orders`
-- Update `customers` row: increment `total_order_count`, add order total to `total_ltv_cents`, update `last_order_at`
-- Write a `customer_events` row (`event_type: 'order_placed'`) — order activity is a customer memory event
+### 6. Scoring job orchestrator
 
-`app-uninstalled.ts`:
-- Marks `merchants.uninstalled_at = now()`
-- Does not delete data (data retained for potential reinstall)
+Module: `apps/web/src/jobs/score-customers.ts` (or wherever Sprint 03 put its background jobs).
 
-### 7. Shopify backfill
+Per merchant:
+1. Open a `scoring_runs` row with status `running`
+2. Find scorable customers (filter: lifecycle â‰  `churned`, eligibility per cost-control rules above)
+3. Batch into chunks of 50
+4. For each batch: call Haiku â†’ parse â†’ write `customer_scored` event per customer â†’ update `customer_inferred_state`
+5. Track tokens and cost; halt if cap reached
+6. Close `scoring_runs` row with status `succeeded` or `failed` + counts
 
-New API route `apps/web/app/api/shopify/backfill/route.ts` (POST, authenticated as merchant):
-- Requires a valid merchant session (same auth as other merchant routes)
-- Accepts `{ resource: 'customers' | 'orders', cursor?: string }` body
-- Fetches one page (250 items) from Shopify Admin REST API using the merchant's decrypted access token
-- For customers: writes `customer_events` + upserts `customers`
-- For orders: writes `order_events` + upserts `orders`
-- Returns `{ nextCursor: string | null, count: number }` for the caller to paginate
-- Rate-limit aware: Shopify REST is 40 req/min; the route does not self-throttle but returns the `Retry-After` header if Shopify responds 429
+Idempotent: re-running for the same merchant in the same window produces consistent state (events are written, but state ends up the same). Run boundaries clean â€” never leave a half-scored merchant.
 
-Backfill trigger: called from the onboarding flow's "Connect Shopify" step completion (onboarding page fires `POST /api/shopify/backfill` for both resources sequentially, polling until `nextCursor` is null).
+### 7. Nightly cron wiring
 
-### 8. Customer event write helpers
+Vercel cron at 03:00 merchant timezone (one hour after the Sprint 03 materialized profile job at 02:00). Order matters â€” scoring reads from the freshly materialized customer profile.
 
-`packages/core/src/customer-events.ts`:
-- `appendCustomerEvent(opts): Promise<void>` — validates and writes to `customer_events`
-- `appendOrderEvent(opts): Promise<void>` — writes to `order_events`
-- Typed event schemas via Zod: `CustomerEventType`, `OrderEventType` enums
-- All event writes go through these helpers — no direct table inserts scattered across handlers
+If a merchant's cron run fails, it's retried up to 3 times with exponential backoff. After 3 failures, mark `scoring_runs.status = failed` and surface in the Settings page sync status (Sprint 03 already has the sync surface).
 
-### 9. Materialised customer profile regeneration
+### 8. UI â€” Customer detail page
 
-`packages/core/src/materialize-customer.ts`:
-- `materializeCustomer(merchantId, shopifyCustomerGid, serviceClient)`: reads all `customer_events` and `order_events` for a customer, rebuilds the `customers` row from scratch, increments `profile_version`
-- Called synchronously after each webhook handler (Sprint 03: eager-refresh on event receipt; Sprint 04 will add nightly batch)
-- Returns the new `customers` row
+`apps/web/app/app/lapsed/[id]/page.tsx`:
 
-### 10. DB read helpers for merchant pages
+Add a "Signals" panel displaying:
+- Lifecycle stage badge (`new` / `engaged` / `at_risk` / `lapsed` / `won_back` / `churned`)
+- Propensity scores (30/60/90-day bars, calm visual treatment per design tenet 7)
+- Predicted residual LTV (formatted currency)
+- Group memberships (badge list)
+- Last scored timestamp (small text)
 
-`packages/db/src/queries.ts`:
-- `getLapsedCustomers(merchantClient, { limit, cursor }): Promise<{data, nextCursor}>`
-- `getCustomer(merchantClient, shopifyCustomerGid): Promise<CustomerRow | null>`
-- `getMerchantSummary(serviceClient, merchantId): Promise<MerchantSummaryRow>`
+Empty state: "Not scored yet â€” check back after tomorrow's run."
+Error state: "Scoring failed for this customer â€” retry?"
 
-These are thin wrappers over Supabase queries. No business logic here.
+### 9. UI â€” Lapsed list
 
-### 11. Fixture-to-real-data sweep — lapsed customers
+`apps/web/app/app/lapsed/page.tsx`:
 
-`apps/web/app/app/lapsed/page.tsx` and `apps/web/app/app/lapsed/[id]/page.tsx`:
-- Replace `@lapsed/fixtures` imports with DB queries via `getLapsedCustomers` / `getCustomer`
-- Pass Suspense boundary around the data-dependent section
-- Loading skeleton: `<LapsedCustomersSkeleton />` (new component in `packages/ui/src/components/skeletons/`)
-- Empty state: "No lapsed customers identified yet." with a sub-caption explaining when the agent classifies customers (Sprint 04)
+Add:
+- Group filter dropdown at top â€” multi-select, defaults to all
+- Sort options: by propensity_90d desc (default), by last order date desc, by LTV desc
+- New column: top signal (one-line text from scoring output, truncated)
+- Lifecycle badge on each row
 
-### 12. Fixture-to-real-data sweep — dashboard and settings
+Filtering happens server-side via the DB read helper. URL-encoded filter state so links are shareable.
+
+### 10. UI â€” Dashboard hero metric
 
 `apps/web/app/app/page.tsx`:
-- `getMerchantSummary` for total lapsed count, last-updated timestamp
-- Campaigns and conversations panels remain fixture-backed with a visible `[demo data]` caption until Sprint 06 wires them
-- Loading skeleton on the hero metric section
 
-`apps/web/app/app/settings/page.tsx`:
-- Replace hardcoded `bondi-goods.myshopify.com` with real shop domain from merchant session
-- Show `last_backfill_at` from merchant row (add this column in the migration) and a "Re-sync" button that triggers backfill
+Replace the existing "Lapsed customers" count with two metrics:
+- **Ready to reactivate** â€” count of customers with `propensity_30d â‰¥ 0.4` (calibrate the threshold conservatively; expose in env var for tuning)
+- **Total lapsed** â€” existing count
 
-### 13. Loading and empty states — remaining routes
+Hero number is "Ready to reactivate." Total lapsed becomes a smaller satellite metric. Per design tenet 4 (honest numbers): if scoring hasn't run yet, show "Pending first score" rather than a misleading zero.
 
-For every route that still uses fixtures (campaigns, conversations, attribution, billing):
-- Add a `[demo data]` caption on the panel header so the merchant understands the data is illustrative
-- Ensure these routes render without errors when the real DB tables exist but are empty
+### 11. UI states (empty / loading / error)
 
-For routes with real data fetches (lapsed, dashboard, settings):
-- Suspense loading skeletons per section
-- Error boundary component: `apps/web/app/app/_components/data-error.tsx` — shown when a DB query throws
+Every new fetch boundary gets all three. Same pattern as Sprint 03 chunks 12â€“15.
 
-### 14. Tests
+### 12. Tests
 
-- `packages/db/__tests__/rls.test.ts` extended: cross-merchant isolation tests for `customers`, `orders`, `customer_events`, `order_events` tables
-- `packages/shopify/__tests__/hmac.test.ts` extended: `verifyWebhookHmac` tests — valid passes, tampered body fails, missing header fails, wrong secret fails
-- `packages/core/__tests__/customer-events.test.ts`: unit tests for `appendCustomerEvent`, `appendOrderEvent` — validates event structure, rejects invalid payloads
-- `packages/core/__tests__/materialize-customer.test.ts`: unit tests for `materializeCustomer` — event log with 3 orders produces correct profile row
-- Webhook handler integration tests (vitest): valid payload + valid HMAC → processes; tampered HMAC → 401; duplicate `shopify_webhook_id` → 200 idempotent skip
+Non-negotiable:
 
-### 15. HANDOFF.md
+- `classifyLifecycle` â€” unit tests covering each stage transition + edge cases (zero orders, future-dated orders, etc.)
+- `assignGroups` â€” unit tests per template, plus an integration test with realistic merchant fixtures
+- `customer-scoring.ts` â€” unit tests with mocked Anthropic client (deterministic input â†’ expected output schema validation)
+- Scoring job orchestrator â€” idempotency test (run twice â†’ same state), cap-respecting test (cap reached mid-run â†’ halts cleanly), per-merchant isolation test
+- Cross-merchant RLS test on `customer_inferred_state` extension, `scoring_runs`, `merchant_scoring_caps`
+- E2E test: scoring run produces visible signals on customer detail page
 
-Written at sprint end: rubric scores, any deferred items, failure modes encountered, and the exact `psql` command to apply the migrations.
+### 13. Observability
 
----
+- Structured log per scoring batch: merchant_id (truncated), batch_size, tokens_in, tokens_out, latency_ms, status
+- No PII in logs (no customer emails, names, phone, order details)
+- Cost dashboard query: tokens Ã— pricing Ã— merchant aggregation (Sprint 09 surfaces this in billing; for Sprint 04, just log it)
 
-## Out of scope
+## Out of scope (do not touch â€” these are later sprints)
 
-Do not touch these in Sprint 03. They are explicitly later sprints.
-
-- **Sprint 04**: Cadence calculation, lapsed classification, scoring engine (Haiku batch). `lapsed_score`, `lapsed_at` columns exist in the schema but are null — Sprint 04 populates them.
-- **Sprint 05**: Onboarding flow refresh, AI-suggested brand voice, storefront crawl.
-- **Sprint 06**: SMS sending, two-way conversation engine, opt-out registry, Twilio inbound webhooks. Conversations table exists but messages are not generated.
-- **Sprint 07**: AI Campaign Designer, bandit state, Thompson sampling. Campaign tables are post-v1 schema additions.
-- **Sprint 08**: Attribution reconciliation, Stripe billing, holdout control groups, usage metering. `attributed_order_gid` and `attributed_revenue_cents` columns exist but are null.
-- **Sprint 09**: Performance pricing math, incrementality factor. Not touched here.
-- **Webhook handlers for GDPR mandatory topics** (`customers/data_request`, `customers/redact`, `shop/redact`): post-v1 backlog.
-- **pgvector background embedding job**: columns and indices exist; the actual embedding generation from Voyage AI / OpenAI is wired in Sprint 06 when conversation messages first exist.
-- **Conversation messages**: no messages are created in Sprint 03. The table and embedding column exist for Sprint 06.
-
----
+- Reactivation campaign generation â€” Sprint 06
+- Conversation engine â€” Sprint 07
+- Bandit state / hypothesis testing â€” Sprint 06
+- Brand voice / agent identity â€” Sprint 05
+- Holdout group assignment for campaigns â€” Sprint 08
+- Attribution math â€” Sprint 08
+- Stripe billing â€” Sprint 09
+- Voice channel / email channel â€” post-v1
+- Cross-merchant aggregate scoring (network-effect intelligence) â€” Sprint 10+
+- Merchant-tunable group definitions â€” defer to Sprint 06
+- Real-time scoring on individual engagement events â€” defer; nightly batched is the v1 cadence
+- Score-driven priority weighting in conversation queue â€” Sprint 07
+- Recharge / Klaviyo / Gorgias integrations
+- Storefront pixel installation
+- Any change to the agent operating model or design tenets
 
 ## Acceptance criteria
 
 Every box must be checked with evidence in the PR description.
 
-**Schema and architecture:**
-- [ ] `pgvector` extension enabled in migration 0002 — show migration file
-- [ ] `customer_events` table is append-only: UPDATE trigger raises exception — show trigger SQL and test output proving it fires
-- [ ] `order_events` table is append-only: same enforcement — same evidence
-- [ ] `conversations.embedding` column is `vector(1536)` with ivfflat index — show `\d conversations` output
-- [ ] `conversation_messages.embedding` column is `vector(1536)` with ivfflat index — same
-- [ ] `channel` column in `conversations` and `conversation_messages` is `text` (not hardcoded enum), default `'sms'` — show column definition
-- [ ] RLS enabled on every new table — show `\d+` output or policy list
-
-**Cross-merchant isolation:**
-- [ ] Customer from merchant A cannot be read by a JWT scoped to merchant B — test output from `packages/db/__tests__/rls.test.ts`
-- [ ] Same isolation verified for `orders`, `customer_events`, `order_events` — test output
-
-**Webhook security:**
-- [ ] `verifyWebhookHmac` rejects tampered body — unit test output
-- [ ] `verifyWebhookHmac` rejects missing `X-Shopify-Hmac-Sha256` header — unit test output
-- [ ] Webhook route returns 401 on bad HMAC, 200 on valid HMAC — integration test output
-- [ ] Duplicate `shopify_webhook_id` returns 200 without reprocessing — test output
-
-**Data ingestion:**
-- [ ] `customers/create` webhook writes a `customer_events` row and upserts `customers` — test output
-- [ ] `orders/paid` webhook writes an `order_events` row, upserts `orders`, and updates `customers.total_ltv_cents` — test output
-- [ ] Backfill route paginates correctly and respects cursor — test output
-- [ ] `materializeCustomer` produces correct `customers` row from a sequence of events — unit test output
-
-**UI states:**
-- [ ] Lapsed customers list shows real DB data (empty state when no customers) — screenshot
-- [ ] Dashboard shows real `total_order_count` and `total_ltv_cents` from DB — screenshot
-- [ ] Settings page shows real shop domain (no hardcoded `bondi-goods.myshopify.com`) — screenshot
-- [ ] Loading skeleton renders on lapsed list while data fetches — screenshot
-- [ ] Error boundary renders on lapsed list when DB throws — screenshot
-- [ ] Fixture-backed routes (campaigns, conversations, attribution, billing) show `[demo data]` caption — screenshot
-
-**CI gates:**
-- [ ] `pnpm typecheck` exits 0
-- [ ] `pnpm lint` exits 0
-- [ ] `pnpm test` all passing (including new RLS, HMAC, and core tests)
-- [ ] `pnpm build` exits 0 for all three apps
-- [ ] `pnpm grep:pii` clean — no phone numbers, access tokens, or shop domains in logs
-
----
+- [ ] Migration `0003_customer_intelligence.sql` creates all new tables/columns with RLS policies, tested cross-merchant
+- [ ] `classifyLifecycle` pure function, unit-tested across all 6 stages
+- [ ] `assignGroups` pure function, all 6 system-wide templates implemented and tested
+- [ ] RFM nightly job extended to write `lifecycle_stage`
+- [ ] `customer-scoring.ts` calls Haiku in batches of 50 with structured output schema enforced
+- [ ] Incremental scoring eligibility logic implemented and tested (skip unchanged customers)
+- [ ] Per-merchant daily token cap respected (cap reached â†’ halts cleanly)
+- [ ] Scoring run row recorded with token usage and cost
+- [ ] Each scored customer gets a `customer_scored` event written via `appendCustomerEvent`
+- [ ] Nightly cron wired at 03:00 merchant timezone, runs after materialized profile job
+- [ ] Customer detail page shows Signals panel (lifecycle, propensity, residual LTV, groups, last scored)
+- [ ] Lapsed list has group filter, sort by propensity, lifecycle badges, top signal column
+- [ ] Dashboard hero metric is "Ready to reactivate"
+- [ ] Empty / loading / error states for every new fetch boundary
+- [ ] All scoring tests pass: classifier, group templates, scoring service (with mock), orchestrator, RLS
+- [ ] E2E: post-scoring, customer detail page renders signals
+- [ ] `pnpm grep:pii` clean
+- [ ] No new dependencies without justification (Anthropic SDK already in repo from earlier prep)
+- [ ] Architecture-guardian, code-reviewer, test-coverage-analyzer dispatched after every chunk; no Critical/High findings open at merge
 
 ## Definition of done
 
-- [ ] All acceptance criteria checked with evidence in PR description
-- [ ] `pnpm typecheck` exits 0
-- [ ] `pnpm lint` exits 0
-- [ ] `pnpm test` all passing
-- [ ] `pnpm build` exits 0 for all three apps
-- [ ] `pnpm grep:pii` clean
-- [ ] `pnpm vercel:env:check` clean (new env vars declared in turbo.json)
-- [ ] `HANDOFF.md` committed with rubric scores and migration instructions
-- [ ] PR opened, evaluator session run, every rubric criterion scored 3, squash-merged to main
+- All acceptance criteria checked with evidence
+- `pnpm typecheck` exits 0
+- `pnpm lint` exits 0
+- `pnpm test` all passing (target: 270+ total, +50 from Sprint 03)
+- `pnpm build` exits 0 for all three apps
+- `pnpm test:e2e` all passing
+- `pnpm grep:pii` clean
+- `pnpm vercel:env:check` clean (includes new `ANTHROPIC_API_KEY`, `SCORING_TOKEN_CAP_DEFAULT`, `PROPENSITY_READY_THRESHOLD`)
+- No `TODO: ...` deferrals in the diff
+- No bypasses of canonical event helpers
+- HANDOFF.md committed with rubric scores
+- PR opened, evaluator session run, every rubric criterion scored 3, then squash-merged
 
----
+## Quality rubric
 
-## Quality rubric (10 criteria, scored 0–3)
+Scored 0â€“3 by evaluator. All must score 3 before merge.
 
-Scored 0–3 by the evaluator session. All must score 3 before merge.
+1. **Inferred state purity** â€” `customer_inferred_state` is fully regeneratable from event log + scoring algorithm. No data lives only in inferred state. Verified by running the orchestrator twice on the same data and confirming idempotent output.
+2. **Scoring event-sourcing** â€” every score write produces a `customer_scored` event via `appendCustomerEvent`. Verified by grep + event log inspection.
+3. **Cost discipline** â€” incremental scoring skip logic correct; per-merchant cap respected; cap-exhaustion case tested.
+4. **Lifecycle classifier correctness** â€” all 6 stages reachable from realistic fixtures; transitions follow the documented rules; idempotent.
+5. **Group template correctness** â€” all 6 templates produce expected groups against fixture customers covering the relevant distributions.
+6. **Haiku integration robustness** â€” structured output schema enforced; malformed responses rejected and retried; mocked tests cover happy path + retries + cap halt + API error.
+7. **RLS tenancy isolation** â€” verified by cross-merchant test on all new tables and the extended `customer_inferred_state`.
+8. **UI completeness** â€” Signals panel, Lapsed list filtering/sorting, Dashboard hero metric all wired to real data with empty/loading/error states.
+9. **Observability** â€” structured logs include all required fields; no PII; cost-tracking query works.
+10. **Architecture discipline** â€” no canonical event helper bypasses; no inferred-state-as-truth code paths; no deferrals in the diff.
 
-1. **Event-sourcing correctness** — `customer_events` and `order_events` are truly append-only. Trigger prevents UPDATE/DELETE. No code path mutates an event row. Profile regeneration reads events and writes the `customers` snapshot, never patching events.
-2. **pgvector correctness** — `vector(1536)` column exists on `conversations` and `conversation_messages`. ivfflat index created. `channel` column is text, not enum. No hardcoded "sms" in table definitions or schema constraints.
-3. **Webhook HMAC** — Every webhook entry point verifies the Shopify HMAC before any processing. Tampered-signature test exists and passes. 401 on failure, 200 on success.
-4. **Tenancy isolation** — RLS enabled on all 8 new tables. Cross-merchant tests exist and pass for `customers`, `orders`, `customer_events`, `order_events`.
-5. **Backfill correctness** — Cursor-based pagination produces no duplicates (upsert-safe). Backfill and webhook ingest produce identical `customers` rows for the same customer.
-6. **TypeScript types** — `packages/db/src/types.ts` reflects all new tables. Strict TypeScript compiles without errors. Zero `any`.
-7. **No PII in logs** — grep:pii clean. No phone, email, access token, shop domain, or order detail in any `console.log` or structured log output.
-8. **UI loading/empty/error states** — Every route with a real data fetch has a Suspense boundary, a loading skeleton, an empty state, and an error boundary. No route crashes on empty DB.
-9. **Scope discipline** — Nothing from "Out of scope" was touched. No scoring logic, no SMS, no campaign creation, no attribution math, no billing.
-10. **New env vars declared** — Any new environment variables are in `turbo.json` `@lapsed/web#build.env` and in `pnpm vercel:env:check`'s expected list.
+## Suggested chunking â€” 13 commits
 
----
+After every chunk: dispatch **architecture-guardian + code-reviewer + test-coverage-analyzer** in parallel. Critical or High blocks; fix in same commit (amend). Architecture violations always block.
 
-## 15-chunk implementation sequence
+For chunks 8â€“11 (UI), also dispatch design-tenet-auditor + vocabulary-auditor + accessibility-auditor.
 
-Each chunk is one commit. Architecture-guardian + code-reviewer + test-coverage-analyzer run in parallel after every chunk. Any Critical or High finding blocks the next chunk.
+1. Migration 0003 â€” `customer_inferred_state` extensions, `scoring_runs`, `merchant_scoring_caps`, enums, RLS policies, cross-merchant test
+2. `classifyLifecycle` pure function in `@lapsed/core` + unit tests (target: 25+ test cases)
+3. `assignGroups` pure function + `merchant_aggregates` materialized view + unit tests for all 6 templates
+4. RFM job extension â€” write `lifecycle_stage` from `classifyLifecycle` output; idempotent
+5. `customer-scoring.ts` â€” Haiku client wrapper, batch prompt construction, structured output parser, mocked tests
+6. Scoring orchestrator + `scoring_runs` lifecycle + per-merchant cap logic + idempotency tests
+7. Cron wiring at 03:00 + retry logic + Settings sync surface update
+8. UI: Customer detail Signals panel + empty/loading/error states
+9. UI: Lapsed list group filter + sort + lifecycle badges + top signal column
+10. UI: Dashboard "Ready to reactivate" hero metric + threshold env var
+11. Final UI polish across new surfaces + design-tenet sweep + vocabulary sweep
+12. E2E test: install â†’ backfill â†’ materialize â†’ score â†’ see signals
+13. HANDOFF.md with rubric scores, deviations documented, deferred items, failure modes
 
-**Foundation:**
-1. `feat(db): migration 0002 — pgvector, memory graph schema, append-only triggers, RLS` — SQL migration + updated TypeScript types
-2. `test(db): cross-merchant RLS isolation tests for all Sprint 03 tables` — extend `packages/db/__tests__/rls.test.ts`
-3. `feat(shopify): verifyWebhookHmac + unit tests` — extend `packages/shopify/src/hmac.ts` + `__tests__/hmac.test.ts`
+## Cost notes for evaluator and future sprints
 
-**Data ingestion:**
-4. `feat(webhooks): delivery infrastructure — route, HMAC gate, idempotency log` — `apps/web/app/api/shopify/webhooks/route.ts`
-5. `feat(webhooks): customers/create and customers/update handlers` — handler files + integration tests
-6. `feat(webhooks): orders/paid handler + app/uninstalled handler` — handler files + integration tests
-7. `feat(backfill): Shopify historical data backfill route + onboarding trigger` — `apps/web/app/api/shopify/backfill/route.ts`
+Approximate Haiku 4.5 cost per scoring run, per merchant:
+- 5,000 customers, batched 50/batch = 100 batches
+- ~500 tokens input per customer, ~50 tokens output per customer (structured)
+- Per batch: ~25,000 input + ~2,500 output = ~$0.04 per batch at current Haiku pricing
+- Per merchant per night: ~$4 for 5,000 customers
+- Incremental scoring typically cuts this to 10â€“20% on subsequent nights
 
-**Memory graph:**
-8. `feat(core): customer and order event write helpers (appendCustomerEvent, appendOrderEvent)` — `packages/core/src/customer-events.ts` + tests
-9. `feat(core): materializeCustomer — profile regeneration from event log` — `packages/core/src/materialize-customer.ts` + tests
+Default daily cap is 10M tokens â€” far above typical merchant needs. Tune per plan tier in Sprint 09.
 
-**Query layer + env:**
-10. `feat(db): DB read helpers for merchant pages (getLapsedCustomers, getCustomer, getMerchantSummary)` — `packages/db/src/queries.ts`
-11. `chore(env): declare new env vars in turbo.json + vercel:env:check` — SHOPIFY_WEBHOOK_SECRET, SUPABASE_SERVICE_ROLE_KEY (if not already present)
+## Exact next action
 
-**Fixture sweep:**
-12. `feat(web): lapsed customers list + detail — real data, Suspense, skeleton, empty state` — replace fixture imports
-13. `feat(web): dashboard + settings — real data, merchant summary, shop domain, backfill trigger`
-14. `feat(web): loading/empty/error states on all 6 routes; demo-data captions on fixture-backed panels`
+After Sprint 03 PR is merged to main and the small Sprint 02.6 vocab cleanup ships, create branch `sprint-04/customer-intelligence` from main and start with chunk 1 (migration 0003). The first chunk validates the schema + RLS pattern â€” cross-merchant test must pass before chunk 2 starts.
 
-**Close:**
-15. `docs(sprint-03): HANDOFF.md — rubric scores, migration instructions, failure modes`
-
----
-
-## Evaluator session prompt
-
-After implementation, open a fresh Claude Code session with this exact prompt:
-
-```
-You are a skeptical senior engineer doing QA on Sprint 03 (Data Ingestion and Customer Memory Graph) of lapsed.ai. Your job is to find everything wrong, incomplete, or inconsistent. Do not approve anything unless you are certain it meets the standard.
-
-Read in order: CLAUDE.md, DESIGN-SYSTEM.md, PRODUCT.md, SPRINT.md, HANDOFF.md.
-
-Then run and report exact output:
-- pnpm typecheck
-- pnpm lint
-- pnpm test
-- pnpm build
-- pnpm grep:pii
-- pnpm vercel:env:check
-- git diff main --stat
-
-Then verify EVERY acceptance criterion in SPRINT.md against actual code — do not trust HANDOFF.md claims.
-
-Pay special attention to:
-1. Are customer_events and order_events truly append-only? Show the trigger SQL and a test that fires it.
-2. Does the webhook route return 401 on a tampered HMAC before any DB write? Show the test.
-3. Does materializeCustomer read from events (not mutate them)? Trace the code path.
-4. Does conversations.embedding exist as vector(1536)? Run \d conversations.
-5. Is channel stored as text, never as a hardcoded enum or 'sms'-only constraint?
-6. Do all new tables have RLS enabled? Do the cross-merchant tests pass?
-7. Is there any "Lapsed AI", "Recovered revenue", "Lapsed cohort" copy in the new UI states? (Those were Sprint 02.6 fixes — ensure they didn't regress here.)
-
-Score each of the 10 rubric criteria 0–3 with justification. Report PASS or REMEDIATE per criterion.
-Do not suggest the sprint is complete unless every criterion scores 3.
-```
+This sprint is well-suited to an overnight run. Chunks 2â€“6 are mechanical (math + LLM integration + orchestrator) and chunks 8â€“11 are UI work that the harness handles well.
