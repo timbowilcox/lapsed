@@ -57,6 +57,17 @@ export {
 } from "./pii-redactor";
 
 export {
+  appendVoiceEvent,
+  materializeVoice,
+  insertVoiceVersion,
+  VoiceEventType,
+  VoiceEventSource,
+  VoiceFailurePhase,
+  type VoiceEventInput,
+  type InsertVoiceVersionInput,
+} from "./voice-events";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
