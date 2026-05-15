@@ -28,9 +28,17 @@ export interface CustomerForGrouping {
  */
 export interface MerchantContext {
   ltvP90Cents: number;
-  ltvP75Cents: number;
-  medianLtvCents: number;
   medianAovCents: number;
+}
+
+/**
+ * A group assignment with a confidence score.
+ * Sprint 04: confidence is always 1 (deterministic rule match).
+ * Sprint 06 will introduce fuzzy memberships (0 < confidence < 1).
+ */
+export interface GroupAssignment {
+  slug: GroupSlug;
+  confidence: 1;
 }
 
 /**
@@ -51,7 +59,7 @@ export interface MerchantContext {
 export function assignGroups(
   customer: CustomerForGrouping,
   merchantContext: MerchantContext,
-): GroupSlug[] {
+): GroupAssignment[] {
   const {
     totalOrderCount,
     totalLtvCents,
@@ -66,27 +74,30 @@ export function assignGroups(
     ? Math.round(totalLtvCents / totalOrderCount)
     : 0;
 
-  const groups: GroupSlug[] = [];
+  const groups: GroupAssignment[] = [];
+  const match = (slug: GroupSlug): void => { groups.push({ slug, confidence: 1 }); };
 
   // 1. Lapsed VIPs — lapsed lifecycle and LTV in top 10% of merchant's distribution.
   if (lifecycle === "lapsed" && totalLtvCents >= ltvP90Cents) {
-    groups.push("lapsed_vips");
+    match("lapsed_vips");
   }
 
   // 2. At-risk regulars — at_risk with a meaningful purchase history.
   if (lifecycle === "at_risk" && totalOrderCount >= 3) {
-    groups.push("at_risk_regulars");
+    match("at_risk_regulars");
   }
 
   // 3. Single-purchase converters — 1 order, not recent, order value exceeds median AOV.
-  //    These are customers worth a personalised nudge toward a second purchase.
+  //    Excludes churned customers (>365 days, no engagement) since the nudge is only
+  //    effective for customers still reachable.
   if (
+    lifecycle !== "churned" &&
     totalOrderCount === 1 &&
     lastOrderDaysAgo !== null &&
     lastOrderDaysAgo > 60 &&
     totalLtvCents > medianAovCents
   ) {
-    groups.push("single_purchase_converters");
+    match("single_purchase_converters");
   }
 
   // 4. Price-sensitive lapsed — lapsed multi-buyers whose avg order is below median.
@@ -96,19 +107,19 @@ export function assignGroups(
     totalOrderCount >= 2 &&
     avgOrderValueCents < medianAovCents
   ) {
-    groups.push("price_sensitive_lapsed");
+    match("price_sensitive_lapsed");
   }
 
   // 5. Recent first-purchasers — new customers who are now warm enough for
   //    a second-purchase nudge (at least 14 days post-purchase).
   if (lifecycle === "new" && firstOrderDaysAgo !== null && firstOrderDaysAgo >= 14) {
-    groups.push("recent_first_purchasers");
+    match("recent_first_purchasers");
   }
 
   // 6. Win-backs at risk — won-back customers who've gone quiet again.
   //    No engagement in 30 days signals the reactivation is losing momentum.
   if (lifecycle === "won_back" && engagementEventsInPast30Days === 0) {
-    groups.push("win_backs_at_risk");
+    match("win_backs_at_risk");
   }
 
   return groups;

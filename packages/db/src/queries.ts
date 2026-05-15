@@ -140,13 +140,17 @@ export async function getLapsedCustomersWithSignals(
     // with group_memberships). Fetch a page of scored rows, then hydrate with customer
     // identity data. The totalCount is from the inferred_state count query so it reflects
     // the full group-filtered population, not just the current page's customer matches.
-    const stateCol =
-      sortBy === "propensity_90d" ? "propensity_90d" :
-      sortBy === "total_ltv_cents" ? "updated_at" : "updated_at";
+    //
+    // Sort constraint: last_order_at and total_ltv_cents live on the customers table, not
+    // customer_inferred_state. When a group filter is active, only propensity_90d sort is
+    // supported from this table. The UI must disable the other sort options when a group
+    // filter is active, or pass sortBy: "propensity_90d".
+    const stateCol = sortBy === "propensity_90d" ? "propensity_90d" : "propensity_90d";
 
     const { data: stateRows, error: stateErr, count: stateCount } = await merchantClient
       .from("customer_inferred_state")
       .select("*", { count: "exact" })
+      .eq("merchant_id", merchantId)
       .overlaps("group_memberships", groupFilter)
       .order(stateCol, { ascending: false, nullsFirst: false })
       .range(cursor, cursor + limit - 1);
@@ -175,7 +179,10 @@ export async function getLapsedCustomersWithSignals(
 
     return {
       data: merged,
-      nextCursor: states.length === limit ? cursor + limit : null,
+      // Base nextCursor on merged.length so the pagination contract holds even when
+      // some state rows have no matching lapsed customer (lapsed_at may have become null
+      // after the state was written — the two tables can temporarily diverge).
+      nextCursor: merged.length === limit ? cursor + limit : null,
       totalCount: stateCount,
     };
   }
@@ -190,6 +197,7 @@ export async function getLapsedCustomersWithSignals(
     const { data: stateRows, error: stateErr, count: stateCount } = await merchantClient
       .from("customer_inferred_state")
       .select("*", { count: "exact" })
+      .eq("merchant_id", merchantId)
       .order("propensity_90d", { ascending: false, nullsFirst: false })
       .range(from, to);
 
@@ -231,7 +239,7 @@ export async function getLapsedCustomersWithSignals(
 
     return {
       data: merged,
-      nextCursor: states.length === limit ? cursor + limit : null,
+      nextCursor: merged.length === limit ? cursor + limit : null,
       totalCount: stateCount,
     };
   }

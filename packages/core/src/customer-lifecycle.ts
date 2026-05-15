@@ -106,7 +106,8 @@ function computeBaseStage(customer: {
   }
 
   // Rule 4: at_risk — 60 < lastOrderDaysAgo ≤ 180 AND was previously engaged.
-  if (lastOrderDaysAgo > 60 && previousLifecycleStage === "engaged") {
+  // Upper bound is explicit so this rule is self-contained regardless of execution order.
+  if (lastOrderDaysAgo > 60 && lastOrderDaysAgo <= 180 && previousLifecycleStage === "engaged") {
     return "at_risk";
   }
 

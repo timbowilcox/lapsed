@@ -503,7 +503,7 @@ export type Database = {
           id: string
           lifecycle_stage: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id: string
-          monetary_cents: number
+          monetary_cents: string  // bigint — returned as string by Supabase to preserve precision
           monetary_score: number | null
           recency_days: number | null
           recency_score: number | null
@@ -519,7 +519,7 @@ export type Database = {
           id?: string
           lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id: string
-          monetary_cents?: number
+          monetary_cents?: string | number  // bigint — accepts number for convenience on insert
           monetary_score?: number | null
           recency_days?: number | null
           recency_score?: number | null
@@ -535,7 +535,7 @@ export type Database = {
           id?: string
           lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
           merchant_id?: string
-          monetary_cents?: number
+          monetary_cents?: string | number  // bigint — accepts number for convenience on update
           monetary_score?: number | null
           recency_days?: number | null
           recency_score?: number | null

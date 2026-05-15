@@ -21,6 +21,7 @@ export {
 export {
   assignGroups,
   type GroupSlug,
+  type GroupAssignment,
   type CustomerForGrouping,
   type MerchantContext,
 } from "./customer-groups";
