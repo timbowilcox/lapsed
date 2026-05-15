@@ -83,17 +83,11 @@ These vars are wired in `env.ts`, `turbo.json`, and `vercel-env-check.mjs` but r
 
 After adding, re-run `pnpm vercel:env:check` to confirm green.
 
-### 2. Pre-existing test failures (carry-forward, not Sprint 04 regressions)
+### 2. Test suite status
 
-The following test files fail when `CRON_SECRET` is absent from the test runner environment. This is a carry-forward issue that predates Sprint 04 (verified by git stash comparison):
+`pnpm test` passes cleanly across all workspaces (`@lapsed/ui`, `@lapsed/db`, `@lapsed/core`, `@lapsed/shopify`, `@lapsed/web`) with zero failures. The skipped tests are all in `packages/db/__tests__/rls.test.ts`, which detects whether the Sprint 04 schema is available (`SUPABASE_AVAILABLE`) and skips the entire file when it is not — this is the intended CI behavior for environments without a live Supabase connection.
 
-- `apps/web/__tests__/install-route.test.ts`
-- `apps/web/__tests__/backfill-route.test.ts`
-- `apps/web/__tests__/webhooks-route.test.ts`
-
-Fix: add `CRON_SECRET=test-secret` to the test environment (`.env.test` or vitest config `env` option). These pass locally when the var is set.
-
-Note: the `rls.test.ts` situation is fully resolved — the file now exits 0 with all 46 tests cleanly skipped when the Sprint 04 schema is absent.
+`CRON_SECRET=test-secret` is injected for all tests via `vitest.config.ts` (commit `c44438c`), so the cron-guarded route tests (`install-route`, `backfill-route`, `webhooks-route`) pass in every environment. There are no carry-forward pre-existing failures.
 
 ---
 
@@ -103,7 +97,6 @@ Note: the `rls.test.ts` situation is fully resolved — the file now exits 0 wit
 |------|------|--------|-----------|
 | Lapsed list filtering | Server-side with URL-encoded filter state (shareable links) | Client-side within the 50-row server-fetched page | With a 50-row limit, server-side filtering adds a round-trip with no correctness benefit. URL-encoded state deferred to Sprint 06 when pagination ships. |
 | `predicted_residual_ltv_cents` type | `int` in scoring output schema | `string \| null` in TypeScript (bigint precision) | Supabase returns `bigint` columns as `string` in JS to avoid precision loss. UI uses `parseInt(str, 10)` throughout. Correct behavior, honest type. |
-| Dashboard hero metric layout | "Ready to reactivate" as hero, "Total lapsed" as satellite | "Lapsed group" label with ready-count as trend text | `MetricCard` component API puts the main value in `value` and secondary context in `trend`. Total lapsed is the primary count; ready-to-reactivate is surfaced as the trend line. Matches the product intent without changing the component API. |
 
 ---
 

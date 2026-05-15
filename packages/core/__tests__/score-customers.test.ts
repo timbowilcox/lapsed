@@ -136,17 +136,16 @@ function makeServiceClient(opts: MockOptions = {}): LapsedSupabaseClient {
 
       if (table === "customer_events") {
         // Two uses:
-        // 1. Enrichment: .select().eq().in().not().gte() — terminal
+        // 1. Enrichment: .select().eq().in().not() — terminal (no 90d filter; we
+        //    aggregate count-within-90d and MAX(occurred_at) in code).
         // 2. appendCustomerEvent: .upsert()
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               in: vi.fn().mockReturnValue({
-                not: vi.fn().mockReturnValue({
-                  gte: vi.fn().mockResolvedValue({
-                    data: opts.engagementEventsError ? null : (opts.engagementEvents ?? []),
-                    error: opts.engagementEventsError ?? null,
-                  }),
+                not: vi.fn().mockResolvedValue({
+                  data: opts.engagementEventsError ? null : (opts.engagementEvents ?? []),
+                  error: opts.engagementEventsError ?? null,
                 }),
               }),
             }),
@@ -427,8 +426,8 @@ describe("scoreCustomers — scoring input enrichment (Fix A regression)", () =>
     ];
     // Two engagement events within 90 days.
     const engagementEvents = [
-      { shopify_customer_gid: GID },
-      { shopify_customer_gid: GID },
+      { shopify_customer_gid: GID, occurred_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString() },
+      { shopify_customer_gid: GID, occurred_at: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString() },
     ];
 
     const serviceClient = makeServiceClient({ orderEvents, engagementEvents });
@@ -713,6 +712,119 @@ describe("scoreCustomers — churned exclusion via RFM lifecycle", () => {
 
     expect(result.customersScored).toBe(0);
     expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// last_engagement_event_at write path (regression: column was never written, so
+// engagement-freshness rescore was permanently inert before this fix).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("scoreCustomers — last_engagement_event_at write path", () => {
+  it("rescores when a fresh engagement event is newer than last_scored_at", async () => {
+    // last_scored_at is 25h ago; a customer_events row landed 1h ago.
+    // Previously: column was never written, so lastEngaged = 0, customer was skipped.
+    // After fix: MAX(occurred_at) is captured on the prior run and now drives rescore.
+    const now = Date.now();
+    const inferredStates = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(now - 25 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(now - 1 * 60 * 60 * 1000).toISOString(), // 1h ago
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }];
+    const serviceClient = makeServiceClient({ inferredStates, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(1);
+    expect(anthropicClient.messages.create).toHaveBeenCalledOnce();
+  });
+
+  it("skips when last_scored_at is fresher than last_engagement_event_at (column populated)", async () => {
+    // Scored 1h ago, last engagement 5h ago — no new signal since score; skip.
+    const now = Date.now();
+    const inferredStates = [
+      {
+        shopify_customer_gid: GID,
+        lifecycle_stage: "lapsed",
+        last_scored_at: new Date(now - 1 * 60 * 60 * 1000).toISOString(),
+        last_engagement_event_at: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
+        score_model_version: HAIKU_MODEL,
+      },
+    ];
+    const rfmStates = [{ shopify_customer_gid: GID, lifecycle_stage: "lapsed" }];
+    const serviceClient = makeServiceClient({ inferredStates, rfmStates });
+    const anthropicClient = makeAnthropicClient();
+
+    const result = await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    expect(result.customersScored).toBe(0);
+    expect(anthropicClient.messages.create).not.toHaveBeenCalled();
+  });
+
+  it("writes the MAX(occurred_at) of non-system events to customer_inferred_state.last_engagement_event_at", async () => {
+    // Three engagement events; the most recent (2 days ago) must land in the upsert payload.
+    const now = Date.now();
+    const mostRecent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const engagementEvents = [
+      { shopify_customer_gid: GID, occurred_at: new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString() },
+      { shopify_customer_gid: GID, occurred_at: mostRecent },
+      { shopify_customer_gid: GID, occurred_at: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString() },
+    ];
+    const serviceClient = makeServiceClient({ engagementEvents });
+    const anthropicClient = makeAnthropicClient();
+
+    await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    interface MockWithUpsert { value: { upsert: ReturnType<typeof vi.fn> } }
+    const fromMock = serviceClient.from as ReturnType<typeof vi.fn>;
+    const upsertResult = (fromMock.mock.calls as string[][])
+      .map((c, i) =>
+        c[0] === "customer_inferred_state"
+          ? (fromMock.mock.results[i] as unknown as MockWithUpsert | null)
+          : null,
+      )
+      .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
+    expect(upsertResult).toBeDefined();
+    const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.last_engagement_event_at).toBe(mostRecent);
+  });
+
+  it("writes null when the customer has no non-system engagement events", async () => {
+    const serviceClient = makeServiceClient({ engagementEvents: [] });
+    const anthropicClient = makeAnthropicClient();
+
+    await scoreCustomers(serviceClient, anthropicClient, {
+      merchantId: MERCHANT_A,
+      medianAovCents: 8000,
+    });
+
+    interface MockWithUpsert { value: { upsert: ReturnType<typeof vi.fn> } }
+    const fromMock = serviceClient.from as ReturnType<typeof vi.fn>;
+    const upsertResult = (fromMock.mock.calls as string[][])
+      .map((c, i) =>
+        c[0] === "customer_inferred_state"
+          ? (fromMock.mock.results[i] as unknown as MockWithUpsert | null)
+          : null,
+      )
+      .find((r): r is MockWithUpsert => (r?.value?.upsert?.mock?.calls?.length ?? 0) > 0);
+    expect(upsertResult).toBeDefined();
+    const payload = upsertResult!.value.upsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.last_engagement_event_at).toBeNull();
   });
 });
 

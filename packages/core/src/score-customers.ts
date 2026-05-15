@@ -67,12 +67,14 @@ interface OrderEventEnrichmentRow {
 
 interface CustomerEventEnrichmentRow {
   shopify_customer_gid: string;
+  occurred_at: string;
 }
 
 interface CustomerEventEnrichment {
   firstOrderDaysAgo: number | null;
   ordersInPast12Months: number;
   engagementEventsInPast90Days: number;
+  lastNonSystemEventAt: Date | null;
 }
 
 interface TokenCapRow {
@@ -118,14 +120,16 @@ async function enrichWithEventData(
 
   if (oeErr) throw oeErr;
 
-  // Fetch engagement events (non-identity) in past 90 days for the batch.
+  // Fetch all non-system engagement events for the batch. We aggregate two
+  // metrics from this single result set: a count of events in the past 90 days
+  // (signal density for the LLM) and the MAX(occurred_at) overall (drives the
+  // incremental-skip eligibility check via customer_inferred_state.last_engagement_event_at).
   const { data: engagementEvents, error: eeErr } = await serviceClient
     .from("customer_events")
-    .select("shopify_customer_gid")
+    .select("shopify_customer_gid,occurred_at")
     .eq("merchant_id", merchantId)
     .in("shopify_customer_gid", gids)
-    .not("event_type", "in", SYSTEM_EVENTS)
-    .gte("occurred_at", cutoff90d.toISOString());
+    .not("event_type", "in", SYSTEM_EVENTS);
 
   if (eeErr) throw eeErr;
 
@@ -141,11 +145,20 @@ async function enrichWithEventData(
     orderData.set(ev.shopify_customer_gid, entry);
   }
 
-  // Aggregate engagement event counts per GID.
+  // Aggregate engagement event counts (last 90d) and MAX(occurred_at) (all time) per GID.
   const engagementCounts = new Map<string, number>();
-  for (const gid of gids) engagementCounts.set(gid, 0);
+  const lastEventAt = new Map<string, Date | null>();
+  for (const gid of gids) {
+    engagementCounts.set(gid, 0);
+    lastEventAt.set(gid, null);
+  }
   for (const ev of (engagementEvents ?? []) as CustomerEventEnrichmentRow[]) {
-    engagementCounts.set(ev.shopify_customer_gid, (engagementCounts.get(ev.shopify_customer_gid) ?? 0) + 1);
+    const d = new Date(ev.occurred_at);
+    if (d >= cutoff90d) {
+      engagementCounts.set(ev.shopify_customer_gid, (engagementCounts.get(ev.shopify_customer_gid) ?? 0) + 1);
+    }
+    const prev = lastEventAt.get(ev.shopify_customer_gid) ?? null;
+    if (!prev || d > prev) lastEventAt.set(ev.shopify_customer_gid, d);
   }
 
   // Build result map.
@@ -159,6 +172,7 @@ async function enrichWithEventData(
       firstOrderDaysAgo,
       ordersInPast12Months: orders.ordersIn12m,
       engagementEventsInPast90Days: engagementCounts.get(gid) ?? 0,
+      lastNonSystemEventAt: lastEventAt.get(gid) ?? null,
     });
   }
 
@@ -224,6 +238,11 @@ async function setTokenUsage(
 // Eligibility
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface FindScorableResult {
+  inputs: CustomerScoringInput[];
+  lastEngagementByGid: Map<string, Date | null>;
+}
+
 /** Build the set of scorable customers. Excludes churned lifecycle and applies
  * incremental skip: skip if last_scored_at > last_engagement_event_at AND
  * lifecycle_stage is unchanged (no new signal since last score). */
@@ -231,7 +250,7 @@ async function findScorable(
   serviceClient: LapsedSupabaseClient,
   merchantId: string,
   forceFullRescore: boolean,
-): Promise<CustomerScoringInput[]> {
+): Promise<FindScorableResult> {
   // Fetch customers who are not churned (scoring is not effective for churned).
   // Fetch all customers — churned filter is applied below using the inferred state map.
   const { data: customers, error: custErr } = await serviceClient
@@ -244,7 +263,7 @@ async function findScorable(
   if (custErr) throw custErr;
   const customerList = (customers ?? []) as CustomerEligibilityRow[];
 
-  if (customerList.length === 0) return [];
+  if (customerList.length === 0) return { inputs: [], lastEngagementByGid: new Map() };
 
   // Fetch existing inferred states for incremental skip logic.
   const gids = customerList.map((c) => c.shopify_customer_gid);
@@ -308,17 +327,19 @@ async function findScorable(
       (rfmLifecycle != null && rfmLifecycle !== state.lifecycle_stage);
   });
 
-  if (scorable.length === 0) return [];
+  if (scorable.length === 0) return { inputs: [], lastEngagementByGid: new Map() };
 
   const scorableGids = scorable.map((c) => c.shopify_customer_gid);
   const now = new Date();
   const enrichment = await enrichWithEventData(serviceClient, merchantId, scorableGids, now);
 
-  return scorable.map((c) => {
+  const lastEngagementByGid = new Map<string, Date | null>();
+  const inputs = scorable.map((c) => {
     const avgOrderValueCents =
       c.total_order_count > 0 ? Math.round(c.total_ltv_cents / c.total_order_count) : 0;
     const state = stateMap.get(c.shopify_customer_gid);
     const ev = enrichment.get(c.shopify_customer_gid);
+    lastEngagementByGid.set(c.shopify_customer_gid, ev?.lastNonSystemEventAt ?? null);
     return {
       shopifyCustomerGid: c.shopify_customer_gid,
       totalOrderCount: c.total_order_count,
@@ -331,6 +352,8 @@ async function findScorable(
       avgOrderValueCents,
     };
   });
+
+  return { inputs, lastEngagementByGid };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,6 +368,7 @@ async function writeScoreForCustomer(
   result: ScoringBatchResult["scores"][number],
   lifecycleStage: LifecycleStage,
   now: string,
+  lastNonSystemEventAt: Date | null,
 ): Promise<void> {
   // Decision 1: write customer_scored event before touching inferred state.
   await appendCustomerEvent(serviceClient, {
@@ -383,6 +407,7 @@ async function writeScoreForCustomer(
         score_model_version: HAIKU_MODEL,
         score_run_id: scoringRunId,
         last_scored_at: now,
+        last_engagement_event_at: lastNonSystemEventAt?.toISOString() ?? null,
       },
       { onConflict: "merchant_id,shopify_customer_gid" },
     );
@@ -439,7 +464,11 @@ export async function scoreCustomers(
         JSON.stringify({ event: "scoring_cap_reached", merchant_id: merchantId.slice(0, 8) }),
       );
     } else {
-      const scorable = await findScorable(serviceClient, merchantId, forceFullRescore);
+      const { inputs: scorable, lastEngagementByGid } = await findScorable(
+        serviceClient,
+        merchantId,
+        forceFullRescore,
+      );
 
       // Process in batches of BATCH_SIZE.
       for (let i = 0; i < scorable.length; i += BATCH_SIZE) {
@@ -490,6 +519,7 @@ export async function scoreCustomers(
               score,
               batchLifecycleMap.get(score.shopifyCustomerGid) ?? "lapsed",
               now,
+              lastEngagementByGid.get(score.shopifyCustomerGid) ?? null,
             );
             customersScored++;
           } catch (err) {
