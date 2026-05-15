@@ -17,3 +17,10 @@ export {
   type LifecycleStage,
   type CustomerSnapshot,
 } from "./customer-lifecycle";
+
+export {
+  assignGroups,
+  type GroupSlug,
+  type CustomerForGrouping,
+  type MerchantContext,
+} from "./customer-groups";

@@ -485,34 +485,48 @@ function makeWithSignalsClient(opts: {
   return {
     from: vi.fn((table: string) => {
       if (table === "customer_inferred_state") {
-        const stateResolvedValue = stateError
+        // Handles:
+        //   propensity path:  select().order().range()
+        //   group-filter:     select().overlaps().order().range()
+        //   ltv/date hydrate: select().eq().in()  → resolves
+        const stateRangeValue = stateError
           ? { data: null, error: stateError, count: null }
           : { data: stateRows, error: null, count: stateCount };
+        const stateInValue = stateError
+          ? { data: null, error: stateError }
+          : { data: stateRows, error: null };
         return {
           select: vi.fn().mockReturnThis(),
           order: vi.fn().mockReturnThis(),
           overlaps: vi.fn().mockReturnThis(),
-          range: vi.fn().mockResolvedValue(stateResolvedValue),
+          eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockResolvedValue(stateInValue),
+          range: vi.fn().mockResolvedValue(stateRangeValue),
         };
       }
-      // customers table — hydration path: select().in().not() resolves, or select().not().order().range() resolves
-      const custResolvedValue = customerError
+
+      // customers table handles two distinct call chains:
+      //   direct:    select().not().order().range()               → custRangeValue
+      //   hydration: select().eq("merchant_id").in().not()        → custHydrateValue
+      const custRangeValue = customerError
         ? { data: null, error: customerError, count: null }
         : { data: customerRows, error: null, count: customerCount };
-      const custChain = {
+      const custHydrateValue = customerError
+        ? { data: null, error: customerError }
+        : { data: customerRows, error: null };
+
+      return {
         select: vi.fn().mockReturnThis(),
         not: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
-        range: vi.fn().mockResolvedValue(custResolvedValue),
-        in: vi.fn(),
+        range: vi.fn().mockResolvedValue(custRangeValue),
+        // eq("merchant_id", ...) returns chain for hydration path
+        eq: vi.fn().mockReturnValue({
+          in: vi.fn().mockReturnValue({
+            not: vi.fn().mockResolvedValue(custHydrateValue),
+          }),
+        }),
       };
-      // .in() returns an object where .not() resolves (hydration path)
-      custChain.in.mockReturnValue({
-        not: vi.fn().mockResolvedValue(
-          customerError ? { data: null, error: customerError } : { data: customerRows, error: null },
-        ),
-      });
-      return custChain;
     }),
   } as unknown as LapsedSupabaseClient;
 }
@@ -542,7 +556,7 @@ describe("getLapsedCustomersWithSignals", () => {
       customerRows: [mockCustomerA],
     });
 
-    const result = await getLapsedCustomersWithSignals(client, { limit: 10 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 });
     expect(result.data).toHaveLength(1);
     expect(result.data[0]?.inferred_state).toEqual(mockStateA);
     expect(result.data[0]?.id).toBe("c1");
@@ -556,14 +570,14 @@ describe("getLapsedCustomersWithSignals", () => {
       customerCount: 1,
     });
 
-    const result = await getLapsedCustomersWithSignals(client, { limit: 10 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 });
     expect(result.data).toHaveLength(1);
     expect(result.data[0]?.inferred_state).toBeNull();
   });
 
   it("returns empty data and null nextCursor when no customers exist", async () => {
     const client = makeWithSignalsClient({ stateRows: [], stateCount: 0, customerRows: [] });
-    const result = await getLapsedCustomersWithSignals(client, { limit: 10 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 });
     expect(result.data).toHaveLength(0);
     expect(result.nextCursor).toBeNull();
   });
@@ -575,7 +589,7 @@ describe("getLapsedCustomersWithSignals", () => {
       customerRows: [mockCustomerA],
     });
 
-    const result = await getLapsedCustomersWithSignals(client, { limit: 1 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 1 });
     expect(result.nextCursor).toBe(1);
   });
 
@@ -586,7 +600,7 @@ describe("getLapsedCustomersWithSignals", () => {
       customerRows: [mockCustomerA],
     });
 
-    const result = await getLapsedCustomersWithSignals(client, { limit: 10 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 });
     expect(result.nextCursor).toBeNull();
   });
 
@@ -597,14 +611,14 @@ describe("getLapsedCustomersWithSignals", () => {
       customerRows: [mockCustomerA],
     });
 
-    const result = await getLapsedCustomersWithSignals(client, { limit: 10 });
+    const result = await getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 });
     expect(result.totalCount).toBe(42);
   });
 
   it("throws when the inferred_state query errors", async () => {
     const client = makeWithSignalsClient({ stateError: { message: "state query failed" } });
     await expect(
-      getLapsedCustomersWithSignals(client, { limit: 10 }),
+      getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 }),
     ).rejects.toMatchObject({ message: "state query failed" });
   });
 });

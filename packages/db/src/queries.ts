@@ -126,13 +126,14 @@ export interface LapsedCustomersWithSignalsPage {
 export async function getLapsedCustomersWithSignals(
   merchantClient: LapsedSupabaseClient,
   opts: {
+    merchantId: string;
     limit: number;
     cursor?: number;
     groupFilter?: string[];
     sortBy?: "propensity_90d" | "last_order_at" | "total_ltv_cents";
   },
 ): Promise<LapsedCustomersWithSignalsPage> {
-  const { limit, cursor = 0, groupFilter, sortBy = "propensity_90d" } = opts;
+  const { merchantId, limit, cursor = 0, groupFilter, sortBy = "propensity_90d" } = opts;
 
   if (groupFilter && groupFilter.length > 0) {
     // Group-filter path: drive pagination from customer_inferred_state (the only table
@@ -161,6 +162,7 @@ export async function getLapsedCustomersWithSignals(
     const { data: customerRows, error: custErr } = await merchantClient
       .from("customers")
       .select("*")
+      .eq("merchant_id", merchantId)
       .in("shopify_customer_gid", gids)
       .not("lapsed_at", "is", null);
 
@@ -216,6 +218,7 @@ export async function getLapsedCustomersWithSignals(
     const { data: customerRows, error: custErr } = await merchantClient
       .from("customers")
       .select("*")
+      .eq("merchant_id", merchantId)
       .in("shopify_customer_gid", gids)
       .not("lapsed_at", "is", null);
 
@@ -260,6 +263,7 @@ export async function getLapsedCustomersWithSignals(
   const { data: stateRows, error: stateErr } = await merchantClient
     .from("customer_inferred_state")
     .select("*")
+    .eq("merchant_id", merchantId)
     .in("shopify_customer_gid", gids);
 
   if (stateErr) throw stateErr;
