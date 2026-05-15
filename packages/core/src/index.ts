@@ -55,3 +55,26 @@ export {
   type PiiMatch,
   type RedactResult,
 } from "./pii-redactor";
+
+export {
+  synthesizeVoice,
+  createVoiceClient,
+  parseVoiceProfile,
+  VoiceSynthesisError,
+  SONNET_MODEL_DEFAULT,
+  PROMPT_VERSION,
+  SYSTEM_PROMPT_TEMPLATE,
+  TONE_TAXONOMY,
+  SENTENCE_LENGTHS,
+  REGISTERS,
+  EMOJI_POLICIES,
+  type VoiceProfile,
+  type ToneDescriptor,
+  type SentenceLength,
+  type Register,
+  type EmojiPolicy,
+  type SynthesizeVoiceInput,
+  type SynthesizeVoiceResult,
+  type VoiceSynthesisReason,
+  type VoiceClientOptions,
+} from "./voice-synthesizer";
