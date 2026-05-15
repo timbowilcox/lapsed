@@ -1,8 +1,8 @@
 # .claude/agents — Specialist subagents for lapsed.ai
 
-This directory contains six specialist subagent definitions that Claude Code's main session can dispatch in parallel to review work during a build sprint. Each subagent has its own context window, focused system prompt, restricted tool access, and a defined output format.
+This directory contains seven specialist subagent definitions that Claude Code's main session can dispatch in parallel to review work during a build sprint. Each subagent has its own context window, focused system prompt, restricted tool access, and a defined output format.
 
-## The six specialists
+## The seven specialists
 
 | Subagent | What it does | When to invoke |
 |---|---|---|
@@ -12,6 +12,7 @@ This directory contains six specialist subagent definitions that Claude Code's m
 | **accessibility-auditor** | Runs axe-core on changed routes + manual review of focus rings, aria-labels, keyboard nav, contrast. | After any UI change. |
 | **test-coverage-analyzer** | Identifies untested code paths. Critical/High severity for load-bearing or security-critical code. | After any source-file change. |
 | **architecture-guardian** | Detects violations of the six load-bearing architectural decisions from CLAUDE.md. The most paranoid auditor. | After any code change that could affect data model, conversation engine, billing math, attribution, or memory graph. |
+| **spec-adherence-auditor** | Maps every SPRINT.md acceptance criterion to its file:line implementation + test. Flags GAPs where spec items have no code or no test. Detects out-of-scope creep. | After every commit on a sprint branch (any sprint type). |
 
 ## How to use them
 
@@ -35,18 +36,19 @@ First, run architecture-guardian on this diff. If it reports any violations, sto
 
 ### Which subagents to run for each sprint type
 
-**UI-only sprints** (e.g., Sprint 02.5 polish): code-reviewer, design-tenet-auditor, vocabulary-auditor, accessibility-auditor. Skip architecture-guardian (UI changes rarely touch load-bearing decisions). Run test-coverage-analyzer for components with logic.
+**UI-only sprints** (e.g., Sprint 02.5 polish): code-reviewer, design-tenet-auditor, vocabulary-auditor, accessibility-auditor, spec-adherence-auditor. Skip architecture-guardian (UI changes rarely touch load-bearing decisions). Run test-coverage-analyzer for components with logic.
 
-**Data / backend sprints** (Sprint 03, Sprint 04, Sprint 08): architecture-guardian (always), code-reviewer, test-coverage-analyzer. Skip the UI-focused auditors.
+**Data / backend sprints** (Sprint 03, Sprint 04, Sprint 08): architecture-guardian (always), code-reviewer, test-coverage-analyzer, spec-adherence-auditor. Skip the UI-focused auditors.
 
-**Conversation / agent sprints** (Sprint 06, Sprint 07): all six. These sprints touch the most load-bearing decisions and have the most surface area for issues.
+**Conversation / agent sprints** (Sprint 05, Sprint 06, Sprint 07): all seven. These sprints touch the most load-bearing decisions and have the most surface area for issues.
 
-**Billing sprint** (Sprint 09): architecture-guardian (mandatory — billing math is decision 6), code-reviewer, test-coverage-analyzer.
+**Billing sprint** (Sprint 09): architecture-guardian (mandatory — billing math is decision 6), code-reviewer, test-coverage-analyzer, spec-adherence-auditor.
 
 ## Calibration notes
 
 - **Block-on-Critical**: any subagent returning a Critical finding should block merge. Don't merge until it's fixed or explicitly waived with documented reasoning.
 - **Block-on-architecture-violation**: architecture-guardian's verdicts are absolute. Even a single violation blocks. Retrofitting load-bearing decisions later is far more expensive than fixing them in the originating PR.
+- **Block-on-GAP**: spec-adherence-auditor returning a GAP (criterion claimed in SPRINT.md but no implementation or test found) blocks merge. The build agent claimed delivery and didn't deliver — that's a sprint-level miss, not a Medium issue.
 - **Disagreement is OK**: subagents may flag the same issue from different angles, or flag things that turn out to be acceptable in context. The main session is the integrator and decides.
 - **Don't over-parallelize**: dispatching all six on a one-line change wastes tokens. Pick the relevant subset.
 - **Custom subagent invocations**: you can pass extra context (`"focus on the new RevenueChart component"`) when invoking. Each subagent reads its own system prompt plus the invocation context.

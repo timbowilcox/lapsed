@@ -92,7 +92,7 @@ Each sprint that touches a relevant area scores against these. Anything below 3 
 
 ## Architectural load-bearing decisions
 
-These six decisions are expensive to retrofit. Any code that touches them is reviewed by the `architecture-guardian` subagent (see `.claude/agents/architecture-guardian.md`). "We'll fix it later" is not an acceptable deferral for any of these.
+These decisions are expensive to retrofit. Any code that touches them is reviewed by the `architecture-guardian` subagent (see `.claude/agents/architecture-guardian.md`). "We'll fix it later" is not an acceptable deferral for any of these.
 
 1. **Event-sourced customer memory graph (Sprint 03).** Append-only event log with timestamp + source. Materialised customer profile regenerated nightly. No snapshot mutations — every customer state change is an appended event, never an `UPDATE` to the profile row.
 
@@ -106,6 +106,18 @@ These six decisions are expensive to retrofit. Any code that touches them is rev
 
 6. **Performance pricing on incremental revenue, not gross.** Billing math is `(attributed revenue × incrementality factor)`. The incrementality factor is derived from holdout group comparison. No invoice line item uses gross attributed revenue without the adjustment. "We'll fix it later" means the billing math is wrong from day one.
 
+7. **Brand voice profiles are versioned and immutable (Sprint 05).** Re-extraction creates a new `voice_versions` row. Active version tracked via `agent_profiles.active_voice_version_id`. Prior versions retained for audit. Editing = new version with edits applied; old version remains.
+
+8. **Storefront snapshots persisted before synthesis (Sprint 05).** Full input corpus written to `storefront_snapshots` before any LLM call. Same snapshot + same model + same prompt = same output. Enables replay if the voice algorithm changes.
+
+9. **Voice synthesis uses Sonnet 4.6 with structured output (Sprint 05).** Not Haiku. One-shot, high-leverage. `tool_choice` with strict JSON schema; retry up to 3 attempts; token usage accumulated.
+
+10. **PII redaction mandatory before any LLM call (Sprint 05).** Pre-flight test fails the call if PII patterns remain after redaction. No storefront content reaches Sonnet unredacted.
+
+11. **Agent identity uses functional language only — no personal names (Sprint 05).** Role descriptors drawn from a taxonomy enum. Type-level rejection of freeform persona names.
+
+12. **Voice events are event-sourced (Sprint 05).** Every extraction writes a `voice_extracted` event via `appendVoiceEvent`. Current state in `agent_profiles` is materialized cache, regeneratable from events. Consistent with decisions 1 and 2.
+
 ## Conventions
 
 - **Sprint branches**: `sprint-NN/<short-name>` or `fix/<short-name>` for hotfixes
@@ -115,7 +127,7 @@ These six decisions are expensive to retrofit. Any code that touches them is rev
 - **Env vars**: every server-side var read by `apps/web` MUST be declared in `turbo.json`'s `tasks["@lapsed/web#build"].env` array. The `pnpm vercel:env:check` script enforces parity between `EXPECTED_ALL`, Vercel project env, and `turbo.json`. Drift fails CI.
 - **Encryption**: tokens encrypted at rest with AES-256-GCM in Node runtime; key never touches Postgres. `packages/db/src/encryption.ts` is the single helper.
 - **Format helpers**: currency / date / timestamp formatting lives in `packages/ui/src/lib/format.ts` (lands in Sprint 02.5). Never format inline.
-- **Parallel review during build**: six specialist subagents in `.claude/agents/` can be dispatched in parallel after each implementation chunk to review work independently. See `.claude/agents/README.md` for which subagents to run per sprint type and how to dispatch them. The evaluator session (post-merge) and the subagents (during build) are both required — they are not substitutes for each other.
+- **Parallel review during build**: seven specialist subagents in `.claude/agents/` can be dispatched in parallel after each implementation chunk to review work independently. See `.claude/agents/README.md` for which subagents to run per sprint type and how to dispatch them. The evaluator session (post-merge) and the subagents (during build) are both required — they are not substitutes for each other.
 
 ## Failure modes encoded so far
 
@@ -143,3 +155,98 @@ You are a skeptical senior engineer doing QA on Sprint NN of lapsed.ai (<sprint 
 ```
 
 Treat the evaluator's verdict as binding. Don't merge until every criterion scores 3.
+
+# Evidence-required HANDOFF format
+
+Starting Sprint 05, every rubric self-score in HANDOFF.md MUST include three evidence components. Self-scores without all three components are treated as `0/3` by the evaluator, regardless of what number is written.
+
+## Required template per rubric criterion
+
+```
+### Criterion N: [name]
+
+**Self-score:** N/3
+
+**Implementation evidence:**
+- Primary file: `<path>:<start_line>-<end_line>`
+- Supporting files (if any): `<path>:<line>`, `<path>:<line>`
+
+**Test evidence:**
+- Test file: `<path>:<test_block_start_line>-<test_block_end_line>`
+- Number of test cases: N
+- Key assertion(s): describe the specific assertion that proves the criterion is met (e.g., "asserts response_format is passed at line 156"; "asserts customer with stale engagement and unchanged lifecycle is skipped at line 312")
+
+**Notes:** [Optional — only if deviations or context needed. NOT a substitute for evidence above.]
+```
+
+## What this prevents
+
+The first HANDOFF.md from Sprint 04 had three fabricated 3/3 self-scores. The fabrications passed the build agent's own review because the agent confused "I addressed this concern" with "the implementation is complete and tested." Requiring file:line evidence forces the agent to look at actual code to fill the references. If the references don't exist, the score must drop.
+
+## Evaluator instruction
+
+When an evaluator session runs against a HANDOFF.md without this format, the evaluator should:
+1. Treat every non-conforming criterion as `0/3`
+2. Flag the format violation as a High finding in itself
+3. Recommend REMEDIATE on format alone
+
+The format is not optional after Sprint 05.
+
+# Mid-sprint checkpoint evaluator protocol
+
+The first evaluator pass on Sprint 04 caught 5 issues, one of them Critical. Several of those issues stemmed from structural drift in early chunks that compounded across later chunks. Catching this earlier — at the halfway point of the sprint — reduces the iteration count needed at sprint end.
+
+## When the checkpoint runs
+
+The checkpoint evaluator runs after the chunk numbered closest to half the chunk count. For a 13-chunk sprint, that's after chunk 7. For a 9-chunk sprint, that's after chunk 5. The chunk where this runs is marked in `SPRINT.md` with a `⚠️ Mid-sprint checkpoint` annotation.
+
+## How to run it
+
+1. After the chunk-7 commit lands on the sprint branch, open a fresh Claude Code session (not the build session)
+2. Use **Opus 4.7 + Medium effort** (lighter than the full evaluator's High; the diff is half-size)
+3. Paste the checkpoint-evaluator prompt below
+
+## Checkpoint evaluator prompt template
+
+```
+You are the mid-sprint checkpoint evaluator for [Sprint N] on lapsed.ai. The build session is halfway done. Your job is to catch structural drift early — before it compounds across the remaining chunks. You are NOT the final evaluator. You score a smaller surface, with a lighter rubric, focused on early-stage course correction.
+
+Read in order:
+1. SPRINT.md — full spec, all 13 chunks
+2. The diff: `git log main..HEAD --oneline` and `git diff main`
+3. HANDOFF.md (if exists from a prior partial session)
+
+Audit only the chunks that have landed. Skip anything not yet attempted.
+
+## Phase 1 — Architectural alignment
+For each architectural decision relevant to the chunks built so far:
+- Is the foundation laid correctly? (Schema shape, event flow, helper signatures)
+- Would the remaining chunks be forced to fight the foundation? If yes, fix the foundation now.
+
+## Phase 2 — Drift detection
+Compare the built chunks against SPRINT.md acceptance criteria:
+- Are the chunks deviating from the spec in ways that will be expensive to undo later?
+- Are there spec items being silently deferred to later chunks that shouldn't be?
+
+## Phase 3 — Foundation for remaining chunks
+- Do the data structures support what's coming?
+- Are the helpers extensible for the remaining work?
+- Is anything being built that will need to be replaced before sprint end?
+
+## Verdict
+
+APPROVE — proceed to chunk N+1
+ADJUST — list specific structural fixes needed before continuing. NOT cosmetic issues; only items that would force expensive rework if deferred.
+
+Be lighter than the final evaluator. Cosmetic issues, missing tests for non-critical paths, documentation gaps — those are all final-evaluator concerns. Your only job is to catch structural drift while it's still cheap to fix.
+```
+
+## Decision rule
+
+- **APPROVE**: build session continues from chunk N+1 with no changes
+- **ADJUST**: a focused remediation commit before chunk N+1. Fixes structural issues only. Re-run checkpoint evaluator after remediation if Critical structural issues found; otherwise proceed.
+
+## Why this works
+
+Structural drift is cheap to fix at chunk 7 (one foundation file affects 5 future chunks). It's expensive at chunk 13 (one foundation file affects 12 already-built chunks). Investing 30 minutes at the halfway mark saves potentially hours of remediation after the final evaluator finds the same issue compounded.
+
