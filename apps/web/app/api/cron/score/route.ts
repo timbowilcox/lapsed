@@ -7,6 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const MAX_RETRIES = 3;
+
 interface MerchantRow {
   id: string;
   shopify_shop_domain: string;
@@ -17,7 +19,16 @@ interface AggregateRow {
   median_aov_cents: string | null;
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+/** Exponential backoff: 5s, 15s, 45s */
+function backoffMs(attempt: number): number {
+  return 5_000 * Math.pow(3, attempt);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
 
   const authHeader = request.headers.get("Authorization");
@@ -47,6 +58,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     customersScored: number;
     costCents: number;
     capReached: boolean;
+    attempts: number;
   }> = [];
 
   for (const merchant of merchantList) {
@@ -59,35 +71,55 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const row = agg as unknown as AggregateRow | null;
     const medianAovCents = Number(row?.median_aov_cents ?? 0);
 
-    try {
-      const result = await scoreCustomers(serviceClient, anthropicClient, {
-        merchantId: merchant.id,
-        medianAovCents,
-      });
+    let lastErr: unknown = null;
+    let succeeded = false;
+    let finalResult = { customersScored: 0, costCents: 0, capReached: false };
 
-      results.push({
-        merchantId: merchant.id.slice(0, 8),
-        status: result.status,
-        customersScored: result.customersScored,
-        costCents: result.costCents,
-        capReached: result.capReached,
-      });
-    } catch (err) {
-      results.push({
-        merchantId: merchant.id.slice(0, 8),
-        status: "failed",
-        customersScored: 0,
-        costCents: 0,
-        capReached: false,
-      });
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await sleep(backoffMs(attempt - 1));
+      }
+      try {
+        const result = await scoreCustomers(serviceClient, anthropicClient, {
+          merchantId: merchant.id,
+          medianAovCents,
+        });
+        finalResult = {
+          customersScored: result.customersScored,
+          costCents: result.costCents,
+          capReached: result.capReached,
+        };
+        succeeded = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn(
+          JSON.stringify({
+            event: "score_cron_retry",
+            merchant_id: merchant.id.slice(0, 8),
+            attempt,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    }
+
+    if (!succeeded) {
       console.error(
         JSON.stringify({
-          event: "score_cron_merchant_error",
+          event: "score_cron_merchant_failed",
           merchant_id: merchant.id.slice(0, 8),
-          error: err instanceof Error ? err.message : String(err),
+          error: lastErr instanceof Error ? lastErr.message : String(lastErr),
         }),
       );
     }
+
+    results.push({
+      merchantId: merchant.id.slice(0, 8),
+      status: succeeded ? "succeeded" : "failed",
+      ...finalResult,
+      attempts: succeeded ? 1 : MAX_RETRIES,
+    });
   }
 
   return NextResponse.json({ merchants: merchantList.length, results });

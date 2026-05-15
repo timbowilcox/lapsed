@@ -13,7 +13,7 @@ interface MerchantRow {
   shopify_shop_domain: string;
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
 
   const authHeader = request.headers.get("Authorization");
