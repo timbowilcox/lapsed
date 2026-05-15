@@ -57,6 +57,18 @@ export {
 } from "./pii-redactor";
 
 export {
+  deriveAgentIdentity,
+  isRoleDescriptor,
+  ROLE_TAXONOMY,
+  CHANNELS,
+  type RoleDescriptor,
+  type Channel,
+  type ChannelPreferences,
+  type FallbackCriteria,
+  type AgentIdentityDefaults,
+} from "./derive-agent-identity";
+
+export {
   appendVoiceEvent,
   materializeVoice,
   insertVoiceVersion,
