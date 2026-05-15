@@ -1,7 +1,7 @@
 import "server-only";
 
 import { MetricCard, formatCount } from "@lapsed/ui";
-import { createServiceClient, getMerchantSummary } from "@lapsed/db";
+import { createServiceClient, getMerchantSummary, getReadyToReactivateCount, getLatestScoringRun } from "@lapsed/db";
 import { serverEnv } from "@/app/lib/env";
 
 export async function DashboardLapsedMetric({ merchantId }: { merchantId: string }) {
@@ -10,13 +10,24 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
     url: env.supabaseUrl,
     serviceKey: env.supabaseSecretKey,
   });
-  const summary = await getMerchantSummary(serviceClient, merchantId);
+
+  const [summary, readyCount, latestRun] = await Promise.all([
+    getMerchantSummary(serviceClient, merchantId),
+    getReadyToReactivateCount(serviceClient, merchantId, env.propensityReadyThreshold),
+    getLatestScoringRun(serviceClient, merchantId),
+  ]);
+
+  // Design tenet 4: honest numbers.
+  // "Pending first score" only when scoring has never run — a true unknown.
+  // When scoring has run and zero customers qualify, show the honest zero.
+  const heroValue = latestRun === null ? "Pending first score" : formatCount(readyCount);
+  const satelliteTrend = `${formatCount(summary.total_lapsed_count)} total lapsed`;
 
   return (
     <MetricCard
-      label="Lapsed group"
-      value={formatCount(summary.total_lapsed_count)}
-      trend="Cadence scoring in Sprint 04"
+      label="Ready to reactivate"
+      value={heroValue}
+      trend={satelliteTrend}
       trendDirection="flat"
     />
   );

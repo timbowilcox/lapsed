@@ -9,11 +9,19 @@ export { encryptToken, decryptToken, decodeEncryptionKey } from "./encryption";
 
 export {
   getLapsedCustomers,
+  getLapsedCustomersWithSignals,
   getCustomer,
   getCustomerOrders,
+  getCustomerInferredState,
+  getReadyToReactivateCount,
+  getLatestScoringRun,
   getMerchantSummary,
   type LapsedCustomersPage,
+  type LapsedCustomersWithSignalsPage,
   type MerchantSummaryRow,
+  type CustomerInferredStateRow,
+  type ScoringRunRow,
+  type CustomerRfmRow,
 } from "./queries";
 
 const ROLE = "authenticated";

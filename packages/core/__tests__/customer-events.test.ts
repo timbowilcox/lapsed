@@ -88,8 +88,14 @@ describe("appendCustomerEvent", () => {
     expect(upserts[0]?.row.payload).toEqual({});
   });
 
-  it("accepts all valid CustomerEventType values", async () => {
-    const types = ["customer_created", "customer_updated", "customer_backfilled", "order_placed"] as const;
+  it("accepts all valid CustomerEventType values including customer_scored", async () => {
+    const types = [
+      "customer_created",
+      "customer_updated",
+      "customer_backfilled",
+      "order_placed",
+      "customer_scored",
+    ] as const;
     for (const eventType of types) {
       const { client, upserts } = makeMockClient();
       await appendCustomerEvent(client, { ...VALID_CUSTOMER_EVENT, eventType });

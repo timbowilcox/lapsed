@@ -10,6 +10,7 @@ export const CustomerEventType = z.enum([
   "customer_updated",
   "customer_backfilled",
   "order_placed",        // customer_events row for an order (cross-stream)
+  "customer_scored",     // Sprint 04: written before each customer_inferred_state update
 ]);
 
 export const OrderEventType = z.enum([
