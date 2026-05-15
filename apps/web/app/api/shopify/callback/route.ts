@@ -17,6 +17,35 @@ import { serverEnv } from "@/app/lib/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Fires the voice-extraction orchestrator as a fire-and-forget POST. We
+ * deliberately do NOT await — Vercel functions can extend via waitUntil
+ * for true backgrounding, but a simple unawaited fetch is sufficient
+ * here: the orchestrator's only side-effects are DB writes that the
+ * onboarding UI polls for via getExtractionStatus (chunk 8).
+ */
+function triggerVoiceExtraction(opts: {
+  appUrl: string;
+  cronSecret: string;
+  merchantId: string;
+}): void {
+  const url = `${opts.appUrl}/api/voice/extract`;
+  // No await — return immediately so the merchant redirect isn't blocked.
+  fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.cronSecret}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      merchantId: opts.merchantId,
+      source: "install_orchestrator",
+    }),
+  }).catch((err) => {
+    console.warn(`voice_extraction_trigger_failed err=${(err as Error).message}`);
+  });
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
   const stateCookie = request.cookies.get(STATE_TOKEN_COOKIE)?.value;
@@ -62,19 +91,33 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Postgres bytea on-the-wire format is `\xHEX...`. PostgREST passes
   // string values straight to Postgres which decodes the hex literal.
-  const { error } = await admin.from("merchants").upsert(
-    {
-      shopify_shop_domain: shop,
-      shopify_access_token: `\\x${ciphertext.toString("hex")}` as unknown as string,
-      shopify_scope: tokenResp.scope,
-      uninstalled_at: null,
-    },
-    { onConflict: "shopify_shop_domain" },
-  );
-  if (error) {
-    console.warn(`merchant_upsert_failed code=${error.code}`);
+  const { data: merchantRow, error } = await admin
+    .from("merchants")
+    .upsert(
+      {
+        shopify_shop_domain: shop,
+        shopify_access_token: `\\x${ciphertext.toString("hex")}` as unknown as string,
+        shopify_scope: tokenResp.scope,
+        uninstalled_at: null,
+      },
+      { onConflict: "shopify_shop_domain" },
+    )
+    .select("id")
+    .single();
+  if (error || !merchantRow) {
+    console.warn(`merchant_upsert_failed code=${error?.code ?? "unknown"}`);
     return NextResponse.json({ error: "persistence_failed" }, { status: 500 });
   }
+
+  // Fire-and-forget trigger the voice-extraction orchestrator (chunk 7).
+  // Awaiting would delay the merchant-facing redirect by up to 30s; the
+  // orchestrator writes its own voice_events and the onboarding UI
+  // (chunk 9) polls them for progress.
+  triggerVoiceExtraction({
+    appUrl: env.shopifyAppUrl,
+    cronSecret: env.cronSecret,
+    merchantId: merchantRow.id,
+  });
 
   const sessionToken = await mintSessionCookie({
     shopDomain: shop,

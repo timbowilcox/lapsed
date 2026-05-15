@@ -24,6 +24,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
     "@lapsed/db": "workspace:*",
+    "@lapsed/shopify": "workspace:*",
     "zod": "^4.4.3"
   }
 }

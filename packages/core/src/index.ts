@@ -57,6 +57,12 @@ export {
 } from "./pii-redactor";
 
 export {
+  runVoiceExtraction,
+  type RunVoiceExtractionInput,
+  type RunVoiceExtractionResult,
+} from "./run-voice-extraction";
+
+export {
   deriveAgentIdentity,
   isRoleDescriptor,
   ROLE_TAXONOMY,
