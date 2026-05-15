@@ -11,3 +11,9 @@ export {
 } from "./customer-events";
 
 export { materializeCustomer } from "./materialize-customer";
+
+export {
+  classifyLifecycle,
+  type LifecycleStage,
+  type CustomerSnapshot,
+} from "./customer-lifecycle";
