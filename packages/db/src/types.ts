@@ -495,6 +495,228 @@ export type Database = {
           },
         ]
       }
+      customer_rfm: {
+        Row: {
+          created_at: string
+          frequency: number
+          frequency_score: number | null
+          id: string
+          lifecycle_stage: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id: string
+          monetary_cents: number
+          monetary_score: number | null
+          recency_days: number | null
+          recency_score: number | null
+          refreshed_at: string
+          rfm_combined: number | null
+          shopify_customer_gid: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          frequency?: number
+          frequency_score?: number | null
+          id?: string
+          lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id: string
+          monetary_cents?: number
+          monetary_score?: number | null
+          recency_days?: number | null
+          recency_score?: number | null
+          refreshed_at?: string
+          rfm_combined?: number | null
+          shopify_customer_gid: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          frequency?: number
+          frequency_score?: number | null
+          id?: string
+          lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id?: string
+          monetary_cents?: number
+          monetary_score?: number | null
+          recency_days?: number | null
+          recency_score?: number | null
+          refreshed_at?: string
+          rfm_combined?: number | null
+          shopify_customer_gid?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_rfm_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scoring_runs: {
+        Row: {
+          cost_cents: number
+          created_at: string
+          customers_scored: number
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          merchant_id: string
+          model_version: string
+          started_at: string
+          status: string
+          tokens_input: number
+          tokens_output: number
+        }
+        Insert: {
+          cost_cents?: number
+          created_at?: string
+          customers_scored?: number
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          merchant_id: string
+          model_version: string
+          started_at?: string
+          status?: string
+          tokens_input?: number
+          tokens_output?: number
+        }
+        Update: {
+          cost_cents?: number
+          created_at?: string
+          customers_scored?: number
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          merchant_id?: string
+          model_version?: string
+          started_at?: string
+          status?: string
+          tokens_input?: number
+          tokens_output?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scoring_runs_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      merchant_scoring_caps: {
+        Row: {
+          created_at: string
+          daily_token_cap: number
+          id: string
+          merchant_id: string
+          period_start: string
+          tokens_used_today: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          daily_token_cap?: number
+          id?: string
+          merchant_id: string
+          period_start?: string
+          tokens_used_today?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          daily_token_cap?: number
+          id?: string
+          merchant_id?: string
+          period_start?: string
+          tokens_used_today?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_scoring_caps_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_inferred_state: {
+        Row: {
+          created_at: string
+          group_memberships: string[]
+          id: string
+          last_engagement_event_at: string | null
+          last_scored_at: string | null
+          lifecycle_stage: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id: string
+          predicted_residual_ltv_cents: number | null
+          propensity_30d: number | null
+          propensity_60d: number | null
+          propensity_90d: number | null
+          score_model_version: string | null
+          score_run_id: string | null
+          shopify_customer_gid: string
+          top_signal: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          group_memberships?: string[]
+          id?: string
+          last_engagement_event_at?: string | null
+          last_scored_at?: string | null
+          lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id: string
+          predicted_residual_ltv_cents?: number | null
+          propensity_30d?: number | null
+          propensity_60d?: number | null
+          propensity_90d?: number | null
+          score_model_version?: string | null
+          score_run_id?: string | null
+          shopify_customer_gid: string
+          top_signal?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          group_memberships?: string[]
+          id?: string
+          last_engagement_event_at?: string | null
+          last_scored_at?: string | null
+          lifecycle_stage?: Database["public"]["Enums"]["lifecycle_stage"] | null
+          merchant_id?: string
+          predicted_residual_ltv_cents?: number | null
+          propensity_30d?: number | null
+          propensity_60d?: number | null
+          propensity_90d?: number | null
+          score_model_version?: string | null
+          score_run_id?: string | null
+          shopify_customer_gid?: string
+          top_signal?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_inferred_state_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_inferred_state_score_run_id_fkey"
+            columns: ["score_run_id"]
+            isOneToOne: false
+            referencedRelation: "scoring_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -511,7 +733,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      lifecycle_stage: "new" | "engaged" | "at_risk" | "lapsed" | "won_back" | "churned"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -638,6 +860,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      lifecycle_stage: ["new", "engaged", "at_risk", "lapsed", "won_back", "churned"],
+    },
   },
 } as const
