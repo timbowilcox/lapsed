@@ -14,6 +14,7 @@ import {
   getReadyToReactivateCount,
   getLatestScoringRun,
   getMerchantSummary,
+  getExtractionStatus,
 } from "../src/queries";
 
 const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440001";
@@ -620,5 +621,178 @@ describe("getLapsedCustomersWithSignals", () => {
     await expect(
       getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 }),
     ).rejects.toMatchObject({ message: "state query failed" });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getExtractionStatus
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VOICE_VERSION_ID = "99999999-9999-4999-8999-999999999999";
+
+/** Builds a client whose voice_events query resolves to `events` (newest-first). */
+function makeExtractionStatusClient(
+  events: Record<string, unknown>[] | null,
+  error?: { message: string } | null,
+) {
+  const eqCall = vi.fn().mockReturnThis();
+  const limitCall = vi
+    .fn()
+    .mockResolvedValue(error ? { data: null, error } : { data: events, error: null });
+  const client = {
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: eqCall,
+      order: vi.fn().mockReturnThis(),
+      limit: limitCall,
+    })),
+  } as unknown as LapsedSupabaseClient;
+  return { client, eqCall, limitCall };
+}
+
+describe("getExtractionStatus", () => {
+  it("returns analyzing with null fields when no voice events exist", async () => {
+    const { client } = makeExtractionStatusClient([]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result).toEqual({
+      phase: "analyzing",
+      startedAt: null,
+      completedAt: null,
+      errorMessage: null,
+      voiceVersionId: null,
+    });
+  });
+
+  it("derives analyzing from a lone extraction_started event", async () => {
+    const { client } = makeExtractionStatusClient([
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
+    expect(result.startedAt).toBe("2026-05-16T10:00:00.000Z");
+    expect(result.completedAt).toBeNull();
+    expect(result.voiceVersionId).toBeNull();
+  });
+
+  it("derives extracting from a storefront_fetched latest event", async () => {
+    const { client } = makeExtractionStatusClient([
+      { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("extracting");
+    expect(result.startedAt).toBe("2026-05-16T10:00:00.000Z");
+  });
+
+  it("derives extracting from a pii_redacted latest event", async () => {
+    const { client } = makeExtractionStatusClient([
+      { event_type: "pii_redacted", occurred_at: "2026-05-16T10:00:06.000Z", payload: {} },
+      { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("extracting");
+  });
+
+  it("derives generating from a voice_extracted latest event and exposes the version id", async () => {
+    const { client } = makeExtractionStatusClient([
+      {
+        event_type: "voice_extracted",
+        occurred_at: "2026-05-16T10:00:10.000Z",
+        payload: { version_id: VOICE_VERSION_ID },
+      },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("generating");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+    expect(result.completedAt).toBeNull();
+  });
+
+  it("derives ready from voice_activated, with completedAt from its occurred_at", async () => {
+    const { client } = makeExtractionStatusClient([
+      {
+        event_type: "voice_activated",
+        occurred_at: "2026-05-16T10:00:11.000Z",
+        payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
+      },
+      {
+        event_type: "voice_extracted",
+        occurred_at: "2026-05-16T10:00:10.000Z",
+        payload: { version_id: VOICE_VERSION_ID },
+      },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("ready");
+    expect(result.completedAt).toBe("2026-05-16T10:00:11.000Z");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+    expect(result.errorMessage).toBeNull();
+  });
+
+  it("derives ready from a voice_edited latest event (Settings edit)", async () => {
+    const { client } = makeExtractionStatusClient([
+      {
+        event_type: "voice_edited",
+        occurred_at: "2026-05-16T12:00:00.000Z",
+        payload: { version_id: VOICE_VERSION_ID, previous_version_id: VOICE_VERSION_ID, fields_changed: ["register"] },
+      },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("ready");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+  });
+
+  it("derives failed from extraction_failed, surfacing the reason as errorMessage", async () => {
+    const { client } = makeExtractionStatusClient([
+      {
+        event_type: "extraction_failed",
+        occurred_at: "2026-05-16T10:00:08.000Z",
+        payload: { phase: "synthesize", reason: "exhausted_retries" },
+      },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("failed");
+    expect(result.errorMessage).toBe("exhausted_retries");
+    expect(result.completedAt).toBe("2026-05-16T10:00:08.000Z");
+  });
+
+  it("scopes to the current run — a re-extraction in progress shows no stale version id", async () => {
+    // Run 1 completed (started → activated); run 2 just started. Newest-first.
+    const { client } = makeExtractionStatusClient([
+      { event_type: "extraction_started", occurred_at: "2026-05-16T14:00:00.000Z", payload: {} },
+      {
+        event_type: "voice_activated",
+        occurred_at: "2026-05-16T10:00:11.000Z",
+        payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
+      },
+      {
+        event_type: "voice_extracted",
+        occurred_at: "2026-05-16T10:00:10.000Z",
+        payload: { version_id: VOICE_VERSION_ID },
+      },
+      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
+    ]);
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
+    // startedAt is run 2's extraction_started, not run 1's.
+    expect(result.startedAt).toBe("2026-05-16T14:00:00.000Z");
+    // No version id from the prior run leaks into the in-progress run.
+    expect(result.voiceVersionId).toBeNull();
+  });
+
+  it("filters the query by merchant_id", async () => {
+    const { client, eqCall } = makeExtractionStatusClient([]);
+    await getExtractionStatus(client, MERCHANT_ID);
+    expect(eqCall).toHaveBeenCalledWith("merchant_id", MERCHANT_ID);
+  });
+
+  it("throws when Supabase returns an error", async () => {
+    const { client } = makeExtractionStatusClient(null, { message: "voice_events query failed" });
+    await expect(getExtractionStatus(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "voice_events query failed",
+    });
   });
 });

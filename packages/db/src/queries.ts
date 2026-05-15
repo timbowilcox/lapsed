@@ -1,5 +1,5 @@
 import type { LapsedSupabaseClient } from "./index";
-import type { Database } from "./types";
+import type { Database, Json } from "./types";
 
 type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
@@ -357,4 +357,134 @@ export async function getMerchantSummary(
     total_lapsed_count: countResult.count ?? 0,
     last_synced_at: merchant?.last_backfill_at ?? null,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getExtractionStatus — voice-extraction progress for the onboarding UI
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ExtractionPhase =
+  | "analyzing"
+  | "extracting"
+  | "generating"
+  | "ready"
+  | "failed";
+
+export interface ExtractionStatus {
+  phase: ExtractionPhase;
+  /** occurred_at of the current run's `extraction_started` event; null if no run is recorded yet. */
+  startedAt: string | null;
+  /** occurred_at of the terminal event when phase is `ready`/`failed`; null while in progress. */
+  completedAt: string | null;
+  /** `extraction_failed` reason when phase is `failed`; null otherwise. */
+  errorMessage: string | null;
+  /** Voice version id once `voice_extracted` has landed; null before then. */
+  voiceVersionId: string | null;
+}
+
+interface VoiceEventRow {
+  event_type: string;
+  occurred_at: string;
+  payload: Json;
+}
+
+/** Map a voice_events event_type to the extraction phase it represents. */
+function phaseForEvent(eventType: string): ExtractionPhase {
+  switch (eventType) {
+    case "extraction_started":
+      return "analyzing";
+    case "storefront_fetched":
+    case "pii_redacted":
+      return "extracting";
+    case "voice_extracted":
+      return "generating";
+    case "voice_activated":
+    case "voice_edited":
+      return "ready";
+    case "extraction_failed":
+      return "failed";
+    default:
+      // Unknown event type — treat as in-progress rather than crash the UI poll.
+      return "analyzing";
+  }
+}
+
+/** Reads a string field from a jsonb payload object, or null. */
+function payloadString(payload: Json, key: string): string | null {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const value = (payload as Record<string, unknown>)[key];
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+/**
+ * Derives the current voice-extraction status for a merchant from the
+ * `voice_events` log (Sprint 05, decision 12 — events are the source of
+ * truth). Powers the onboarding progress UI (chunk 9), which polls this
+ * every 2 seconds.
+ *
+ * Phase derivation maps the most recent event:
+ *   extraction_started               → analyzing
+ *   storefront_fetched / pii_redacted → extracting
+ *   voice_extracted                  → generating
+ *   voice_activated / voice_edited    → ready
+ *   extraction_failed                → failed
+ *
+ * The "current run" is every event at or after the most recent
+ * `extraction_started`, so a re-extraction never surfaces a stale version id
+ * from a prior run. `startedAt` is that event's occurred_at; `completedAt` is
+ * the terminal event's occurred_at (`voice_activated` for `ready`,
+ * `extraction_failed` for `failed`).
+ */
+export async function getExtractionStatus(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<ExtractionStatus> {
+  // A single run is ≤6 events; 20 generously covers the current run plus
+  // slack while bounding the query against a long re-extraction history.
+  const { data, error } = await client
+    .from("voice_events")
+    .select("event_type, occurred_at, payload")
+    .eq("merchant_id", merchantId)
+    .order("occurred_at", { ascending: false })
+    .limit(20);
+
+  if (error) throw error;
+
+  const events = (data ?? []) as VoiceEventRow[];
+  if (events.length === 0) {
+    return {
+      phase: "analyzing",
+      startedAt: null,
+      completedAt: null,
+      errorMessage: null,
+      voiceVersionId: null,
+    };
+  }
+
+  // Events are newest-first. The current run is every event at or after the
+  // most recent extraction_started.
+  const startedIdx = events.findIndex((e) => e.event_type === "extraction_started");
+  const currentRun = startedIdx === -1 ? events : events.slice(0, startedIdx + 1);
+  const startedAt = startedIdx === -1 ? null : events[startedIdx]!.occurred_at;
+
+  const latest = currentRun[0]!;
+  const phase = phaseForEvent(latest.event_type);
+
+  const completedAt = phase === "ready" || phase === "failed" ? latest.occurred_at : null;
+  const errorMessage = phase === "failed" ? payloadString(latest.payload, "reason") : null;
+
+  // version_id is carried by voice_activated / voice_edited / voice_extracted
+  // payloads — take it from the most recent carrier in the current run.
+  let voiceVersionId: string | null = null;
+  for (const event of currentRun) {
+    const versionId = payloadString(event.payload, "version_id");
+    if (versionId) {
+      voiceVersionId = versionId;
+      break;
+    }
+  }
+
+  return { phase, startedAt, completedAt, errorMessage, voiceVersionId };
 }

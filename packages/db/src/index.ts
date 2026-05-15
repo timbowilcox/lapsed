@@ -16,12 +16,15 @@ export {
   getReadyToReactivateCount,
   getLatestScoringRun,
   getMerchantSummary,
+  getExtractionStatus,
   type LapsedCustomersPage,
   type LapsedCustomersWithSignalsPage,
   type MerchantSummaryRow,
   type CustomerInferredStateRow,
   type ScoringRunRow,
   type CustomerRfmRow,
+  type ExtractionPhase,
+  type ExtractionStatus,
 } from "./queries";
 
 const ROLE = "authenticated";
