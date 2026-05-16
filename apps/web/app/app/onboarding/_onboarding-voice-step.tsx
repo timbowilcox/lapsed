@@ -6,22 +6,29 @@
 
 import { useCallback, useState } from "react";
 import type { VoiceProfile } from "@lapsed/core";
+import type { VoiceProfileResponse } from "@/app/api/voice/profile/route";
 import { ExtractionProgress } from "./_extraction-progress";
 import { VoicePreview } from "../_components/voice-preview";
 
 export function OnboardingVoiceStep() {
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
+  const [previewError, setPreviewError] = useState(false);
 
   const handleComplete = useCallback(async () => {
-    // Best-effort: the progress indicator already shows `ready`; a fetch
-    // failure here just means the preview doesn't render.
     try {
       const res = await fetch("/api/voice/profile", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = (await res.json()) as { profile: VoiceProfile } | null;
-      if (data?.profile) setProfile(data.profile);
+      if (!res.ok) {
+        setPreviewError(true);
+        return;
+      }
+      const data = (await res.json()) as VoiceProfileResponse | null;
+      if (data) {
+        setProfile(data.profile);
+      } else {
+        setPreviewError(true);
+      }
     } catch {
-      /* preview is non-critical during onboarding */
+      setPreviewError(true);
     }
   }, []);
 
@@ -29,6 +36,11 @@ export function OnboardingVoiceStep() {
     <div className="flex w-full flex-col gap-16">
       <ExtractionProgress onComplete={() => void handleComplete()} />
       {profile && <VoicePreview profile={profile} context="onboarding" />}
+      {!profile && previewError && (
+        <p className="text-meta text-ink-500">
+          Your brand voice is ready. You can view it any time from Settings.
+        </p>
+      )}
     </div>
   );
 }
