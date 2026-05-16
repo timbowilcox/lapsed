@@ -120,7 +120,7 @@ export default async function ConversationDetailPage({ params }: PageProps) {
               <div className="flex flex-col gap-12 p-24">
                 {campaign && (
                   <Link
-                    href={`/app/campaigns/${campaign.id}`}
+                    href="/app/campaigns"
                     className="text-meta font-medium text-lavender-700 hover:text-ink-900"
                   >
                     {campaign.name}
