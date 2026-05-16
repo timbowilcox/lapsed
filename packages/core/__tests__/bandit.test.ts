@@ -309,6 +309,18 @@ describe("posteriorStats", () => {
     const ci50 = posteriorStats(8, 5, 0.5);
     expect(ci50.ciUpper - ci50.ciLower).toBeLessThan(ci95.ciUpper - ci95.ciLower);
   });
+
+  it("stays finite and ordered for a high-observation posterior (Beta(400,12))", () => {
+    // The state an arm reaches after hundreds of Sprint 07 observations — the
+    // lnGamma/exp path must not underflow to NaN in the inspector UI.
+    const s = posteriorStats(400, 12);
+    expect(Number.isFinite(s.mean)).toBe(true);
+    expect(Number.isFinite(s.ciLower)).toBe(true);
+    expect(Number.isFinite(s.ciUpper)).toBe(true);
+    expect(s.ciLower).toBeLessThan(s.mean);
+    expect(s.mean).toBeLessThan(s.ciUpper);
+    expect(s.mean).toBeCloseTo(400 / 412, 4);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -316,19 +328,22 @@ describe("posteriorStats", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface MockConfig {
-  /** Row returned by SELECT ... maybeSingle (initialize read-back / update read). */
+  /** Row returned by the first SELECT ... maybeSingle. */
   existingRow?: Record<string, unknown> | null;
-  /** Row returned by the UPDATE ... select().maybeSingle(). */
+  /** Row returned by the SECOND SELECT (the post-unique-violation re-read). */
+  secondReadRow?: Record<string, unknown> | null;
+  /** Row returned by INSERT ... select().maybeSingle(). */
+  insertedRow?: Record<string, unknown> | null;
+  /** Row returned by UPDATE ... select().maybeSingle(). */
   updatedRow?: Record<string, unknown> | null;
-  upsertError?: { message: string };
+  insertError?: { message: string; code?: string };
   selectError?: { message: string };
   updateError?: { message: string };
 }
 
-interface UpsertCall {
+interface InsertCall {
   table: string;
   row: Record<string, unknown>;
-  opts: unknown;
 }
 interface UpdateCall {
   table: string;
@@ -336,17 +351,30 @@ interface UpdateCall {
 }
 
 function makeMockClient(config: MockConfig = {}) {
-  const upserts: UpsertCall[] = [];
+  const inserts: InsertCall[] = [];
   const updates: UpdateCall[] = [];
+  let selectCalls = 0;
 
   function selectBuilder() {
+    const call = ++selectCalls;
     const qb: Record<string, unknown> = {};
     qb.eq = () => qb;
+    qb.maybeSingle = () => {
+      if (config.selectError) return Promise.resolve({ data: null, error: config.selectError });
+      const row = call >= 2 ? (config.secondReadRow ?? null) : (config.existingRow ?? null);
+      return Promise.resolve({ data: row, error: null });
+    };
+    return qb;
+  }
+
+  function insertBuilder() {
+    const qb: Record<string, unknown> = {};
+    qb.select = () => qb;
     qb.maybeSingle = () =>
       Promise.resolve(
-        config.selectError
-          ? { data: null, error: config.selectError }
-          : { data: config.existingRow ?? null, error: null },
+        config.insertError
+          ? { data: null, error: config.insertError }
+          : { data: config.insertedRow ?? null, error: null },
       );
     return qb;
   }
@@ -366,13 +394,11 @@ function makeMockClient(config: MockConfig = {}) {
 
   const client = {
     from: vi.fn((table: string) => ({
-      upsert: vi.fn((row: Record<string, unknown>, opts: unknown) => {
-        upserts.push({ table, row, opts });
-        return Promise.resolve(
-          config.upsertError ? { data: null, error: config.upsertError } : { data: null, error: null },
-        );
-      }),
       select: vi.fn(() => selectBuilder()),
+      insert: vi.fn((row: Record<string, unknown>) => {
+        inserts.push({ table, row });
+        return insertBuilder();
+      }),
       update: vi.fn((row: Record<string, unknown>) => {
         updates.push({ table, row });
         return updateBuilder();
@@ -380,7 +406,7 @@ function makeMockClient(config: MockConfig = {}) {
     })),
   } as unknown as LapsedSupabaseClient;
 
-  return { client, upserts, updates };
+  return { client, inserts, updates };
 }
 
 function banditRow(overrides: Record<string, unknown> = {}) {
@@ -403,16 +429,19 @@ describe("NEUTRAL_PRIOR", () => {
 });
 
 describe("initializeBanditArm", () => {
-  it("writes the neutral Beta(1,1) prior with observation_count 0", async () => {
-    const { client, upserts } = makeMockClient({ existingRow: banditRow() });
+  it("inserts the neutral Beta(1,1) prior when the arm has no row yet", async () => {
+    const { client, inserts } = makeMockClient({
+      existingRow: null,
+      insertedRow: banditRow(),
+    });
     await initializeBanditArm(client, {
       armId: ARM_A,
       merchantId: MERCHANT_ID,
       proposalId: PROPOSAL_ID,
     });
-    expect(upserts).toHaveLength(1);
-    expect(upserts[0]!.table).toBe("bandit_state");
-    expect(upserts[0]!.row).toEqual({
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]!.table).toBe("bandit_state");
+    expect(inserts[0]!.row).toEqual({
       arm_id: ARM_A,
       merchant_id: MERCHANT_ID,
       proposal_id: PROPOSAL_ID,
@@ -422,18 +451,8 @@ describe("initializeBanditArm", () => {
     });
   });
 
-  it("uses ON CONFLICT DO NOTHING on arm_id for idempotency", async () => {
-    const { client, upserts } = makeMockClient({ existingRow: banditRow() });
-    await initializeBanditArm(client, {
-      armId: ARM_A,
-      merchantId: MERCHANT_ID,
-      proposalId: PROPOSAL_ID,
-    });
-    expect(upserts[0]!.opts).toEqual({ onConflict: "arm_id", ignoreDuplicates: true });
-  });
-
-  it("returns the bandit state read back from the row", async () => {
-    const { client } = makeMockClient({ existingRow: banditRow() });
+  it("returns the bandit state from the inserted row", async () => {
+    const { client } = makeMockClient({ existingRow: null, insertedRow: banditRow() });
     const state = await initializeBanditArm(client, {
       armId: ARM_A,
       merchantId: MERCHANT_ID,
@@ -450,10 +469,10 @@ describe("initializeBanditArm", () => {
     });
   });
 
-  it("returns the true current statistics when the arm was already initialized and updated", async () => {
-    // A re-run after Sprint 07 has folded in observations: the upsert no-ops,
-    // and the read-back must return the real (12, 4) posterior, not (1, 1).
-    const { client } = makeMockClient({
+  it("returns an already-initialized arm untouched — never re-sends the prior (decision 14)", async () => {
+    // Sprint 07 has folded in observations: the existing posterior is (12,4).
+    // No insert must happen, and the live posterior must be returned as-is.
+    const { client, inserts } = makeMockClient({
       existingRow: banditRow({ alpha: 12, beta: 4, observation_count: 14 }),
     });
     const state = await initializeBanditArm(client, {
@@ -461,9 +480,40 @@ describe("initializeBanditArm", () => {
       merchantId: MERCHANT_ID,
       proposalId: PROPOSAL_ID,
     });
+    expect(inserts).toHaveLength(0);
     expect(state.alpha).toBe(12);
     expect(state.beta).toBe(4);
     expect(state.observationCount).toBe(14);
+  });
+
+  it("re-reads and returns the live row when a concurrent insert wins the race", async () => {
+    // First read: no row. Insert: unique violation (23505). Re-read: the row
+    // the racing caller inserted.
+    const { client, inserts } = makeMockClient({
+      existingRow: null,
+      insertError: { message: "duplicate key", code: "23505" },
+      secondReadRow: banditRow({ alpha: 1, beta: 1 }),
+    });
+    const state = await initializeBanditArm(client, {
+      armId: ARM_A,
+      merchantId: MERCHANT_ID,
+      proposalId: PROPOSAL_ID,
+    });
+    expect(inserts).toHaveLength(1);
+    expect(state.armId).toBe(ARM_A);
+  });
+
+  it("throws a tenancy error when the arm already belongs to another merchant", async () => {
+    const { client } = makeMockClient({
+      existingRow: banditRow({ merchant_id: "999e8400-e29b-41d4-a716-446655440000" }),
+    });
+    await expect(
+      initializeBanditArm(client, {
+        armId: ARM_A,
+        merchantId: MERCHANT_ID,
+        proposalId: PROPOSAL_ID,
+      }),
+    ).rejects.toThrow(/different merchant/);
   });
 
   it("rejects a non-UUID armId", async () => {
@@ -488,29 +538,43 @@ describe("initializeBanditArm", () => {
     ).rejects.toThrow(/merchantId/);
   });
 
-  it("throws when the row cannot be read back after upsert", async () => {
-    const { client } = makeMockClient({ existingRow: null });
+  it("rejects a non-UUID proposalId", async () => {
+    const { client } = makeMockClient();
+    await expect(
+      initializeBanditArm(client, {
+        armId: ARM_A,
+        merchantId: MERCHANT_ID,
+        proposalId: "nope",
+      }),
+    ).rejects.toThrow(/proposalId/);
+  });
+
+  it("throws when the insert returns no row", async () => {
+    const { client } = makeMockClient({ existingRow: null, insertedRow: null });
     await expect(
       initializeBanditArm(client, {
         armId: ARM_A,
         merchantId: MERCHANT_ID,
         proposalId: PROPOSAL_ID,
       }),
-    ).rejects.toThrow(/not found after upsert/);
+    ).rejects.toThrow(/returned no row/);
   });
 
-  it("propagates an upsert error", async () => {
-    const { client } = makeMockClient({ upsertError: { message: "upsert failed" } });
+  it("propagates a non-unique insert error", async () => {
+    const { client } = makeMockClient({
+      existingRow: null,
+      insertError: { message: "disk full", code: "53100" },
+    });
     await expect(
       initializeBanditArm(client, {
         armId: ARM_A,
         merchantId: MERCHANT_ID,
         proposalId: PROPOSAL_ID,
       }),
-    ).rejects.toThrow(/upsert failed/);
+    ).rejects.toThrow(/disk full/);
   });
 
-  it("propagates a read-back select error", async () => {
+  it("propagates a read error", async () => {
     const { client } = makeMockClient({ selectError: { message: "read failed" } });
     await expect(
       initializeBanditArm(client, {
@@ -561,9 +625,30 @@ describe("updatePosterior", () => {
     expect(updates[0]!.row).toMatchObject({ alpha: 2, beta: 1, observation_count: 1 });
   });
 
+  it("the update payload never includes an identity column (decision 14)", async () => {
+    const { client, updates } = makeMockClient({
+      existingRow: banditRow(),
+      updatedRow: banditRow({ alpha: 2 }),
+    });
+    await updatePosterior(client, ARM_A, true, {
+      now: () => new Date("2026-05-16T12:00:00.000Z"),
+    });
+    expect(Object.keys(updates[0]!.row).sort()).toEqual([
+      "alpha",
+      "beta",
+      "last_updated_at",
+      "observation_count",
+    ]);
+  });
+
   it("throws when the arm has no bandit_state row", async () => {
     const { client } = makeMockClient({ existingRow: null });
     await expect(updatePosterior(client, ARM_A, true)).rejects.toThrow(/no bandit_state row/);
+  });
+
+  it("throws when the row vanishes between the read and the update", async () => {
+    const { client } = makeMockClient({ existingRow: banditRow(), updatedRow: null });
+    await expect(updatePosterior(client, ARM_A, true)).rejects.toThrow(/vanished mid-update/);
   });
 
   it("rejects a non-UUID armId", async () => {
@@ -585,7 +670,6 @@ describe("updatePosterior", () => {
   });
 
   it("is not idempotent — two successes advance alpha twice", async () => {
-    // First call: 1,1 → 2,1. Second call modelled separately: 2,1 → 3,1.
     const first = makeMockClient({
       existingRow: banditRow({ alpha: 1, beta: 1, observation_count: 0 }),
       updatedRow: banditRow({ alpha: 2, beta: 1, observation_count: 1 }),

@@ -97,11 +97,15 @@ function sampleGamma(shape: number, rng: Rng): number {
     } while (v <= 0);
     v = v * v * v;
     const u = rng();
+    // 0.0331 is the Marsaglia-Tsang (2000) squeeze constant — accepts the
+    // common case without evaluating the costlier log test below.
     if (u < 1 - 0.0331 * x * x * x * x) return d * v;
     if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
   }
-  // Effectively unreachable; return the distribution mean as a safe fallback.
-  return shape;
+  // Unreachable for shape >= 1 in practice. Throwing (rather than returning a
+  // plausible-but-wrong fallback) ensures a statistical-engine fault surfaces
+  // loudly instead of silently corrupting an arm selection.
+  throw new Error(`sampleGamma: rejection loop exhausted for shape=${shape}`);
 }
 
 /**
@@ -126,12 +130,25 @@ export interface ThompsonSampleOptions {
   seed?: number;
 }
 
+/** FNV-1a hash of a string to a 32-bit unsigned integer. */
+function hashArmId(armId: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < armId.length; i++) {
+    h ^= armId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 /**
  * Draws one sample from each arm's Beta posterior and returns the `armId` of
  * the arm with the highest draw — the Thompson-sampling arm-selection rule.
  *
- * Deterministic given `opts.seed`: the same seed and the same arm posteriors
- * always select the same arm. Arms are sampled in array order; an exact
+ * Deterministic given `opts.seed`: each arm is sampled from its own PRNG
+ * stream seeded by `seed XOR hash(armId)`, so a selection is reproducible
+ * from `(seed, each arm's armId + alpha + beta)` ALONE — it does not depend
+ * on arm array order, and changing one arm's posterior does not perturb the
+ * draws of the others. Arms are scanned in array order, so an exact
  * floating-point tie (vanishingly improbable) resolves to the earlier arm.
  *
  * Throws if `arms` is empty — a campaign with no arms cannot be sampled.
@@ -143,11 +160,14 @@ export function thompsonSample(
   if (arms.length === 0) {
     throw new Error("thompsonSample: cannot sample from an empty arm set");
   }
-  const rng: Rng = opts.seed !== undefined ? mulberry32(opts.seed) : Math.random;
 
   let bestArmId = arms[0]!.armId;
   let bestSample = -Infinity;
   for (const arm of arms) {
+    const rng: Rng =
+      opts.seed !== undefined
+        ? mulberry32((opts.seed ^ hashArmId(arm.armId)) >>> 0)
+        : Math.random;
     const draw = sampleBeta(arm.alpha, arm.beta, rng);
     if (draw > bestSample) {
       bestSample = draw;
@@ -314,6 +334,9 @@ interface BanditStateRow {
   last_updated_at: string;
 }
 
+const BANDIT_STATE_COLUMNS =
+  "arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at";
+
 function toBanditState(row: BanditStateRow): BanditState {
   return {
     armId: row.arm_id,
@@ -326,17 +349,54 @@ function toBanditState(row: BanditStateRow): BanditState {
   };
 }
 
+/** True for a Postgres unique-violation error (SQLSTATE 23505). */
+function isUniqueViolation(err: unknown): boolean {
+  return !!err && typeof err === "object" && (err as { code?: string }).code === "23505";
+}
+
+/**
+ * Converts a row to BanditState after asserting it belongs to the expected
+ * merchant + proposal. A divergence means the arm_id was re-used across
+ * tenants/proposals — a caller bug that must fail loudly, not silently return
+ * another tenant's posterior.
+ */
+function assertTenancyAndConvert(row: BanditStateRow, v: InitializeBanditArmInput): BanditState {
+  if (row.merchant_id !== v.merchantId || row.proposal_id !== v.proposalId) {
+    throw new Error(
+      `initializeBanditArm: arm ${v.armId} already belongs to a different merchant/proposal`,
+    );
+  }
+  return toBanditState(row);
+}
+
+async function readBanditRow(
+  serviceClient: LapsedSupabaseClient,
+  armId: string,
+): Promise<BanditStateRow | null> {
+  const { data, error } = await serviceClient
+    .from("bandit_state")
+    .select(BANDIT_STATE_COLUMNS)
+    .eq("arm_id", armId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as BanditStateRow | null) ?? null;
+}
+
 /**
  * Writes the neutral Beta(1,1) prior for a campaign arm to `bandit_state`.
  * Called at proposal approval (decision 14 — arms are initialized in
  * bandit_state once the proposal is approved).
  *
- * Idempotent: the arm_id PK plus ON CONFLICT DO NOTHING means a re-run is a
- * no-op. The current row is then read back and returned, so a re-run after
- * Sprint 07 has already updated the posterior returns the true current
- * statistics rather than a stale (1,1).
+ * Read-first: if the arm already has a row, it is returned UNTOUCHED — the
+ * neutral prior is never sent over a live posterior, so this function cannot
+ * reset an arm Sprint 07 has already updated (decision 14). Only when no row
+ * exists is the prior inserted. A concurrent insert that races between the
+ * read and the insert is detected via the arm_id PK unique violation and
+ * resolved by re-reading. Idempotent across every ordering.
  *
- * Throws a ZodError on invalid input and the Postgres error on a write failure.
+ * Throws a ZodError on invalid input, on a tenancy mismatch (the arm_id
+ * already belongs to a different merchant/proposal), and the Postgres error
+ * on an unexpected write failure.
  */
 export async function initializeBanditArm(
   serviceClient: LapsedSupabaseClient,
@@ -344,29 +404,35 @@ export async function initializeBanditArm(
 ): Promise<BanditState> {
   const v = InitializeBanditArmInputSchema.parse(input);
 
-  const { error: upErr } = await serviceClient.from("bandit_state").upsert(
-    {
+  const existing = await readBanditRow(serviceClient, v.armId);
+  if (existing) return assertTenancyAndConvert(existing, v);
+
+  const { data: inserted, error } = await serviceClient
+    .from("bandit_state")
+    .insert({
       arm_id: v.armId,
       merchant_id: v.merchantId,
       proposal_id: v.proposalId,
       alpha: NEUTRAL_PRIOR.alpha,
       beta: NEUTRAL_PRIOR.beta,
       observation_count: 0,
-    },
-    { onConflict: "arm_id", ignoreDuplicates: true },
-  );
-  if (upErr) throw upErr;
-
-  const { data, error } = await serviceClient
-    .from("bandit_state")
-    .select("arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at")
-    .eq("arm_id", v.armId)
+    })
+    .select(BANDIT_STATE_COLUMNS)
     .maybeSingle();
-  if (error) throw error;
-  if (!data) {
-    throw new Error(`initializeBanditArm: bandit_state row for arm ${v.armId} not found after upsert`);
+
+  if (error) {
+    // A concurrent caller inserted the arm between our read and this insert;
+    // the arm_id PK rejects the duplicate. Re-read and return the live row.
+    if (isUniqueViolation(error)) {
+      const raced = await readBanditRow(serviceClient, v.armId);
+      if (raced) return assertTenancyAndConvert(raced, v);
+    }
+    throw error;
   }
-  return toBanditState(data as BanditStateRow);
+  if (!inserted) {
+    throw new Error(`initializeBanditArm: insert for arm ${v.armId} returned no row`);
+  }
+  return assertTenancyAndConvert(inserted as BanditStateRow, v);
 }
 
 /**
