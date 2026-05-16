@@ -50,12 +50,19 @@ The mid-sprint checkpoint ran after chunk 7 and returned **APPROVE**.
 | Gate | Status |
 |---|---|
 | `pnpm typecheck` | PASS |
-| `pnpm test` | PASS (603 core, 97 db, 85 shopify, plus the web suites) |
+| `pnpm test` | PASS (603 core, 175 web, 97 db, 85 shopify) |
 | `pnpm lint` | PASS |
 | `pnpm grep:pii` | PASS — no findings |
-| `pnpm vercel:env:check` | **FAILS** — expected; the two new env vars are not yet on the Vercel project. See "Manual actions required". |
+| `pnpm vercel:env:check` | PASS — `CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT` and `HOLDOUT_RATE` are now present on all three environments. |
+| `pnpm build` | PASS — all three apps |
 
 `pnpm test:e2e` is not a per-commit gate; it requires a running app + a database with migration 0007 applied (see "Manual actions required").
+
+### CI gate notes — RLS test skip behaviour
+
+`campaign-rls.test.ts` (33 cases — the primary test evidence for rubric criterion 7) is **schema-gated**: when it runs against a database that does not have migration 0007 applied, all 33 cases self-skip cleanly (the suite prints `Sprint 06 schema missing — skipping all tests` and `pnpm test` still exits 0). The cross-merchant 404-not-403 behaviour for criterion 7 is *also* covered by `apps/web/__tests__/campaigns-routes.test.ts`, which runs unconditionally.
+
+As of 2026-05-16, migration 0007 is applied to the production Supabase project (`vuyjtkpubxadudahzrlh`). The campaign RLS suite was run live against that database during this remediation: **all 33 cases passed** (`pnpm --filter @lapsed/db vitest run __tests__/campaign-rls.test.ts` → `Tests 33 passed (33)`). The per-table merchant isolation, write-rejection, and append-only enforcement for all five Sprint 06 tables + the `campaign_holdouts` view are therefore verified against real Postgres RLS, not merely written.
 
 ---
 
@@ -236,6 +243,12 @@ SPRINT.md chunk 12 describes the E2E as "trigger campaign proposal → assert 3 
 
 `getProposalsByStatus` (`packages/db/src/queries.ts`) fetches the merchant's full `campaign_events` set and derives status in memory. The per-merchant daily cap bounds this for v1, but it does not scale to arbitrary campaign history. **Post-v1 follow-up:** move the status derivation into SQL (a view or RPC over `campaign_events`). This is documented in the function's docstring as a "KNOWN SCALING LIMIT".
 
+### 4. Holdout assignment uses fractional-bucket math, not literal `% 10`
+
+SPRINT.md chunk 2 specifies the holdout test as `hash(${proposalId}||${customerId}) % 10 === 0`. The chunk-2 implementation (`packages/core/src/snapshot-group.ts`, `isHeldOut`) instead takes the first 8 hex characters of `SHA-256(${proposalId}::${customerId})` as a uint32 and holds the customer out when `bucket / 2^32 < HOLDOUT_RATE`.
+
+**Why:** the fractional-bucket form is driven by the `HOLDOUT_RATE` env var (default `0.1`), so the holdout fraction is tunable without a code change — whereas a hardcoded `% 10` pins it to exactly 10%. SPRINT.md itself is internally inconsistent here: chunk 2 says `% 10` but the spec also introduces a configurable `HOLDOUT_RATE` env var, which only the fractional form can honour. The distributional properties are equivalent — deterministic per `(proposalId, customerId)`, ~`HOLDOUT_RATE` fraction over a large set — and the `~10% rate distribution` and golden-vector determinism are tested in `snapshot-group.test.ts`. The spec-adherence-auditor reviewed this approach at chunk 2.
+
 ---
 
 ## Known issues / follow-ups (out of Sprint 06 scope)
@@ -247,4 +260,4 @@ SPRINT.md chunk 12 describes the E2E as "trigger campaign proposal → assert 3 
 
 ## Recommended evaluator command
 
-Run the evaluator template from CLAUDE.md against Sprint 06. Note that `pnpm vercel:env:check` will fail until the two new env vars are added to Vercel (see "Manual actions required") — that failure is expected and is not a sprint defect.
+Run the evaluator template from CLAUDE.md against Sprint 06. All six CI gates (`typecheck`, `lint`, `test`, `build`, `grep:pii`, `vercel:env:check`) are green — the two new env vars are now present on the Vercel project.
