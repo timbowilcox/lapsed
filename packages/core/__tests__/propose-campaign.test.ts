@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LapsedSupabaseClient } from "@lapsed/db";
 import type Anthropic from "@anthropic-ai/sdk";
-import { proposeCampaign } from "../src/propose-campaign";
+import { proposeCampaign, median } from "../src/propose-campaign";
 import type { CampaignVariant } from "../src/campaign-designer";
 
 const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -35,14 +35,18 @@ function validVariants(): CampaignVariant[] {
 // Mock Anthropic client
 // ─────────────────────────────────────────────────────────────────────────────
 
-function mockAnthropic(opts: { variants?: CampaignVariant[]; throwError?: Error } = {}): Anthropic {
+function mockAnthropic(
+  opts: { variants?: CampaignVariant[]; throwError?: Error; noToolUse?: boolean } = {},
+): Anthropic {
   const create = vi.fn(async () => {
     if (opts.throwError) throw opts.throwError;
+    const usage = { input_tokens: 1000, output_tokens: 500 };
+    if (opts.noToolUse) return { content: [{ type: "text", text: "no tool" }], usage };
     return {
       content: [
         { type: "tool_use", name: "propose_campaign", input: { variants: opts.variants ?? validVariants() } },
       ],
-      usage: { input_tokens: 1000, output_tokens: 500 },
+      usage,
     };
   });
   return { messages: { create } } as unknown as Anthropic;
@@ -362,14 +366,58 @@ describe("proposeCampaign — failure paths", () => {
     if (!result.ok) expect(result.reason).toBe("design");
   });
 
-  it("fails with reason cap_check when the proposal row cannot be inserted", async () => {
+  it("fails with reason proposal_init when the proposal row cannot be inserted", async () => {
     const { client } = makeSupabase({ proposalInsertError: { message: "insert blew up" } });
     const result = await proposeCampaign(runInput(client, mockAnthropic()));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe("cap_check");
+      expect(result.reason).toBe("proposal_init");
       expect(result.proposalId).toBeNull();
     }
+  });
+
+  it("fails with reason proposal_init when the proposal_started event cannot be written", async () => {
+    const { client } = makeSupabase({ eventUpsertError: { message: "event write failed" } });
+    const result = await proposeCampaign(runInput(client, mockAnthropic()));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("proposal_init");
+  });
+
+  it("fails with reason proposal_init when the cap-count query errors", async () => {
+    const { client } = makeSupabase({ countError: { message: "count query failed" } });
+    const result = await proposeCampaign(runInput(client, mockAnthropic()));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("proposal_init");
+  });
+
+  it("fails with reason group_fetch when the customer query errors", async () => {
+    const { client } = makeSupabase({ stateError: { message: "state query failed" } });
+    const result = await proposeCampaign(runInput(client, mockAnthropic()));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("group_fetch");
+  });
+
+  it("fails with reason redact when PII reaches the group summary (decision 10)", async () => {
+    // A regression that let a customer email become a lifecycle-stage value
+    // would surface it as a lifecycleCounts key — the PII pre-flight catches it.
+    const { client } = makeSupabase({
+      stateRows: [
+        { shopify_customer_gid: "gid://shopify/Customer/1", lifecycle_stage: "jane.doe@example.com" },
+      ],
+    });
+    const anthropic = mockAnthropic();
+    const result = await proposeCampaign(runInput(client, anthropic));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("redact");
+    // The PII pre-flight ran before the LLM — Anthropic was never called.
+    expect((anthropic.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("fails with reason design when the designer exhausts retries (no tool_use block)", async () => {
+    const { client } = makeSupabase();
+    const result = await proposeCampaign(runInput(client, mockAnthropic({ noToolUse: true })));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("design");
   });
 
   it("fails with reason design when the campaign_arms insert errors", async () => {
@@ -390,5 +438,47 @@ describe("proposeCampaign — failure paths", () => {
     const { client } = makeSupabase({ stateRows: [] });
     const result = await proposeCampaign(runInput(client, mockAnthropic()));
     if (!result.ok) expect(result.proposalId).toBe(PROPOSAL_ID);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Holdout determinism
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("proposeCampaign — holdout determinism", () => {
+  it("produces an identical holdout count across two runs with the same inputs", async () => {
+    const a = await proposeCampaign(runInput(makeSupabase().client, mockAnthropic()));
+    const b = await proposeCampaign(runInput(makeSupabase().client, mockAnthropic()));
+    expect(a.ok && b.ok).toBe(true);
+    if (a.ok && b.ok) {
+      expect(a.holdoutCount).toBe(b.holdoutCount);
+      expect(a.customerCount).toBe(b.customerCount);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// median helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("median", () => {
+  it("returns 0 for an empty list", () => {
+    expect(median([])).toBe(0);
+  });
+
+  it("returns the middle element of an odd-length list", () => {
+    expect(median([3, 1, 2])).toBe(2);
+  });
+
+  it("averages the two middle elements of an even-length list", () => {
+    expect(median([1, 2, 3, 4])).toBe(3); // round((2+3)/2) = round(2.5) = 3
+  });
+
+  it("does not depend on input ordering", () => {
+    expect(median([9, 1, 5, 3, 7])).toBe(median([1, 3, 5, 7, 9]));
+  });
+
+  it("returns a single element for a one-element list", () => {
+    expect(median([42])).toBe(42);
   });
 });

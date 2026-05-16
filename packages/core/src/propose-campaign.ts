@@ -43,7 +43,7 @@ import {
   type CampaignFailurePhase,
 } from "./campaign-events";
 import { assertNoPii, PiiLeakError } from "./pii-redactor";
-import { parseVoiceProfile, SONNET_MODEL_DEFAULT } from "./voice-synthesizer";
+import { parseVoiceProfile, SONNET_MODEL_DEFAULT, type VoiceProfile } from "./voice-synthesizer";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inputs / outputs
@@ -114,14 +114,16 @@ export async function proposeCampaign(
     // No row exists — nothing to attach a proposal_failed event to.
     logStructured("propose_campaign_failed", {
       merchant_id: input.merchantId,
-      phase: "cap_check",
+      phase: "proposal_init",
       reason: "proposal_row_insert_failed",
       error_class: errorClassName(err),
     });
-    return { ok: false, reason: "cap_check", detail: errorReason(err), proposalId: null };
+    return { ok: false, reason: "proposal_init", detail: errorReason(err), proposalId: null };
   }
 
   // ── Step 2: proposal_started event ───────────────────────────────────────
+  // A failure here is a setup failure, not a cost-cap failure — phase
+  // `proposal_init` keeps the failure taxonomy honest for operators.
   const startedAt = now().toISOString();
   try {
     await appendCampaignEvent(input.serviceClient, {
@@ -132,36 +134,38 @@ export async function proposeCampaign(
       payload: {},
     });
   } catch (err) {
-    return await failProposal(input, proposalId, "cap_check", err);
+    return await failProposal(input, proposalId, "proposal_init", err);
   }
 
   // ── Step 3: daily-cap check ──────────────────────────────────────────────
-  // The cap counts SUCCESSFUL proposals — campaign_proposed events today — so
-  // a capped attempt's zombie row does not itself consume cap headroom.
+  // The cap counts campaign_proposed events today. A proposal that fails
+  // BEFORE step 9 (campaign_proposed) never wrote that event, so it does not
+  // consume cap headroom; a proposal that fails AFTER step 9 does count —
+  // which is acceptable, as it did reach the (paid) design phase.
   let proposedToday: number;
   try {
     proposedToday = await countProposedToday(input.serviceClient, input.merchantId, now());
   } catch (err) {
-    return await failProposal(input, proposalId, "cap_check", err);
+    // A failed cap query is a setup failure, not a cap exhaustion.
+    return await failProposal(input, proposalId, "proposal_init", err);
   }
   if (proposedToday >= input.dailyCapDefault) {
-    await failProposal(input, proposalId, "cap_check", new Error("daily_cap_exhausted"));
     logStructured("propose_campaign_cap_exhausted", {
       merchant_id: input.merchantId,
       proposal_id: proposalId,
       proposed_today: proposedToday,
       cap: input.dailyCapDefault,
     });
-    return {
-      ok: false,
-      reason: "cap_check",
-      detail: "daily_cap_exhausted",
+    return await failProposal(
+      input,
       proposalId,
-    };
+      "cap_check",
+      new Error("daily_cap_exhausted"),
+    );
   }
 
   // ── Step 4: voice-profile presence check ─────────────────────────────────
-  let voiceProfile;
+  let voiceProfile: VoiceProfile;
   try {
     const active = await getActiveVoiceProfile(input.serviceClient, input.merchantId);
     if (!active) {
@@ -211,7 +215,9 @@ export async function proposeCampaign(
       groupSlug: input.groupSlug,
       voiceProfile,
       groupSummary,
-      model: input.model,
+      // The same resolved model recorded on the campaign_proposals row, so the
+      // row's model_version and the actual LLM call never disagree.
+      model,
     });
   } catch (err) {
     return await failProposal(input, proposalId, "design", err);
@@ -412,13 +418,16 @@ async function fetchGroupSummary(
       lifecycleCounts,
       medianAovCents: median(aovValues),
       medianRecencyDays: median(recencyValues),
-      avgOrderCount: rfm.length > 0 ? frequencySum / rfm.length : 0,
+      // Average orders per GROUP MEMBER (not per RFM row): a group customer
+      // with no customer_rfm row contributes 0 orders. Dividing by
+      // customerIds.length keeps this consistent with customerCount.
+      avgOrderCount: customerIds.length > 0 ? frequencySum / customerIds.length : 0,
     },
   };
 }
 
-/** Median of a numeric list (0 for an empty list). Pure. */
-function median(values: number[]): number {
+/** Median of a numeric list (0 for an empty list). Pure. Exported for tests. */
+export function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);

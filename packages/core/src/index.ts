@@ -132,6 +132,7 @@ export {
 
 export {
   proposeCampaign,
+  median as campaignGroupMedian,
   type ProposeCampaignInput,
   type ProposeCampaignResult,
 } from "./propose-campaign";

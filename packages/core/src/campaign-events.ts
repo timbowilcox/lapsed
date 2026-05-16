@@ -25,6 +25,7 @@ export const CampaignEventType = z.enum([
 export type CampaignEventType = z.infer<typeof CampaignEventType>;
 
 export const CampaignFailurePhase = z.enum([
+  "proposal_init",
   "cap_check",
   "voice_profile",
   "group_fetch",
