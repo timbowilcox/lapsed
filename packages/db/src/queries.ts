@@ -1093,3 +1093,284 @@ export async function getProposalsByStatus(
     };
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 07 — conversation read helpers (chunks 10 + 11)
+//
+// Read-only. The merchant client's RLS scopes every table to the calling
+// merchant; the explicit merchant_id filters are defense-in-depth, consistent
+// with the rest of this file. Both helpers assemble in memory (mirroring
+// getProposalsByStatus) — acceptable for v1's bounded conversation volume.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CustomerNameRow {
+  shopify_customer_gid: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+}
+
+/** Best-effort display name: full name, else email, else a short gid suffix. */
+function customerDisplayName(row: CustomerNameRow | undefined, gid: string): string {
+  if (row) {
+    const full = [row.first_name, row.last_name].filter((p) => p && p.trim()).join(" ");
+    if (full) return full;
+    if (row.email && row.email.trim()) return row.email;
+  }
+  const tail = gid.split("/").pop() ?? gid;
+  return `Customer ${tail}`;
+}
+
+export interface ConversationListItem {
+  /** conversations.id — the route param for the detail view. */
+  conversationId: string;
+  /** shopify_customer_gid. */
+  customerId: string;
+  customerName: string;
+  /** Truncated body of the most recent message; "" when the thread is empty. */
+  latestPreview: string;
+  latestDirection: "inbound" | "outbound" | null;
+  /** sentiment of the most recent INBOUND message; null if none / unclassified. */
+  latestInboundSentiment: string | null;
+  messageCount: number;
+  lastMessageAt: string | null;
+  /** True when the most recent message is an inbound (awaiting / just-landed). */
+  hasUnread: boolean;
+  /** group_slugs of the campaigns that drove outbounds on this thread. */
+  sourceCampaignSlugs: string[];
+  optedOut: boolean;
+}
+
+interface ConvMessageRow {
+  id: string;
+  conversation_id: string;
+  direction: string;
+  body: string;
+  sentiment: string | null;
+  intent: string | null;
+  campaign_id: string | null;
+  arm_id: string | null;
+  status: string;
+  sent_at: string;
+}
+
+const PREVIEW_MAX = 90;
+
+/** Returns every conversation for a merchant, newest activity first (chunk 10). */
+export async function getConversationList(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<ConversationListItem[]> {
+  const { data: convRows, error: convErr } = await client
+    .from("conversations")
+    .select("id, customer_id, last_message_at, last_inbound_at, message_count")
+    .eq("merchant_id", merchantId)
+    .order("last_message_at", { ascending: false, nullsFirst: false });
+  if (convErr) throw convErr;
+  const conversations = convRows ?? [];
+  if (conversations.length === 0) return [];
+
+  const [messagesRes, customersRes, optOutsRes, proposalsRes] = await Promise.all([
+    client
+      .from("messages")
+      .select(
+        "id, conversation_id, direction, body, sentiment, intent, campaign_id, arm_id, status, sent_at",
+      )
+      .eq("merchant_id", merchantId),
+    client
+      .from("customers")
+      .select("shopify_customer_gid, first_name, last_name, email")
+      .eq("merchant_id", merchantId),
+    client.from("customer_opt_outs").select("customer_id").eq("merchant_id", merchantId),
+    client.from("campaign_proposals").select("id, group_slug").eq("merchant_id", merchantId),
+  ]);
+  if (messagesRes.error) throw messagesRes.error;
+  if (customersRes.error) throw customersRes.error;
+  if (optOutsRes.error) throw optOutsRes.error;
+  if (proposalsRes.error) throw proposalsRes.error;
+
+  const messages = (messagesRes.data ?? []) as ConvMessageRow[];
+  const messagesByConversation = new Map<string, ConvMessageRow[]>();
+  for (const m of messages) {
+    const list = messagesByConversation.get(m.conversation_id) ?? [];
+    list.push(m);
+    messagesByConversation.set(m.conversation_id, list);
+  }
+  const customerByGid = new Map(
+    (customersRes.data ?? []).map((c) => [c.shopify_customer_gid, c as CustomerNameRow]),
+  );
+  const optedOut = new Set((optOutsRes.data ?? []).map((o) => o.customer_id));
+  const slugByProposal = new Map((proposalsRes.data ?? []).map((p) => [p.id, p.group_slug]));
+
+  return conversations.map((conv) => {
+    const msgs = (messagesByConversation.get(conv.id) ?? [])
+      .slice()
+      .sort((a, b) => (a.sent_at < b.sent_at ? 1 : a.sent_at > b.sent_at ? -1 : 0));
+    const latest = msgs[0];
+    const latestInbound = msgs.find((m) => m.direction === "inbound");
+    const sourceSlugs = Array.from(
+      new Set(
+        msgs
+          .filter((m) => m.direction === "outbound" && m.campaign_id)
+          .map((m) => slugByProposal.get(m.campaign_id as string))
+          .filter((s): s is string => Boolean(s)),
+      ),
+    );
+    return {
+      conversationId: conv.id,
+      customerId: conv.customer_id,
+      customerName: customerDisplayName(customerByGid.get(conv.customer_id), conv.customer_id),
+      latestPreview: latest ? truncate(latest.body, PREVIEW_MAX) : "",
+      latestDirection: latest ? (latest.direction === "inbound" ? "inbound" : "outbound") : null,
+      latestInboundSentiment: latestInbound?.sentiment ?? null,
+      messageCount: conv.message_count,
+      lastMessageAt: conv.last_message_at,
+      hasUnread: latest?.direction === "inbound",
+      sourceCampaignSlugs: sourceSlugs,
+      optedOut: optedOut.has(conv.customer_id),
+    };
+  });
+}
+
+export interface ThreadMessage {
+  id: string;
+  direction: "inbound" | "outbound";
+  body: string;
+  status: string;
+  /** Classified sentiment of an inbound; null for outbound / unclassified. */
+  sentiment: string | null;
+  intent: string | null;
+  /** group_slug of the campaign that drove an outbound; null otherwise. */
+  campaignSlug: string | null;
+  /** Bandit-arm label on a campaign outbound, e.g. "Variant 2 · witty". */
+  armLabel: string | null;
+  sentAt: string;
+}
+
+export interface ConversationThread {
+  conversationId: string;
+  customerId: string;
+  customerName: string;
+  lifecycleStage: string | null;
+  lastOrderAt: string | null;
+  /** 90-day repurchase propensity in [0,1], or null if unscored. */
+  propensity: number | null;
+  optedOut: boolean;
+  messages: ThreadMessage[];
+}
+
+/**
+ * Returns the full thread for one conversation (chunk 11), or null if the
+ * conversation does not exist / belongs to another merchant. Messages are
+ * oldest-first. Outbound messages carry their source campaign + bandit arm;
+ * inbound messages carry the classified sentiment + intent.
+ */
+export async function getConversationThread(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  conversationId: string,
+): Promise<ConversationThread | null> {
+  const { data: conv, error: convErr } = await client
+    .from("conversations")
+    .select("id, customer_id")
+    .eq("id", conversationId)
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (convErr) throw convErr;
+  if (!conv) return null;
+
+  const { data: msgRows, error: msgErr } = await client
+    .from("messages")
+    .select("id, direction, body, sentiment, intent, campaign_id, arm_id, status, sent_at")
+    .eq("merchant_id", merchantId)
+    .eq("conversation_id", conversationId)
+    .order("sent_at", { ascending: true });
+  if (msgErr) throw msgErr;
+  const messages = (msgRows ?? []) as Array<Omit<ConvMessageRow, "conversation_id">>;
+
+  const campaignIds = Array.from(
+    new Set(messages.map((m) => m.campaign_id).filter((c): c is string => Boolean(c))),
+  );
+  const armIds = Array.from(
+    new Set(messages.map((m) => m.arm_id).filter((a): a is string => Boolean(a))),
+  );
+
+  const [customerRes, stateRes, optOutRes, proposalsRes, armsRes] = await Promise.all([
+    client
+      .from("customers")
+      .select("shopify_customer_gid, first_name, last_name, email, last_order_at")
+      .eq("merchant_id", merchantId)
+      .eq("shopify_customer_gid", conv.customer_id)
+      .maybeSingle(),
+    client
+      .from("customer_inferred_state")
+      .select("lifecycle_stage, propensity_90d")
+      .eq("merchant_id", merchantId)
+      .eq("shopify_customer_gid", conv.customer_id)
+      .maybeSingle(),
+    client
+      .from("customer_opt_outs")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .eq("customer_id", conv.customer_id)
+      .limit(1)
+      .maybeSingle(),
+    campaignIds.length > 0
+      ? client.from("campaign_proposals").select("id, group_slug").in("id", campaignIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; group_slug: string }>, error: null }),
+    armIds.length > 0
+      ? client
+          .from("campaign_arms")
+          .select("bandit_arm_id, variant_index, tone")
+          .in("bandit_arm_id", armIds)
+      : Promise.resolve({
+          data: [] as Array<{ bandit_arm_id: string; variant_index: number; tone: string }>,
+          error: null,
+        }),
+  ]);
+  if (customerRes.error) throw customerRes.error;
+  if (stateRes.error) throw stateRes.error;
+  if (optOutRes.error) throw optOutRes.error;
+  if (proposalsRes.error) throw proposalsRes.error;
+  if (armsRes.error) throw armsRes.error;
+
+  const slugByProposal = new Map((proposalsRes.data ?? []).map((p) => [p.id, p.group_slug]));
+  const armByBanditId = new Map(
+    (armsRes.data ?? []).map((a) => [
+      a.bandit_arm_id,
+      a as { variant_index: number; tone: string },
+    ]),
+  );
+
+  const threadMessages: ThreadMessage[] = messages.map((m) => {
+    const arm = m.arm_id ? armByBanditId.get(m.arm_id) : undefined;
+    return {
+      id: m.id,
+      direction: m.direction === "inbound" ? "inbound" : "outbound",
+      body: m.body,
+      status: m.status,
+      sentiment: m.sentiment,
+      intent: m.intent,
+      campaignSlug: m.campaign_id ? slugByProposal.get(m.campaign_id) ?? null : null,
+      armLabel: arm ? `Variant ${arm.variant_index + 1} · ${arm.tone}` : null,
+      sentAt: m.sent_at,
+    };
+  });
+
+  return {
+    conversationId: conv.id,
+    customerId: conv.customer_id,
+    customerName: customerDisplayName(customerRes.data ?? undefined, conv.customer_id),
+    lifecycleStage: stateRes.data?.lifecycle_stage ?? null,
+    lastOrderAt: customerRes.data?.last_order_at ?? null,
+    propensity: stateRes.data?.propensity_90d ?? null,
+    optedOut: optOutRes.data !== null,
+    messages: threadMessages,
+  };
+}
+
+/** Truncates a string for a list preview, appending an ellipsis when cut. */
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trimEnd()}…`;
+}
