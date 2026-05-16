@@ -20,6 +20,7 @@ import {
   DEGRADED_FALLBACK_REPLY,
 } from "@lapsed/core";
 import { serverEnv } from "@/app/lib/env";
+import { emptyTwiml, messageTwiml } from "../_twiml";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,26 +136,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TwiML rendering
+// TwiML response helper
 // ─────────────────────────────────────────────────────────────────────────────
-
-function emptyTwiml(): string {
-  return '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
-}
-
-function messageTwiml(body: string): string {
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${xmlEscape(body)}</Message></Response>`;
-}
-
-/** XML-escapes a reply body for safe inclusion in the TwiML response. */
-function xmlEscape(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 function xmlResponse(xml: string, status: number): NextResponse {
   return new NextResponse(xml, {

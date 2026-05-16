@@ -25,6 +25,10 @@ export default defineConfig({
       SUPABASE_JWT_SECRET: "test-jwt-secret",
       TOKEN_ENCRYPTION_KEY: "test-aes-key-32-chars-padded-00000",
       ANTHROPIC_API_KEY: "test-anthropic-key",
+      // Sprint 07 — required by serverEnv(); fake values, routes mock Twilio.
+      TWILIO_ACCOUNT_SID: "AC_test_account_sid",
+      TWILIO_AUTH_TOKEN: "test-twilio-auth-token",
+      TWILIO_PHONE_NUMBER: "+18888800461",
     },
   },
 });

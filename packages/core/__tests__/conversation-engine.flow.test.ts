@@ -30,6 +30,7 @@ const ARMS = [
 ];
 const CUSTOMER = "gid://shopify/Customer/9001";
 const PHONE = "+15551239001";
+const HOLDOUT_CUSTOMER = "gid://shopify/Customer/9002";
 const FROM_NUMBER = "+18888800461";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,14 +60,27 @@ function fakeTwilio(): { client: TwilioClient; sends: number; optOuts: string[] 
 }
 
 function mockLlm(toolName: string, input: unknown): Anthropic {
-  return {
+  return countingLlm(toolName, input).client;
+}
+
+/** A mock Anthropic client that also exposes how many times it was invoked. */
+function countingLlm(
+  toolName: string,
+  input: unknown,
+): { client: Anthropic; calls: () => number } {
+  let calls = 0;
+  const client = {
     messages: {
-      create: async () => ({
-        content: [{ type: "tool_use", id: "tu", name: toolName, input }],
-        usage: { input_tokens: 40, output_tokens: 20 },
-      }),
+      create: async () => {
+        calls += 1;
+        return {
+          content: [{ type: "tool_use", id: "tu", name: toolName, input }],
+          usage: { input_tokens: 40, output_tokens: 20 },
+        };
+      },
     },
   } as unknown as Anthropic;
+  return { client, calls: () => calls };
 }
 
 /** Seeds an approved Sprint-06 campaign with one targeted customer. */
@@ -102,9 +116,12 @@ function seedApprovedCampaign() {
     })),
     campaign_group_snapshots: [
       { proposal_id: PROPOSAL, merchant_id: MERCHANT, customer_id: CUSTOMER, included_in_holdout: false },
+      // A holdout customer — decision 5/15: never receives a send.
+      { proposal_id: PROPOSAL, merchant_id: MERCHANT, customer_id: HOLDOUT_CUSTOMER, included_in_holdout: true },
     ],
     customers: [
       { merchant_id: MERCHANT, shopify_customer_gid: CUSTOMER, phone: PHONE, last_order_at: "2026-01-01" },
+      { merchant_id: MERCHANT, shopify_customer_gid: HOLDOUT_CUSTOMER, phone: "+15551239002" },
     ],
     customer_inferred_state: [
       { merchant_id: MERCHANT, shopify_customer_gid: CUSTOMER, lifecycle_stage: "lapsed", propensity_90d: 0.5 },
@@ -130,8 +147,13 @@ describe("conversation engine — end-to-end flow (chunk 12)", () => {
       fromNumber: FROM_NUMBER,
       outboundDailyCap: 200,
     });
+    // Exactly one send — the holdout customer is excluded (decision 5/15):
+    // they get no conversation and no message.
     expect(launch.sent).toBe(1);
     expect(twilio.sends).toBe(1);
+    expect((fake.tables.conversations ?? []).some((c) => c.customer_id === HOLDOUT_CUSTOMER)).toBe(
+      false,
+    );
 
     // An outbound message + queued/sent events were recorded.
     const outbound = (fake.tables.messages ?? []).find((m) => m.direction === "outbound") as FakeRow;
@@ -213,11 +235,13 @@ describe("conversation engine — end-to-end flow (chunk 12)", () => {
     });
     const sampledArm = ((fake.tables.messages ?? []).find((m) => m.direction === "outbound") as FakeRow)
       .arm_id as string;
+    const classify = countingLlm("classify_reply", POSITIVE);
+    const generate = countingLlm("generate_reply", REPLY);
     const deps = {
       serviceClient: fake.client,
       twilioClient: twilio.client,
-      classifyClient: mockLlm("classify_reply", POSITIVE),
-      generateClient: mockLlm("generate_reply", REPLY),
+      classifyClient: classify.client,
+      generateClient: generate.client,
     };
     const inboundInput = {
       fromNumber: PHONE,
@@ -227,12 +251,17 @@ describe("conversation engine — end-to-end flow (chunk 12)", () => {
       latencyBudgetMs: 5000,
     };
     await handleInboundMessage(deps, inboundInput);
+    const callsAfterFirst = { classify: classify.calls(), generate: generate.calls() };
     // Twilio retries the same MessageSid — must be a no-op.
     const retry = await handleInboundMessage(deps, inboundInput);
     expect(retry.outcome).toBe("duplicate");
     const armState = (fake.tables.bandit_state ?? []).find((b) => b.arm_id === sampledArm) as FakeRow;
     // alpha stayed at 2 — the posterior was not double-counted.
     expect(armState.alpha).toBe(2);
+    // Neither Sonnet call was re-invoked on the retry (decision 17 — the
+    // dedup short-circuit happens before any LLM call).
+    expect(classify.calls()).toBe(callsAfterFirst.classify);
+    expect(generate.calls()).toBe(callsAfterFirst.generate);
   });
 
   it("a tampered Twilio webhook signature fails validation", () => {
