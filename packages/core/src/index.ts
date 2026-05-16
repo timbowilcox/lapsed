@@ -105,6 +105,13 @@ export {
 } from "./campaign-events";
 
 export {
+  getAttributionWindow,
+  getLtvEvaluationWindow,
+  ATTRIBUTION_WINDOW_DAYS_DEFAULT,
+  LTV_EVALUATION_WINDOW_DAYS_DEFAULT,
+} from "./attribution-config";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
