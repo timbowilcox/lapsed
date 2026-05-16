@@ -31,7 +31,9 @@
         "SCORING_TOKEN_CAP_DEFAULT",
         "ANTHROPIC_API_KEY",
         "VOICE_EXTRACTION_DAILY_CAP_DEFAULT",
-        "SONNET_MODEL"
+        "SONNET_MODEL",
+        "CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT",
+        "HOLDOUT_RATE"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },

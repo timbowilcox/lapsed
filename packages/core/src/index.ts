@@ -131,6 +131,12 @@ export {
 } from "./campaign-designer";
 
 export {
+  proposeCampaign,
+  type ProposeCampaignInput,
+  type ProposeCampaignResult,
+} from "./propose-campaign";
+
+export {
   initializeBanditArm,
   updatePosterior,
   thompsonSample,
