@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button, Card, Panel, PanelHeader, PanelBody } from "@lapsed/ui";
 import { Check, ArrowRight, Plug, Clock4, Send } from "lucide-react";
-import { ExtractionProgress } from "./_extraction-progress";
+import { OnboardingVoiceStep } from "./_onboarding-voice-step";
 
 const steps = [
   {
@@ -78,7 +78,7 @@ export function OnboardingFlow() {
                 </div>
                 <p className="max-w-[420px] text-body text-ink-700">{step.description}</p>
                 {step.key === "connect" ? (
-                  <ExtractionProgress />
+                  <OnboardingVoiceStep />
                 ) : (
                   <Card className="w-full bg-cream-100 p-16 text-left">
                     <div className="text-mini font-semibold uppercase tracking-wide text-ink-500">

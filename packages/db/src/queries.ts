@@ -497,3 +497,54 @@ export async function getExtractionStatus(
 
   return { phase, startedAt, completedAt, errorMessage, voiceVersionId };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getActiveVoiceProfile — the merchant's currently-active brand voice profile
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ActiveVoiceProfile {
+  versionId: string;
+  versionNumber: number;
+  /** Structured VoiceProfile jsonb (validated at write time by @lapsed/core). */
+  profile: Json;
+  modelVersion: string;
+  extractedAt: string;
+}
+
+/**
+ * Returns the merchant's active voice profile — the `voice_versions` row
+ * pointed at by `agent_profiles.active_voice_version_id` — or null when no
+ * extraction has produced an active version yet. Used by the onboarding
+ * voice preview (chunk 10) and the Settings brand-voice tab (chunk 11).
+ */
+export async function getActiveVoiceProfile(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<ActiveVoiceProfile | null> {
+  const { data: agentProfile, error: apError } = await client
+    .from("agent_profiles")
+    .select("active_voice_version_id")
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (apError) throw apError;
+
+  const versionId = agentProfile?.active_voice_version_id ?? null;
+  if (!versionId) return null;
+
+  const { data: version, error: versionError } = await client
+    .from("voice_versions")
+    .select("id, version_number, profile, model_version, extracted_at")
+    .eq("merchant_id", merchantId)
+    .eq("id", versionId)
+    .maybeSingle();
+  if (versionError) throw versionError;
+  if (!version) return null;
+
+  return {
+    versionId: version.id,
+    versionNumber: version.version_number,
+    profile: version.profile,
+    modelVersion: version.model_version,
+    extractedAt: version.extracted_at,
+  };
+}
