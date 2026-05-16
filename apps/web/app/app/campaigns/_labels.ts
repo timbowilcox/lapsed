@@ -76,7 +76,7 @@ export const MESSAGE_MAX = 160;
 export interface ExpectedImpact {
   /** Estimated response rate, 0–1. */
   rate: number;
-  /** Estimated restored revenue, in whole currency units. */
+  /** Estimated (projected, pre-send) revenue, in whole currency units. */
   revenue: number;
 }
 
