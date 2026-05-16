@@ -312,6 +312,35 @@ describe("snapshotGroup — happy path", () => {
     expect(result).toEqual({ customerIds: [], holdoutIds: [] });
   });
 
+  it("chunks the write into 500-row batches for a large group", async () => {
+    const { client, upserts } = makeMockClient();
+    const result = await snapshotGroup(client, validInput({ customerIds: makeCustomerIds(1100) }));
+    // 1100 customers → 500 + 500 + 100 across three upsert calls.
+    expect(upserts).toHaveLength(3);
+    const batchSizes = upserts.map((u) => (u.rows as unknown[]).length);
+    expect(batchSizes).toEqual([500, 500, 100]);
+    expect(upserts.every((u) => u.table === "campaign_group_snapshots")).toBe(true);
+    expect(result.customerIds).toHaveLength(1100);
+  });
+
+  it("propagates a Postgres error from a later batch", async () => {
+    // Mock that fails only on the 2nd upsert call.
+    let calls = 0;
+    const client = {
+      from: vi.fn(() => ({
+        upsert: vi.fn(() => {
+          calls += 1;
+          return Promise.resolve(
+            calls === 2 ? { data: null, error: { message: "batch 2 failed" } } : { data: null, error: null },
+          );
+        }),
+      })),
+    } as unknown as LapsedSupabaseClient;
+    await expect(
+      snapshotGroup(client, validInput({ customerIds: makeCustomerIds(900) })),
+    ).rejects.toThrow(/batch 2 failed/);
+  });
+
   it("produces an identical result when called twice (idempotent)", async () => {
     const { client: c1 } = makeMockClient();
     const { client: c2 } = makeMockClient();
