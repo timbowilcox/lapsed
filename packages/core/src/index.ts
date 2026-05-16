@@ -130,6 +130,20 @@ export {
 } from "./attribution-holdout";
 
 export {
+  welchConfidenceInterval,
+  studentTCdf,
+  studentTQuantile,
+  type WelchResult,
+} from "./stats/welch";
+
+export {
+  computeIncrementalRevenue,
+  campaignCalendarWindow,
+  INSUFFICIENT_EVIDENCE_MIN_COHORT,
+  type IncrementalRevenueResult,
+} from "./incremental-revenue";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
