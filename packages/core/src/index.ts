@@ -184,6 +184,17 @@ export {
 } from "./twilio-client";
 
 export {
+  detectOptOutKeyword,
+  isOptedOut,
+  assertNotOptedOut,
+  recordOptOut,
+  OptOutError,
+  OptOutSource,
+  type RecordOptOutInput,
+  type RecordOptOutResult,
+} from "./opt-out-registry";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
