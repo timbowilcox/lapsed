@@ -1,263 +1,200 @@
-# Sprint 06 HANDOFF — AI Campaign Designer + Bandit State + Approval Surface
+# HANDOFF — Sprint 07: Conversation Engine
 
-Date: 2026-05-16
-Branch: `sprint-06/campaign-designer-and-approval-surface`
-Status: **READY FOR FINAL EVALUATOR SESSION**
+**Branch:** `sprint-07/conversation-engine`
+**Scope:** SMS sends, two-way conversation handling, opt-out registry, bandit posterior updates.
+**Status:** All 13 chunks landed. `pnpm typecheck` / `lint` / `test` / `grep:pii` green (core 871 tests, web 186, db 143 + 84 RLS-integration tests skipped without a live DB). Mid-sprint checkpoint returned ADJUST → Fix 1 applied. `vercel:env:check` is RED pending a manual action — see "Manual actions" below.
 
----
-
-## What was built
-
-All 13 chunks from SPRINT.md completed.
-
-1. **Migration `0007_campaign_proposals.sql`** — Five tables + one view, all merchant-scoped RLS: `campaign_proposals` (materialized status cache, version lineage), `campaign_arms` (write-once variants, decision 14), `bandit_state` (Thompson Beta posterior, decision 4), `campaign_group_snapshots` (frozen customer set, decision 15), `campaign_events` (append-only, trigger-enforced), `campaign_holdouts` (security_invoker view).
-2. **Group snapshot helper** — `packages/core/src/snapshot-group.ts`: `snapshotGroup`, `isHeldOut`, `computeGroupSnapshot`; deterministic SHA-256-bucketed ~10% holdout; 500-row batched upsert.
-3. **Campaign event helpers + materializer** — `packages/core/src/campaign-events.ts`: `appendCampaignEvent` (Zod `.strict()` payloads), `materializeCampaign`, `getReadyCampaigns`.
-4. **Bandit state + Thompson sampling** — `packages/core/src/bandit.ts`: `initializeBanditArm`, `thompsonSample`, `updatePosterior`, `posteriorStats`, `betaQuantile`, mulberry32 PRNG.
-5. **AI Campaign Designer** — `packages/core/src/campaign-designer.ts`: `designCampaign` (Sonnet 4.6 `tool_choice` structured output), `CampaignProposalSchema`, retry ≤3 with backoff, token accumulation.
-6. **Campaign proposal orchestrator** — `packages/core/src/propose-campaign.ts`: `proposeCampaign` — daily-cap check, PII pre-flight, snapshot, designer, persistence; `proposal_failed` on any post-row failure.
-7. **Approval state machine + query helpers** — `packages/core/src/campaign-approval.ts`: `approveProposal` / `rejectProposal` / `editProposal`; read helpers `getPendingProposals` / `getProposalById` / `getCampaignStatus` in `packages/db/src/queries.ts`.
-8. **Approval API routes** — `apps/web/app/api/campaigns/`: `GET pending`, `GET [id]`, `POST [id]/approve|reject|edit`; cross-merchant → 404.
-9. **Approval surface UI** — `apps/web/app/app/campaigns/page.tsx` + `_approval-surface.tsx`: pending list, detail modal, inline editor, reject confirm.
-10. **Campaign list surface** — `apps/web/app/app/campaigns/list/`: four tabs (Pending / Approved / Rejected / All) + group search; `getProposalsByStatus` query helper.
-11. **Bandit-state inspector** — `apps/web/app/app/campaigns/[id]/bandit/page.tsx`: per-arm α/β, mean response rate, 95% credible interval, observation count.
-12. **E2E test** — `apps/web/e2e/campaign-approval.spec.ts`: approve → Approved tab → bandit inspector → `getReadyCampaigns`; reject-with-reason; 409 invalid-state.
-13. **HANDOFF.md** — this file.
-
-### Chunk → commit map
-
-| Chunk | Commits |
-|---|---|
-| 1 | `3465288`, `37212f9`, `b027a3f` |
-| 2 | `2425d7f`, `481cc7e`, `248096e` |
-| 3 | `1b1e470`, `d46bb0c` |
-| 4 | `460ea9f`, `888c615` |
-| 5 | `2690628`, `17e42ed` |
-| 6 | `4b0fc45`, `5cc5820`, `e1b8f73` |
-| 7 | `6557ef7`, `fcdf9a8`, `630d170` |
-| 8 | `0e67d95`, `dce4828` |
-| 9 | `5db1e9a`, `2868720` |
-| 10 | `3d0dac5`, `13c68a0`, `14bf8e0` |
-| 11 | `3de57e9`, `5eb0de4` |
-| 12 | `091808c`, `69dec08` |
-
-The mid-sprint checkpoint ran after chunk 7 and returned **APPROVE**.
+This sprint turns approved campaign proposals into running SMS conversations. A daily cron Thompson-samples a bandit arm per customer and sends the variant via Twilio; inbound replies hit `/api/sms/inbound`, which synchronously classifies sentiment, generates a brand-voice reply, fires the bandit posterior, and returns TwiML. STOP keywords and Sonnet-classified opt-out intent both dual-record to `customer_opt_outs` + Twilio.
 
 ---
 
-## CI gate status
+## Quality rubric — evidence-required self-scores
 
-| Gate | Status |
-|---|---|
-| `pnpm typecheck` | PASS |
-| `pnpm test` | PASS (603 core, 175 web, 97 db, 85 shopify) |
-| `pnpm lint` | PASS |
-| `pnpm grep:pii` | PASS — no findings |
-| `pnpm vercel:env:check` | PASS — `CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT` and `HOLDOUT_RATE` are now present on all three environments. |
-| `pnpm build` | PASS — all three apps |
+### Criterion 1: Conversation per-customer integrity
 
-`pnpm test:e2e` is not a per-commit gate; it requires a running app + a database with migration 0007 applied (see "Manual actions required").
+**Self-score:** 3/3
 
-### CI gate notes — RLS test skip behaviour
+**Implementation evidence:**
+- Primary: `packages/db/supabase/migrations/0008_conversation_engine.sql:60-118` — `conversations` keyed by `constraint conversations_pk primary key (merchant_id, customer_id)` (line 72); a surrogate `id` is `UNIQUE` so `messages`/`message_events` FK one column.
+- Supporting: `packages/core/src/message-events.ts:200-262` (`ensureConversation` — get-or-create on the `(merchant_id, customer_id)` pair, 23505-race re-read); `messages.campaign_id`/`arm_id` are nullable per-message attribution.
 
-`campaign-rls.test.ts` (33 cases — the primary test evidence for rubric criterion 7) is **schema-gated**: when it runs against a database that does not have migration 0007 applied, all 33 cases self-skip cleanly (the suite prints `Sprint 06 schema missing — skipping all tests` and `pnpm test` still exits 0). The cross-merchant 404-not-403 behaviour for criterion 7 is *also* covered by `apps/web/__tests__/campaigns-routes.test.ts`, which runs unconditionally.
-
-As of 2026-05-16, migration 0007 is applied to the production Supabase project (`vuyjtkpubxadudahzrlh`). The campaign RLS suite was run live against that database during this remediation: **all 33 cases passed** (`pnpm --filter @lapsed/db vitest run __tests__/campaign-rls.test.ts` → `Tests 33 passed (33)`). The per-table merchant isolation, write-rejection, and append-only enforcement for all five Sprint 06 tables + the `campaign_holdouts` view are therefore verified against real Postgres RLS, not merely written.
+**Test evidence:**
+- Test file: `packages/core/__tests__/message-events.test.ts` (`ensureConversation` describe); `packages/core/__tests__/conversation-engine.flow.test.ts`.
+- Number of test cases: 5 (4 `ensureConversation` cases + 1 end-to-end flow test).
+- Key assertion: "returns the existing conversation without creating a second (decision 16)" asserts `tables.conversations` length stays 1; `rls.test.ts` "conversations_pk rejects a second thread for the same (merchant_id, customer_id)" asserts the PK violation.
 
 ---
 
-## Manual actions required (human, before merge / deploy)
+### Criterion 2: Twilio webhook signature validation
 
-1. **Add two env vars to the Vercel `lapsed-web` project:**
-   - `CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT` — recommended `5` (proposals per merchant per UTC day)
-   - `HOLDOUT_RATE` — recommended `0.1` (fraction of each group held out per campaign)
+**Self-score:** 3/3
 
-   Both are already wired into `apps/web/app/lib/env.ts`, `turbo.json`, and `scripts/vercel-env-check.mjs`. `pnpm vercel:env:check` fails until they exist on the Vercel project — this is the intended hard stop, not a regression.
+**Implementation evidence:**
+- Primary: `packages/core/src/twilio-client.ts:233-243` (`validateWebhookSignature` — wraps Twilio's official `validateRequest`, fails closed on a thrown error).
+- Supporting: `apps/web/app/api/sms/inbound/route.ts:54-70` — signature validated and a `403` returned before any DB write or LLM call (form parsing is the only prerequisite).
 
-2. **Apply migration 0007 to the Supabase database:**
-   `psql "$SUPABASE_DB_URL" -f packages/db/supabase/migrations/0007_campaign_proposals.sql`
-   Until applied, `campaign-rls.test.ts` self-skips and the chunk-12 E2E cannot run.
+**Test evidence:**
+- Test file: `packages/core/__tests__/twilio-client.test.ts` (`validateWebhookSignature` describe + "agrees with Twilio's own signer"); route boundary in `apps/web/e2e/conversation-engine.spec.ts`.
+- Number of test cases: 7 unit + 2 Playwright.
+- Key assertion: "accepts a correctly-signed request (golden vector)" + "rejects a tampered body" + the cross-check that the wrapper validates a signature minted by Twilio's own `getExpectedTwilioSignature`; the Playwright spec asserts `403` on an absent and a forged signature.
 
 ---
 
-## Rubric self-scores (evidence-required format)
-
-### Criterion 1: Campaign proposal versioning purity
+### Criterion 3: Synchronous reply latency
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/campaign-approval.ts:216-404` (`editProposal` — inserts a new `campaign_proposals` row with `version_number + 1` and `supersedes_proposal_id` set; new arms; the prior row is retained)
-- Supporting files: `packages/db/src/queries.ts:680-721` (`deriveProposalState`) and `:835-893` (`getProposalById`) — status derived from the `campaign_events` log, never the cache; `packages/db/supabase/migrations/0007_campaign_proposals.sql:112-114` (partial-unique index keeps the version lineage linear)
+- Primary: `packages/core/src/handle-inbound.ts:122-360` (`handleInboundMessage`) — `softDeadlineMs = startMs + latencyBudgetMs - LATENCY_RESERVE_MS` (line 133); both Sonnet calls race `withDeadline` (lines 231, 311); a timeout/error writes a `degraded_mode` event (`appendDegradedEvent`, line 635) and returns `DEGRADED_FALLBACK_REPLY`. `elapsed_ms` is tracked per step via `mark()`.
+- Supporting: `withDeadline` (line 397) clears its timer in `finally`.
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/campaign-approval.test.ts:220-396` (`editProposal` describe block)
-- Supporting: `packages/db/__tests__/campaign-queries.test.ts:427-440` (status derived from the event log, not the stale `campaign_proposals.status` cache)
-- Number of test cases: 35 in campaign-approval.test.ts, 29 in campaign-queries.test.ts
-- Key assertion(s): an edit produces a new proposal version with `supersedes_proposal_id` set and fresh arms while the prior version is retained; `getProposalById` reports the event-derived `approved` even when the cache row still says `proposed`.
+- Test file: `packages/core/__tests__/handle-inbound.test.ts` ("degraded mode" + "genuine timeouts" describes); `packages/core/__tests__/conversation-engine.flow.test.ts`.
+- Number of test cases: 4 degraded/timeout cases.
+- Key assertion: "degrades when the classify call hangs past the soft deadline" uses a hanging mock + `latencyBudgetMs: 1050` to exercise the real `setTimeout` race, asserts `outcome === "degraded"` and a `degraded_mode` event with `phase: "classify"`.
 
-### Criterion 2: Bandit arm immutability
+---
+
+### Criterion 4: Sentiment classification
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/db/supabase/migrations/0007_campaign_proposals.sql:137-184` (`campaign_arms` is write-once — only a `select` policy is granted; no INSERT/UPDATE/DELETE policy for the authenticated role)
-- Supporting files: `packages/core/src/campaign-approval.ts:334-338` (an edit inserts NEW arms with new `bandit_arm_id` values; existing arms are never `UPDATE`d)
+- Primary: `packages/core/src/classify-reply.ts:194-280` (`classifyReply`) — Sonnet 4.6 `tool_choice` structured output (`additionalProperties: false`), `MAX_CLASSIFY_ATTEMPTS = 2` (line 34, documented as total attempts), token usage accumulated, `assertNoPii` PII pre-flight (line 220). `OPT_OUT_CONFIDENCE_THRESHOLD = 0.7` (line 46) documented.
 
 **Test evidence:**
-- Test file: `packages/db/__tests__/campaign-rls.test.ts:438-448` ("merchant A JWT cannot UPDATE an existing campaign_arms row (decision 14)")
-- Supporting: `packages/core/__tests__/campaign-approval.test.ts:220-396` (`editProposal` creates new arms; the prior proposal's arms are retained)
-- Number of test cases: 33 in campaign-rls.test.ts, 35 in campaign-approval.test.ts
-- Key assertion(s): a merchant-JWT `UPDATE` of `campaign_arms.message_draft` is rejected and no row reads back as `"tampered"`.
+- Test file: `packages/core/__tests__/classify-reply.test.ts`.
+- Number of test cases: 31.
+- Key assertion: all 6 intent values + 3 sentiments classified; "exhausts retries on a persistent transient API error with reason transient_api"; "short-circuits on a name-based permanent error"; "throws pii_leak when the body still contains an un-redacted phone number" asserts the API is never called.
 
-### Criterion 3: Thompson sampling correctness
+---
+
+### Criterion 5: Opt-out immediate honor
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/bandit.ts` — `thompsonSample:156`, `posteriorStats:302`, `betaQuantile:272`, `regularizedIncompleteBeta:256`, `mulberry32:55`
-- Supporting files: `packages/core/src/bandit.ts:42` (`NEUTRAL_PRIOR` Beta(1,1)), `:401` (`initializeBanditArm`, idempotent read-first)
+- Primary: `packages/core/src/opt-out-registry.ts:137-145` (`assertNotOptedOut` — throws `OptOutError`), `:195-260` (`recordOptOut` — writes `customer_opt_outs` then the Twilio leg; table failure throws, Twilio failure is a critical structured log, not thrown), `:66-78` (`detectOptOutKeyword`).
+- Supporting: `packages/core/src/send-message.ts:95` (`assertNotOptedOut` is the first pre-flight before every outbound); migration `0008:300-352` (`customer_opt_outs` append-only, trigger-enforced).
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/bandit.test.ts` (describe blocks at lines 40, 69, 128, 213, 225, 234, 263, 287, 425, 431, 589)
-- Number of test cases: 59
-- Key assertion(s): `thompsonSample` is deterministic for a fixed seed (per-arm seed `seed XOR hash(armId)`); `betaQuantile` golden vectors; the equal-posterior tie-break is documented and tested.
+- Test file: `packages/core/__tests__/opt-out-registry.test.ts` (72 tests); `packages/core/__tests__/send-message.test.ts` ("opt-out gate" describe); `packages/db/__tests__/rls.test.ts` (`customer_opt_outs` append-only UPDATE/DELETE/TRUNCATE rejection).
+- Number of test cases: 72 + 1 (send gate) + 3 (append-only).
+- Key assertion: "skips an opted-out customer without calling Twilio" asserts `sendCalls` length 0; "a second recordOptOut is a no-op that returns alreadyOptedOut:true" asserts no second `customer_opt_outs` row; both STOP-keyword and Sonnet-`opt_out`-intent paths are covered in `handle-inbound.test.ts`.
 
-### Criterion 4: AI Campaign Designer structured output
+---
+
+### Criterion 6: Reply generation in brand voice
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/campaign-designer.ts:322-424` (`designCampaign` — Sonnet 4.6 `tool_choice` structured output, `maxRetries: 0` + manual retry loop at `:366`)
-- Supporting files: `campaign-designer.ts:182` (tool schema `minItems: 3` / `maxItems: 3`), `:24` (`MAX_RETRIES = 3`), `:131` (`CampaignProposalSchema` with per-axis diversity refinement)
+- Primary: `packages/core/src/generate-reply.ts:174-300` (`generateReply`) — Sonnet 4.6 `tool_choice`, consumes the active `voice_versions` profile, the last `REPLY_HISTORY_LIMIT` (10) thread messages, and PII-free customer context; `body` capped at `REPLY_BODY_MAX_CHARS` (320). `buildSystemPrompt` embeds tone descriptors / register / emoji policy / forbidden + signature phrases.
+- Supporting: `handle-inbound.ts` `loadVoiceProfile` resolves the merchant's active voice via `getActiveVoiceProfile`, with a conservative default fallback.
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/campaign-designer.test.ts` (describe blocks at lines 104, 131, 217, 235, 274, 356, 406)
-- Number of test cases: 39
-- Key assertion(s): exactly 3 variants enforced; retries on schema-invalid / no-tool-use / transient API error; token usage accumulates across attempts and into the terminal `CampaignDesignError`. All Anthropic calls are mocked.
+- Test file: `packages/core/__tests__/generate-reply.test.ts`.
+- Number of test cases: 32.
+- Key assertion: "uses only the last REPLY_HISTORY_LIMIT messages of a long thread"; the `buildSystemPrompt` tests assert tone descriptors, forbidden phrases, and signature phrases are embedded; the schema rejects an over-cap body.
 
-### Criterion 5: Cost discipline
+---
+
+### Criterion 7: PII redaction in reply path
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/propose-campaign.ts:152-166` (daily-cap check — when `proposedToday >= dailyCapDefault` the orchestrator writes a `proposal_failed` event with phase `cap_check` and never calls Anthropic), `:153` (`logStructured("propose_campaign_cap_exhausted", …)`)
-- Supporting files: `apps/web/app/lib/env.ts:24,66-69` (`campaignProposalDailyCapDefault`), `turbo.json:35` (`CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT` in the build env array), `scripts/vercel-env-check.mjs:43` (parity enforcement)
+- Three gates, all reusing Sprint 05's `assertNoPii` (`packages/core/src/pii-redactor.ts`):
+  1. Classifier input: `classify-reply.ts:220` — `assertNoPii(body)` before the first Anthropic call.
+  2. Generator input: `generate-reply.ts:205-215` — `assertNoPii` on every conversation-history body (`input_pii_leak`).
+  3. Generator output: `generate-reply.ts:255-263` — `assertNoPii(parsed.data.body)` catches hallucinated PII; the attempt is retried, exhaustion throws `output_pii_leak`.
+- Inbound bodies stored raw (`body`) + PII-redacted (`pii_redacted_body`) — `handle-inbound.ts` `insertInboundMessage`; logs use only the redacted column / `maskPhone`.
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/propose-campaign.test.ts:314-343` (`proposeCampaign — daily cap` describe block)
-- Number of test cases: 3 in that block (27 in the file)
-- Key assertion(s): "fails with reason cap_check when the merchant is at the cap"; "does not call the Anthropic API when capped"; "proceeds when proposals today are below the cap".
+- Test file: `classify-reply.test.ts` (PII-gate describe), `generate-reply.test.ts` ("PII gates" describe).
+- Number of test cases: 6 (classifier) + 5 (generator input + output).
+- Key assertion: "retries when the generated body contains a hallucinated phone number, then succeeds"; "throws output_pii_leak when every attempt hallucinates PII"; "does not call the API when the input PII gate fails".
 
-### Criterion 6: PII redaction
+---
+
+### Criterion 8: RLS tenancy isolation
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/propose-campaign.ts:205` (`assertNoPii(JSON.stringify(groupSummary))` pre-flight at the orchestrator boundary; failure → `proposal_failed` phase `redact`)
-- Supporting files: `packages/core/src/campaign-designer.ts:345` (`assertNoPii` at the designer's entry boundary, defense in depth), `packages/core/src/pii-redactor.ts` (redactor reused from Sprint 05)
+- Primary: migration `0008_conversation_engine.sql` — all four new tables carry a merchant-scoped SELECT policy via the `auth.jwt() ->> 'shop_domain'` → merchants subquery: `conversations_merchant_read` (line 110), `messages_merchant_read` (222), `message_events_merchant_read` (295), `customer_opt_outs_merchant_read` (356). Writes are service-role only (no INSERT/UPDATE/DELETE policy granted).
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/propose-campaign.test.ts:400-446` ("fails with reason redact when PII reaches the group summary (decision 10)")
-- Supporting: `packages/core/__tests__/campaign-designer.test.ts:406-` (`designCampaign — PII pre-flight (decision 10)` describe block)
-- Number of test cases: 27 in propose-campaign.test.ts, 39 in campaign-designer.test.ts
-- Key assertion(s): proposal generation fails with reason `redact` (no Anthropic call) when an un-redacted PII pattern reaches the serialized group summary.
+- Test file: `packages/db/__tests__/rls.test.ts` — RLS describes for `conversations`, `messages`, `message_events`, `customer_opt_outs` (3 cross-tenant cases each), plus append-only triggers and the dedup/PK idempotency tests.
+- Number of test cases: 20 (12 RLS isolation + 6 append-only + 2 idempotency) — live-DB integration tests, skipped when no Supabase is configured (the established `rls.test.ts` pattern).
+- Key assertion: "merchant A cannot see merchant B's messages" asserts `[]`; "wrong JWT secret returns zero rows"; the `customer_opt_outs` cross-merchant test confirms one merchant's opt-out list does not leak.
 
-### Criterion 7: RLS tenancy isolation
+---
+
+### Criterion 9: Bandit posterior updates
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/db/supabase/migrations/0007_campaign_proposals.sql` — merchant-scoped `select` policies on `campaign_proposals:121`, `campaign_arms:177`, `bandit_state:223`, `campaign_group_snapshots:265`, `campaign_events:354`; `campaign_holdouts` view is `security_invoker` (`:281`)
-- Supporting files: `apps/web/app/api/campaigns/_shared.ts:31-58` (`campaignErrorResponse` maps cross-merchant not-found → 404, never 403)
+- Primary: `packages/core/src/handle-inbound.ts:300-303` — `success = sentiment === "positive" && (intent === "engagement" || intent === "purchase")`; `routeBanditPosterior` (line 668) routes to the conversation's most-recent outbound arm, is idempotent (skips an already-stamped outbound), and stamps `posterior_updated_at`.
+- Supporting: `packages/core/src/conversation-sweep.ts:67-118` (`sweepNoReplyPosteriors` — fires `updatePosterior(arm, false)` for outbounds `NO_REPLY_SWEEP_DAYS` old with no posterior yet). `updatePosterior` (Sprint 06 `bandit.ts`) moves only `alpha`/`beta`/`observation_count` — never arm identity (decision 14).
 
 **Test evidence:**
-- Test file: `packages/db/__tests__/campaign-rls.test.ts` (33 tests — per-table "merchant A cannot see merchant B's row" + write-rejection + append-only)
-- Supporting: `apps/web/__tests__/campaigns-routes.test.ts:111,219,331` (cross-merchant access returns 404, never 403)
-- Number of test cases: 33 in campaign-rls.test.ts, 41 in campaigns-routes.test.ts
-- Key assertion(s): every Sprint 06 table returns only the calling merchant's rows; a wrong JWT secret returns zero rows; a cross-merchant proposal id resolves to 404.
+- Test file: `handle-inbound.test.ts` ("bandit posterior" describe — 8 cases), `conversation-sweep.test.ts` (`sweepNoReplyPosteriors` — 7 cases), `conversation-engine.flow.test.ts`.
+- Number of test cases: 8 + 7 + flow.
+- Key assertion: "a positive engagement reply increments the arm's alpha"; "a negative reply increments beta"; "does NOT re-fire the posterior when a classify-phase retry fails at generate twice" asserts `alpha` stays at 2; the no-reply sweep is deterministic given the cutoff.
 
-### Criterion 8: Approval flow correctness
-
-**Self-score:** 3/3
-
-**Implementation evidence:**
-- Primary file: `packages/core/src/campaign-approval.ts` — `approveProposal:49` (idempotent; rejected/edited cannot be approved), `rejectProposal:117`, `editProposal:216`
-- Supporting files: `packages/core/src/campaign-events.ts:358-424` (`getReadyCampaigns` — a proposal is ready only when its **latest** `campaign_events` row is `campaign_approved`; no timer / auto-approval path)
-
-**Test evidence:**
-- Test file: `packages/core/__tests__/campaign-approval.test.ts` (describe blocks at 88, 168, 220, 397 — approve / reject / edit / state-machine guards)
-- Supporting: `packages/core/__tests__/campaign-events.test.ts:736-877` (`getReadyCampaigns`), `apps/web/e2e/campaign-approval.spec.ts` (approve → `getReadyCampaigns` returns it)
-- Number of test cases: 35 in campaign-approval.test.ts, 52 in campaign-events.test.ts, 3 E2E
-- Key assertion(s): re-approving is a no-op (`alreadyApproved: true`, no second event); approving a `rejected` proposal throws → 409; `getReadyCampaigns` excludes rejected and edited-without-reapproval proposals.
-
-### Criterion 9: Group snapshot integrity
-
-**Self-score:** 3/3
-
-**Implementation evidence:**
-- Primary file: `packages/core/src/snapshot-group.ts` — `snapshotGroup:107` (customer set frozen at proposal time), `isHeldOut:44` (deterministic SHA-256 bucket `< holdoutRate`), `computeGroupSnapshot:60`
-- Supporting files: `packages/db/supabase/migrations/0007_campaign_proposals.sql:239-247` (`campaign_group_snapshots` composite PK makes the snapshot write idempotent)
-
-**Test evidence:**
-- Test file: `packages/core/__tests__/snapshot-group.test.ts` (describe blocks at 44, 78, 124, 153, 221, 354 — determinism / rate distribution / golden vectors / write path)
-- Number of test cases: 40
-- Key assertion(s): the same `(proposalId, customerId)` always yields the same holdout assignment; the holdout fraction converges to ~10% over a large customer set; golden-vector holdout assignments are pinned.
+---
 
 ### Criterion 10: Observability + evidence-required HANDOFF
 
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/propose-campaign.ts` — structured logs at every phase (`propose_campaign_failed:115`, `propose_campaign_cap_exhausted:153`, `propose_campaign_complete:302`, `propose_campaign_event_append_failed:466`); `logStructured` helper at `:502`
-- Supporting files: this `HANDOFF.md` (evidence-required self-scores)
+- Structured single-line JSON logs at every phase, no PII: `send-message.ts` (`send_message_sent`/`failed`/`skipped`), `handle-inbound.ts` (`inbound_replied`/`degraded`/`opt_out`, per-step `elapsed_ms` in `timings`), `launch-campaigns.ts`, `conversation-sweep.ts`, `twilio-client.ts` (`maskPhone` on every log path). `grep:pii` passes.
+- The `message_events` append-only log (`message_outbound_queued/sent/failed`, `message_inbound_received`, `inbound_classified`, `reply_generated/sent`, `degraded_mode`, `opt_out_recorded`, `posterior_updated`) is the regeneratable source of truth.
 
 **Test evidence:**
-- Process evidence: the `spec-adherence-auditor` was dispatched after every chunk; the mid-sprint checkpoint ran after chunk 7 and returned APPROVE; the per-chunk auditors (architecture-guardian, code-reviewer, test-coverage-analyzer, plus the three UI auditors on chunks 9–11) were dispatched and their Critical/High/GAP findings remediated before proceeding.
-- Number of test cases: structured-log payloads are exercised within `propose-campaign.test.ts` (27 tests) and `campaign-events.test.ts` (52 tests)
-- Key assertion(s): every `propose_campaign_*` log line carries `merchant_id` / `proposal_id` / counts only — no customer PII or LLM-generated message text (verified by `pnpm grep:pii`).
+- `twilio-client.test.ts` "structured logs never contain a raw phone number" asserts `maskPhone` output is present and the raw number absent; `opt-out-registry.test.ts` "the twilio-leg-failure log masks the phone and never contains it raw".
+- This HANDOFF uses the evidence-required format. Every chunk was reviewed by the specialist subagent panel per chunk type (backend chunks: architecture-guardian + code-reviewer + test-coverage-analyzer + spec-adherence-auditor; UI chunks 10-11: all seven), and every Critical/High/GAP finding was remediated and re-reviewed clean.
+
+**Notes:** SPRINT.md's "3/3 looks like" wording for this criterion says "mid-sprint checkpoint APPROVED at chunk 7." The checkpoint did not return a bare APPROVE — it returned **ADJUST** with one surgical fix (the `messages.twilio_sid` partial unique index). Per CLAUDE.md's checkpoint decision rule, an ADJUST is remediated and the build proceeds with no re-run required; the checkpoint evaluator explicitly stated "Apply Fix 1, then proceed to chunk 8 — no checkpoint re-run needed." The fix landed (commit `f428e7a`). The 3/3 is claimed on that basis — a successfully-completed checkpoint with its one directive satisfied — and surfaced transparently here for the final evaluator's judgment rather than asserted as a clean APPROVE.
 
 ---
 
 ## Deliberate deviations from SPRINT.md
 
-These are intentional, reviewed deviations — not omissions.
+1. **Chunk 1 — dropped the 0002 stub tables.** Migration 0002 forward-declared `conversations` + `conversation_messages` stub tables that Sprints 03–06 never used. Chunk 1 `DROP`s both and recreates `conversations` with the decision-16 `(merchant_id, customer_id)` composite key, plus `vector(1536)` embedding columns on `conversations` and `messages` to honor decision 2. Surfaced as a blocker and explicitly human-approved before the migration was written. `db-diagnose.mjs` was extended to parse `DROP TABLE` so the dropped stub is not false-flagged as missing.
 
-### 1. approve / reject / edit live in `@lapsed/core`, not `queries.ts`
+2. **Chunk 3 — `recordOptOut` signature.** Gained a `phoneNumber` parameter (the `customer_opt_outs.phone_number` column and the Twilio opt-out leg need it; relaxed to allow empty for a no-phone merchant-manual opt-out — see #6). Added `STOPALL` to the keyword set (a Twilio-native + AU Spam Act / US TCPA-recognized opt-out keyword). The Twilio leg's `recordOptOut` is a documented structured-log seam — Twilio has no public REST endpoint to suppress an arbitrary number, and it natively records STOP-keyword opt-outs; `customer_opt_outs` is the application source of truth (decision 18).
 
-SPRINT.md chunk 7 places the approve / reject / edit operations alongside the read helpers in `packages/db/src/queries.ts`. They were instead implemented in **`packages/core/src/campaign-approval.ts`**.
+3. **Chunk 6 — `message-events.ts` event taxonomy laid forward.** The full 10-type event taxonomy (including `inbound_classified`, `reply_generated`, `degraded_mode`, `posterior_updated` used by chunks 7–9) was built in chunk 6, the first chunk to write `message_events`. One shared event-log module rather than per-chunk fragments.
 
-**Why:** these are write operations that must go through the canonical event helper (`appendCampaignEvent`), the materializer (`materializeCampaign`), and the bandit initializer (`initializeBanditArm`) — all `@lapsed/core` modules. `@lapsed/db` cannot import `@lapsed/core` without a dependency cycle. Implementing the writes in `queries.ts` would have forced a raw `campaign_events` insert that bypasses the canonical helper, violating the event-sourcing decision. The **read-only** query helpers (`getPendingProposals`, `getProposalById`, `getCampaignStatus`, `getProposalsByStatus`) do live in `queries.ts` exactly as the spec says. This split was reviewed and approved by the mid-sprint checkpoint and the chunk-7 spec-adherence-auditor.
+4. **Chunk 8 — no `launched_at` column.** SPRINT.md says "mark the proposal as launched_at". There is no `launched_at` column or `campaign_launched` event — idempotency is per-customer via `sendMessage`'s `already_sent` guard (a re-run of the launch cron skips every already-messaged `(campaign, customer)`). This achieves "re-running the cron doesn't re-launch" without a schema change or a Sprint-06 `campaign_events` taxonomy change.
 
-### 2. Chunk 12 E2E: no HTTP trigger for proposal generation; cap exhaustion is unit-tested
+5. **Chunk 11 — route param is the conversation UUID.** SPRINT.md names the route `[customerId]`; the implementation uses `[id]` = `conversations.id` (UUID), because shopify customer gids (`gid://shopify/Customer/123`) contain slashes and are not URL-safe path segments. Per decision 16 the conversation is 1:1 with the customer, so the UUID is a clean stable handle to the same thread.
 
-SPRINT.md chunk 12 describes the E2E as "trigger campaign proposal → assert 3 variants generated" and a failure path that "asserts 429 + clear merchant-facing error message".
+6. **Chunk 11 — manual opt-out is never blocked.** The opt-out route does not 409 when a customer has no phone on file; `recordOptOut`'s `phoneNumber` is empty-tolerant, the `customer_opt_outs` row is written regardless, and only the best-effort Twilio leg is skipped — decision 18 requires an opt-out to always be recordable.
 
-**Why:** `proposeCampaign` (the generation orchestrator) has **no HTTP route and no UI trigger anywhere in the Sprint 06 codebase** — it is exported from `@lapsed/core` and will be invoked by Sprint 07's conversation-engine scheduling. There is therefore no browser-reachable way to "trigger campaign proposal" or to produce an HTTP `429`. Consequences:
-- The E2E **seeds proposals directly into Postgres** — the exact row/event shape `proposeCampaign` produces — and exercises the genuinely browser-reachable surfaces (approval surface, list tabs, bandit inspector).
-- **Cap exhaustion** is covered by `packages/core/__tests__/propose-campaign.test.ts:314-343`, which asserts the orchestrator fails with `reason: cap_check` / `daily_cap_exhausted`, writes a `proposal_failed` event, and does not call Anthropic when capped.
-- **Explicitly not asserted anywhere:** an HTTP `429` status code and a merchant-facing cap error string. No endpoint emits them in Sprint 06. When proposal generation gets an HTTP/scheduled trigger (Sprint 07), that trigger should map `cap_check` → `429` + a merchant-facing message, and an E2E should then assert it.
-- The E2E adds a **409 invalid-state** failure-path test on the approval routes in place of the (unreachable) 429.
+7. **Chunk 12 — full-flow E2E is a core-layer integration test.** `packages/core/__tests__/conversation-engine.flow.test.ts` exercises the entire launch → inbound → reply → posterior → STOP → re-launch sequence with the in-memory Supabase fake + fake Twilio + mock Anthropic. A browser-level Playwright run of the full flow is not feasible because the API routes construct their Twilio/Anthropic clients from env with no injection seam. `apps/web/e2e/conversation-engine.spec.ts` covers the route-level security boundaries (signature 403, cron 401) that only the real route can demonstrate. Adding a route-level DI seam for a true browser E2E is a v2 follow-up.
 
-### 3. `getProposalsByStatus` known scaling limit
-
-`getProposalsByStatus` (`packages/db/src/queries.ts`) fetches the merchant's full `campaign_events` set and derives status in memory. The per-merchant daily cap bounds this for v1, but it does not scale to arbitrary campaign history. **Post-v1 follow-up:** move the status derivation into SQL (a view or RPC over `campaign_events`). This is documented in the function's docstring as a "KNOWN SCALING LIMIT".
-
-### 4. Holdout assignment uses fractional-bucket math, not literal `% 10`
-
-SPRINT.md chunk 2 specifies the holdout test as `hash(${proposalId}||${customerId}) % 10 === 0`. The chunk-2 implementation (`packages/core/src/snapshot-group.ts`, `isHeldOut`) instead takes the first 8 hex characters of `SHA-256(${proposalId}::${customerId})` as a uint32 and holds the customer out when `bucket / 2^32 < HOLDOUT_RATE`.
-
-**Why:** the fractional-bucket form is driven by the `HOLDOUT_RATE` env var (default `0.1`), so the holdout fraction is tunable without a code change — whereas a hardcoded `% 10` pins it to exactly 10%. SPRINT.md itself is internally inconsistent here: chunk 2 says `% 10` but the spec also introduces a configurable `HOLDOUT_RATE` env var, which only the fractional form can honour. The distributional properties are equivalent — deterministic per `(proposalId, customerId)`, ~`HOLDOUT_RATE` fraction over a large set — and the `~10% rate distribution` and golden-vector determinism are tested in `snapshot-group.test.ts`. The spec-adherence-auditor reviewed this approach at chunk 2.
+8. **Checkpoint Fix 1.** The mid-sprint checkpoint added a partial unique index `messages_inbound_twilio_sid_unique` on `messages(twilio_sid) WHERE direction = 'inbound'` to migration 0008 — a DB-enforced backstop for the chunk-7 application-level webhook-retry idempotency guard.
 
 ---
 
-## Known issues / follow-ups (out of Sprint 06 scope)
+## Manual actions required before merge
 
-- **No `<h1>` from `AppShell`.** The merchant app shell never emits a level-1 heading; each page renders its own heading. Sprint 06's three campaign surfaces were promoted to `<h1>` for WCAG 1.3.1 compliance, but the rest of the merchant app is unaddressed. A follow-up task was filed to emit `pageTitle` as an `<h1>` in `AppShell` app-wide.
-- **Coverage tooling is broken repo-wide** — `@vitest/coverage-v8` is version-mismatched against `vitest`. `pnpm test` (without `--coverage`) is unaffected. A follow-up task was filed.
+1. **Add six env vars to the Vercel `lapsed-web` project** (all three environments): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `OUTBOUND_DAILY_CAP_DEFAULT`, `INBOUND_REPLY_LATENCY_BUDGET_MS`, `NO_REPLY_SWEEP_DAYS`. They are already wired into `env.ts`, `turbo.json`, and `vercel-env-check.mjs`; `pnpm vercel:env:check` is RED until they exist on Vercel.
+2. **Apply migration `0008_conversation_engine.sql` to production Supabase** before the PR merges (decision-13/Sprint-06 pre-merge gate pattern). `pnpm db:diagnose` exits 0 once applied.
+3. **Configure the Twilio inbound webhook URL** to point at the production `https://app.lapsed.ai/api/sms/inbound` route.
+4. **Register the two new Vercel cron schedules**: `/api/cron/launch-campaigns` and `/api/cron/sweep-no-reply` (daily).
 
 ---
 
-## Recommended evaluator command
+## Known limitations / post-v1 follow-ups
 
-Run the evaluator template from CLAUDE.md against Sprint 06. All six CI gates (`typecheck`, `lint`, `test`, `build`, `grep:pii`, `vercel:env:check`) are green — the two new env vars are now present on the Vercel project.
+- `getConversationList` assembles in memory from a bounded scan (`MESSAGE_SCAN_LIMIT = 5000`); a merchant exceeding that would see stale previews on the least-active threads — move the latest-message-per-conversation reduction into SQL post-v1.
+- `hasUnread` is "the latest message is inbound" — there is no per-merchant read-state tracking; it is effectively "awaiting agent reply".
+- An `INBOUND_REPLY_LATENCY_BUDGET_MS` of 5s for two sequential Sonnet calls is optimistic under real p50s — raise the budget if the degrade rate is high in production.
+- The conversation-engine route layer has no DI seam for Twilio/Anthropic — see deviation #7.
+- A partial unique index on `messages.twilio_sid` covers inbound idempotency; outbound Twilio send SIDs are not uniquely constrained (each send is distinct).
