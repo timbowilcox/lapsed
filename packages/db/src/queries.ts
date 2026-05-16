@@ -654,20 +654,70 @@ export interface ProposalDetail {
   banditState: BanditArmState[];
 }
 
-/** Maps a campaign_events event_type to the materialized proposal status. */
-function statusForEvent(eventType: string | null): CampaignProposalStatus {
-  switch (eventType) {
-    case "campaign_approved":
-      return "approved";
-    case "campaign_rejected":
-      return "rejected";
-    case "proposal_edited":
-      return "edited";
-    default:
-      // proposal_started / campaign_proposed / arms_initialized / proposal_failed
-      // and the no-events case all leave the proposal in `proposed`.
-      return "proposed";
+interface DerivedProposalState {
+  status: CampaignProposalStatus;
+  approvedAt: string | null;
+  approvedByUserId: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+}
+
+const PROPOSED_STATE: DerivedProposalState = {
+  status: "proposed",
+  approvedAt: null,
+  approvedByUserId: null,
+  rejectedAt: null,
+  rejectionReason: null,
+};
+
+/**
+ * Derives a proposal's status AND its approval/rejection metadata from the
+ * single latest campaign_events row — the whole projection from one source,
+ * so status can never disagree with its companion timestamps/actor. The
+ * latest event wins, tie-broken on (occurred_at, ingested_at, id) descending.
+ * Merchant-scoped for defense-in-depth beyond RLS.
+ */
+async function deriveProposalState(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  proposalId: string,
+): Promise<DerivedProposalState> {
+  const { data, error } = await client
+    .from("campaign_events")
+    .select("event_type, occurred_at, payload")
+    .eq("merchant_id", merchantId)
+    .eq("proposal_id", proposalId)
+    .order("occurred_at", { ascending: false })
+    .order("ingested_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return PROPOSED_STATE;
+
+  if (data.event_type === "campaign_approved") {
+    return {
+      status: "approved",
+      approvedAt: data.occurred_at,
+      approvedByUserId: payloadString(data.payload, "user_id"),
+      rejectedAt: null,
+      rejectionReason: null,
+    };
   }
+  if (data.event_type === "campaign_rejected") {
+    return {
+      status: "rejected",
+      approvedAt: null,
+      approvedByUserId: null,
+      rejectedAt: data.occurred_at,
+      rejectionReason: payloadString(data.payload, "reason"),
+    };
+  }
+  if (data.event_type === "proposal_edited") {
+    return { ...PROPOSED_STATE, status: "edited" };
+  }
+  // proposal_started / campaign_proposed / arms_initialized / proposal_failed.
+  return PROPOSED_STATE;
 }
 
 interface CampaignEventLite {
@@ -693,18 +743,7 @@ export async function getCampaignStatus(
   merchantId: string,
   proposalId: string,
 ): Promise<CampaignProposalStatus> {
-  const { data, error } = await client
-    .from("campaign_events")
-    .select("event_type")
-    .eq("merchant_id", merchantId)
-    .eq("proposal_id", proposalId)
-    .order("occurred_at", { ascending: false })
-    .order("ingested_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return statusForEvent(data?.event_type ?? null);
+  return (await deriveProposalState(client, merchantId, proposalId)).status;
 }
 
 /** Reduces a flat campaign_events list to the latest event_type per proposal. */
@@ -813,11 +852,12 @@ export async function getProposalById(
   const counts = await fetchSnapshotCounts(client, merchantId, [proposalId]);
   const c = counts.get(proposalId) ?? { customerCount: 0, holdoutCount: 0 };
 
-  // Derive status from the event log rather than trusting the materialized
-  // `campaign_proposals.status` cache, consistent with getCampaignStatus —
-  // the detail view is where a merchant acts on the proposal, so a stale
-  // cache value must never surface here.
-  const status = await getCampaignStatus(client, merchantId, proposalId);
+  // Derive status AND the approval/rejection metadata from the event log in
+  // one pass rather than trusting the materialized `campaign_proposals`
+  // cache. The detail view is where a merchant acts on the proposal — status
+  // and its companion fields must come from the same source so they can
+  // never disagree under cache staleness.
+  const derived = await deriveProposalState(client, merchantId, proposalId);
 
   const { data: banditRows, error: banditErr } = await client
     .from("bandit_state")
@@ -831,13 +871,13 @@ export async function getProposalById(
     merchantId: proposal.merchant_id,
     groupSlug: proposal.group_slug,
     versionNumber: proposal.version_number,
-    status,
+    status: derived.status,
     modelVersion: proposal.model_version,
     generatedAt: proposal.generated_at,
-    approvedAt: proposal.approved_at,
-    approvedByUserId: proposal.approved_by_user_id,
-    rejectedAt: proposal.rejected_at,
-    rejectionReason: proposal.rejection_reason,
+    approvedAt: derived.approvedAt,
+    approvedByUserId: derived.approvedByUserId,
+    rejectedAt: derived.rejectedAt,
+    rejectionReason: derived.rejectionReason,
     supersedesProposalId: proposal.supersedes_proposal_id,
     customerCount: c.customerCount,
     holdoutCount: c.holdoutCount,

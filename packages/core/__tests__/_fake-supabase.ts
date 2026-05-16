@@ -78,8 +78,15 @@ export interface FakeSupabase {
 }
 
 export interface FakeSupabaseOptions {
-  /** Inject a failure for a specific table + operation. */
-  failOn?: Array<{ table: string; op: "select" | "insert" | "update" | "upsert" }>;
+  /**
+   * Inject a failure for a specific table + operation. An optional `code`
+   * is attached to the returned error (e.g. "23505" for a unique violation).
+   */
+  failOn?: Array<{
+    table: string;
+    op: "select" | "insert" | "update" | "upsert";
+    code?: string;
+  }>;
 }
 
 /**
@@ -97,8 +104,11 @@ export function makeFakeSupabase(
   }
   const tableOf = (t: string): FakeRow[] => (tables[t] ??= []);
   const failOn = opts.failOn ?? [];
-  const shouldFail = (table: string, op: string): boolean =>
-    failOn.some((f) => f.table === table && f.op === op);
+  const failureFor = (table: string, op: string): { message: string; code?: string } | null => {
+    const f = failOn.find((x) => x.table === table && x.op === op);
+    if (!f) return null;
+    return { message: `fake error: ${op} on ${table}`, code: f.code };
+  };
 
   function makeBuilder(table: string, op: "select" | "insert" | "update" | "upsert", payload?: unknown) {
     const filters: Filter[] = [];
@@ -109,9 +119,8 @@ export function makeFakeSupabase(
     let countHead = false;
 
     function run(): { data: unknown; error: unknown; count?: number } {
-      if (shouldFail(table, op)) {
-        return { data: null, error: { message: `fake error: ${op} on ${table}` } };
-      }
+      const failure = failureFor(table, op);
+      if (failure) return { data: null, error: failure };
       if (op === "insert") {
         const rows = Array.isArray(payload) ? payload : [payload];
         const inserted = rows.map((r) => applyDefaults(table, r as FakeRow));

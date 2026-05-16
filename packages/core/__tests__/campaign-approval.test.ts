@@ -453,6 +453,24 @@ describe("approval state-machine guards", () => {
     ).rejects.toThrow(/fake error/);
   });
 
+  it("editProposal translates a 23505 unique violation into a concurrent-edit error", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_proposals", op: "insert", code: "23505" }],
+    });
+    await expect(
+      editProposal(client, MERCHANT_ID, pid, USER_ID, [{ variantIndex: 0, messageDraft: "x" }]),
+    ).rejects.toThrow(/concurrently edited; reload and retry/);
+  });
+
+  it("approveProposal propagates a materialize cache-update error", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_proposals", op: "update" }],
+    });
+    await expect(approveProposal(client, MERCHANT_ID, pid, USER_ID)).rejects.toThrow(/fake error/);
+  });
+
   it("approveProposal reconciles missing bandit_state on a re-approve (idempotent init)", async () => {
     // Simulate a partial prior approval: the campaign_approved event exists but
     // no bandit_state rows were written. A re-approve must initialize them.

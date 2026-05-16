@@ -80,7 +80,13 @@ function makeClient(tables: Tables): LapsedSupabaseClient {
   return { from: (t: string) => builder(t) } as unknown as LapsedSupabaseClient;
 }
 
-function ev(proposalId: string, eventType: string, occurredAt: string, merchantId = MERCHANT_ID): Row {
+function ev(
+  proposalId: string,
+  eventType: string,
+  occurredAt: string,
+  merchantId = MERCHANT_ID,
+  payload: Row = {},
+): Row {
   return {
     id: `evt-${eventType}-${occurredAt}`,
     merchant_id: merchantId,
@@ -88,6 +94,7 @@ function ev(proposalId: string, eventType: string, occurredAt: string, merchantI
     event_type: eventType,
     occurred_at: occurredAt,
     ingested_at: occurredAt,
+    payload,
   };
 }
 
@@ -377,7 +384,10 @@ describe("getProposalById", () => {
       campaign_arms: [arm("p1", 0)],
       campaign_events: [
         ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
-        ev("p1", "campaign_rejected", "2026-05-16T13:00:00.000Z"),
+        ev("p1", "campaign_rejected", "2026-05-16T13:00:00.000Z", MERCHANT_ID, {
+          user_id: "user_9",
+          reason: "offer too aggressive",
+        }),
       ],
     });
     const detail = await getProposalById(client, MERCHANT_ID, "p1");
@@ -398,7 +408,9 @@ describe("getProposalById", () => {
       campaign_arms: [arm("p1", 0)],
       campaign_events: [
         ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
-        ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z"),
+        ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z", MERCHANT_ID, {
+          user_id: "user_9",
+        }),
       ],
     });
     const detail = await getProposalById(client, MERCHANT_ID, "p1");
