@@ -196,6 +196,12 @@ export {
 } from "./message-events";
 
 export {
+  launchMerchantCampaigns,
+  type LaunchMerchantCampaignsOpts,
+  type LaunchMerchantCampaignsResult,
+} from "./launch-campaigns";
+
+export {
   handleInboundMessage,
   LATENCY_RESERVE_MS,
   OPT_OUT_ACK,
