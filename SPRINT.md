@@ -1,272 +1,325 @@
-# Sprint 07 — Conversation Engine (SMS sends, two-way handling, bandit posterior updates)
+# Sprint 08: Attribution + Holdouts + LTV Restoration
 
-**Date:** Drafted post-Sprint 06 merge
-**Repo:** lapsed (timbowilcox/lapsed)
-**Branch:** `sprint-07/conversation-engine`
+Date: 2026-05-17
+Repo: lapsed
+Branch: sprint-08/attribution
+
+---
 
 ## Scope
 
-Sprint 07 turns approved campaign proposals into actual SMS conversations and closes the bandit learning loop. The merchant has approved campaigns sitting in `getReadyCampaigns()` from Sprint 06 — this sprint launches them. A campaign cron Thompson-samples a bandit arm per (campaign, customer) pair, sends the variant's message draft via Twilio (filtered through the opt-out registry), and records the outbound in `message_events`. When a customer replies, Twilio webhooks the inbound to our `/api/sms/inbound` route, which synchronously: validates the Twilio signature, classifies the reply sentiment with Sonnet, generates a contextual reply in the merchant's brand voice (Sprint 05's voice profile), and responds via TwiML. Positive/purchase-intent replies fire bandit posterior updates. STOP keywords (and Sonnet-detected opt-out intent) hit both our `customer_opt_outs` table and Twilio's built-in opt-out tracking.
-
-This sprint completes the second half of the v1 product. Sprint 06 closed "from data to approved campaign." Sprint 07 closes "from approved campaign to running conversation."
-
-**Explicitly NOT in scope:**
-- Attribution reconciliation against Shopify orders (Sprint 08)
-- LTV restoration calculation (Sprint 08)
-- Holdout-vs-treated revenue lift math (Sprint 08)
-- Stripe billing on incremental revenue (Sprint 09)
-- Multi-step / multi-message campaign sequences (v2 — Sprint 07 is single-touch + reply)
-- Email channel (post-v1)
-- WhatsApp, iMessage, voice/IVR (post-v1)
-- Human handoff to live merchant agent (v2)
-- Inbound message classification beyond sentiment + opt-out intent (v2)
-- Group-level conversation aggregation (Sprint 08 dashboards)
-
-## Load-bearing architectural decisions (new for this sprint)
-
-These extend CLAUDE.md's 15 decisions. Cumulative count after Sprint 07: **19**.
-
-**16. Conversations are per-customer, not per-campaign (Sprint 07).** A customer in multiple campaigns generates ONE conversation thread, not one per campaign. The `conversations` table is keyed by `(merchant_id, customer_id)`. Messages reference both `conversation_id` (which thread they belong to) and an optional `campaign_id` + `arm_id` (which campaign drove the outbound). Inbound replies attach to the conversation, with their bandit posterior update routed to the most recent outbound's arm. Rationale: customers experience a single relationship with the merchant, not a thread per marketing campaign. Cross-campaign context is preserved.
-
-**17. Inbound webhook is synchronous (Sprint 07).** The `/api/sms/inbound` route generates the reply in-band and returns it as TwiML in the webhook response. No queue, no async worker. Latency budget: 5 seconds p99 from Twilio's POST to our TwiML response. If Sonnet hasn't returned by 4 seconds, the route returns a safe fallback ("Thanks — we'll get back to you shortly.") and queues a follow-up generation for the next cron tick. Twilio's webhook timeout is 15 seconds; our budget is conservative. Rationale: synchronous keeps the conversation feeling immediate and avoids the operational complexity of a queue + worker for v1.
-
-**18. Opt-outs are immutable and dual-recorded (Sprint 07).** When a customer opts out (STOP keyword, Sonnet-detected opt-out intent, or merchant manually marks): the opt-out is written to `customer_opt_outs` (append-only, event-sourced) AND Twilio's built-in opt-out tracking is updated. Once opted out, no campaign cron path can ever include that customer again — `assertNotOptedOut` is a mandatory pre-flight before every outbound send, similar to `assertNoPii` in Sprint 05's voice pipeline. Re-engagement requires a fresh customer-initiated message; we never "expire" an opt-out. Rationale: Spam Act compliance (AU), TCPA (US), GDPR (EU) all converge on immediate-and-permanent opt-out semantics. Defense in depth: our table is the application source of truth, Twilio's tracking is the safety net.
-
-**19. Bandit posterior updates fire on sentiment-classified positive intent (Sprint 07).** When an inbound reply is classified by Sonnet as positive sentiment + (purchase intent OR engagement intent), the bandit arm that sourced the outbound message gets `updatePosterior(armId, success=true)`. Negative/neutral/opt-out replies fire `updatePosterior(armId, success=false)`. No-reply (after 7 days) also fires `success=false` via a daily cron. The "real" success signal (completed Shopify order within 14 days) is Sprint 08 territory and will adjust posteriors retroactively. Rationale: sentiment is fast enough for bandit convergence within a campaign cycle; order completion is slow but ground truth — Sprint 08 reconciles the two.
-
-## Acceptance criteria
-
-- [ ] Campaign launcher cron picks up `getReadyCampaigns(merchantId)` proposals and Thompson-samples one bandit arm per customer per proposal
-- [ ] Every outbound send pre-flights `assertNotOptedOut(merchantId, customerId)` — opted-out customers are silently excluded (logged, no send)
-- [ ] Outbound messages send via Twilio API and record `message_sent` event with twilio_sid, campaign_id, arm_id, body, conversation_id
-- [ ] Inbound webhook validates Twilio signature; tampered requests return 403 without further processing
-- [ ] Inbound webhook responds within 5s p99 (latency budget enforced via timeout + fallback)
-- [ ] Sonnet classifies every inbound reply: `{sentiment: positive|neutral|negative, intent: engagement|purchase|question|complaint|opt_out|other}`
-- [ ] Opt-out intent (Sonnet) OR STOP/UNSUBSCRIBE/REMOVE keyword writes to `customer_opt_outs` AND calls Twilio's opt-out API
-- [ ] Reply generator (Sonnet) uses voice profile from Sprint 05's active `voice_versions` row + conversation history (last 10 messages) for context
-- [ ] Generated replies pass PII redaction pre-flight before send (extends Sprint 05 pattern)
-- [ ] Bandit `updatePosterior(armId, success)` fires on every classified inbound: positive+engagement/purchase → success=true; everything else → success=false
-- [ ] No-reply daily cron fires `updatePosterior(armId, false)` for outbounds 7+ days old with no inbound on the conversation
-- [ ] Conversation UI lists conversations per merchant, full thread view per customer, sentiment tags on inbounds, bandit arm context on outbounds
-- [ ] All 4 new tables (`conversations`, `messages`, `message_events`, `customer_opt_outs`) have merchant-scoped RLS with cross-merchant isolation tests
-- [ ] E2E test: approved campaign → cron launches → outbound recorded → mock inbound webhook → reply generates → bandit posterior updates
-- [ ] HANDOFF.md uses evidence-required self-score format
-
-## 13-chunk sequence
-
-### Chunk 1 — Migration `0008_conversation_engine.sql`
-
-Four new tables + helper indexes:
-- `conversations` — `(merchant_id, customer_id) PK`, opened_at, last_message_at, last_inbound_at, message_count
-- `messages` — id, conversation_id, direction (`inbound`|`outbound`), body, twilio_sid, campaign_id (FK, nullable), arm_id (FK, nullable), sent_at, status (`pending`|`sent`|`delivered`|`failed`), pii_redacted_body (server-side for logs)
-- `message_events` — append-only event log (id, merchant_id, conversation_id, message_id, event_type, payload_jsonb, occurred_at). Event types: `message_outbound_queued`, `message_outbound_sent`, `message_outbound_failed`, `message_inbound_received`, `inbound_classified`, `reply_generated`, `reply_sent`, `opt_out_recorded`, `posterior_updated`. Append-only triggers (reuse `prevent_event_mutation()` from migration 0002).
-- `customer_opt_outs` — append-only opt-out registry: customer_id, phone_number, opted_out_at, source (`stop_keyword`|`sonnet_classified`|`merchant_manual`|`twilio_native`), inbound_message_id (FK, nullable)
-
-Indexes:
-- `messages(conversation_id, sent_at DESC)` for thread display
-- `customer_opt_outs(merchant_id, customer_id)` for the assertNotOptedOut hot path
-- `message_events(message_id, occurred_at)` for event replay
-
-All RLS-policed via `auth.jwt() ->> 'shop_domain'` → merchants subquery pattern.
-
-### Chunk 2 — Twilio client wrapper (`packages/core/src/twilio-client.ts`)
-
-- `sendSms(to, from, body, metadata)` — wraps Twilio API; returns twilio_sid; handles Twilio errors (4xx → log + return failure, 5xx → retry up to 3 times with exponential backoff)
-- `validateWebhookSignature(url, params, signature)` — Twilio's request signature validation; reusable in the inbound route
-- `recordTwilioOptOut(phoneNumber)` — calls Twilio's opt-out API as the safety net for decision 18
-
-All wrapped in a thin testable interface. Mocked extensively in unit tests; integration tests use Twilio's test credentials.
-
-### Chunk 3 — Opt-out registry (`packages/core/src/opt-out-registry.ts`)
-
-- `assertNotOptedOut(merchantId, customerId)` — throws `OptOutError` if opted out. Mirrors `assertNoPii` pattern from Sprint 05's redactor. Pre-flight gate before every outbound send.
-- `recordOptOut(merchantId, customerId, source, inboundMessageId?)` — writes to `customer_opt_outs` + calls `recordTwilioOptOut`. Idempotent (re-recording is a no-op).
-- `isOptedOut(merchantId, customerId)` — read-only check, used by UI and dashboards.
-- STOP/UNSUBSCRIBE/REMOVE/CANCEL/END/QUIT keyword detection: case-insensitive, whitespace-tolerant. Returns the matched keyword for the audit trail.
-
-40+ unit tests covering keyword variants, idempotency, source enum, edge cases (empty inbound body, multi-language opt-out keywords for future).
-
-### Chunk 4 — Sentiment classifier (`packages/core/src/classify-reply.ts`)
-
-Sonnet 4.6 with `tool_choice` structured output:
-
-```typescript
-const ReplyClassificationSchema = {
-  name: "classify_reply",
-  input_schema: {
-    type: "object",
-    required: ["sentiment", "intent", "confidence"],
-    properties: {
-      sentiment: { enum: ["positive", "neutral", "negative"] },
-      intent: { enum: ["engagement", "purchase", "question", "complaint", "opt_out", "other"] },
-      confidence: { type: "number", minimum: 0, maximum: 1 },
-      reasoning: { type: "string", maxLength: 200 }
-    }
-  }
-}
-```
-
-PII redaction pre-flight on the inbound body before sending to Sonnet (reuse `assertNoPii`). Retry ≤2 attempts (tighter than Sprint 05's voice synthesizer because of the latency budget). Token usage accumulated.
-
-Mocked tests cover: positive/purchase intent, opt-out intent (STOP variants Sonnet should catch), negative complaint, ambiguous neutral, low-confidence cases.
-
-### Chunk 5 — Reply generator (`packages/core/src/generate-reply.ts`)
-
-Sonnet 4.6 with `tool_choice` structured output. Inputs: classified inbound (sentiment + intent), conversation history (last 10 messages), brand voice profile (from Sprint 05's `voice_versions` for the active version), customer context (lifecycle stage, last order, propensity).
-
-```typescript
-const ReplyGenerationSchema = {
-  name: "generate_reply",
-  input_schema: {
-    type: "object",
-    required: ["body"],
-    properties: {
-      body: { type: "string", maxLength: 320 },  // 2 SMS segments max
-      include_signature: { type: "boolean" },
-      suggested_next_action: { enum: ["continue", "offer", "wait", "hand_off"] }
-    }
-  }
-}
-```
-
-PII redaction pre-flight on inputs (conversation history may contain customer-pasted PII). The OUTPUT also passes through `assertNoPii` to catch hallucinated phone numbers / email addresses in generated text — defense in depth.
-
-### Chunk 6 — Outbound message engine (`packages/core/src/send-message.ts`)
-
-End-to-end outbound function:
-1. Pre-flight: `assertNotOptedOut` (decision 18 gate), `assertNotOnCap` (cost discipline gate — reuse pattern), customer phone number lookup
-2. Write `message_outbound_queued` event
-3. Call `twilio.sendSms` with metadata `{campaign_id, arm_id, customer_id}`
-4. On success: write `message_outbound_sent` event with twilio_sid + insert `messages` row
-5. On failure: write `message_outbound_failed` event with twilio error code/message
-6. Update `conversations.last_message_at` (idempotent upsert)
-
-Mirrors the orchestrator pattern from Sprint 05 (`run-voice-extraction.ts`) and Sprint 06 (`propose-campaign.ts`).
-
-### Chunk 7 — Inbound webhook handler (`apps/web/app/api/sms/inbound/route.ts`)
-
-**⚠️ Mid-sprint checkpoint evaluator runs after this chunk lands. See CLAUDE.md → Mid-sprint checkpoint protocol.**
-
-The synchronous-reply heart of decision 17. Flow:
-
-1. Parse Twilio POST body (URL-encoded form)
-2. Validate Twilio signature via `validateWebhookSignature` → 403 if invalid
-3. Resolve `(merchant_id, customer_id, conversation_id)` from the from-number + to-number (Twilio's `From` = customer, `To` = our merchant number)
-4. Write `message_inbound_received` event + insert `messages` row (inbound, direction='inbound')
-5. **STOP keyword fast path**: if body matches STOP variants, `recordOptOut(source='stop_keyword')`, return TwiML acknowledging opt-out, return early.
-6. **Sentiment classification**: call `classifyReply` with 4-second timeout. If timeout: log degraded mode, skip to fallback reply, queue async classification for the daily cron.
-7. **Opt-out intent path** (decision 18): if classification returns `intent='opt_out'` with confidence > 0.7, `recordOptOut(source='sonnet_classified')`, return TwiML acknowledging.
-8. **Reply generation**: call `generateReply` with timeout. On timeout: return TwiML with fallback body ("Thanks for your message — we'll get back to you shortly.") and queue async reply.
-9. **Bandit posterior update**: look up most recent outbound on the conversation → its arm_id → call `updatePosterior(armId, success)` where success = (sentiment === 'positive' && intent ∈ {engagement, purchase}).
-10. Return TwiML response with the generated reply body.
-
-Total budget: 5 seconds p99. Structured logging at every step with elapsed-ms.
-
-### Chunk 8 — Campaign launcher cron (`apps/web/app/api/cron/launch-campaigns/route.ts`)
-
-Daily cron (Vercel cron config). For each merchant:
-1. Fetch `getReadyCampaigns(merchantId)` — approved proposals not yet launched
-2. For each proposal: load `campaign_group_snapshots` (the frozen customer set from Sprint 06 decision 15), exclude holdout customers, exclude opted-out customers
-3. For each remaining customer: Thompson-sample an arm from the proposal's bandit_state, call `sendMessage(merchantId, customerId, proposalId, armId, variantBody)`
-4. Mark the proposal as `launched_at` (idempotent — re-running the cron doesn't re-launch)
-5. Cost discipline: `OUTBOUND_DAILY_CAP_DEFAULT` env var caps sends per merchant per day; cap-exhaustion writes structured log + skips remaining customers (resume next day)
-
-### Chunk 9 — No-reply posterior update cron (`apps/web/app/api/cron/sweep-no-reply/route.ts`)
-
-Daily cron. For each merchant, find outbound messages with no inbound on the conversation 7+ days later. For each such outbound: `updatePosterior(armId, success=false)`. Idempotent via a `posterior_updated_at` flag on the message row.
-
-### Chunk 10 — Conversation list UI (`apps/web/app/app/conversations/page.tsx`)
-
-Per-merchant conversation list. Each row: customer name + handle, latest message preview (truncated), unread indicator (inbounds since last viewed), sentiment chip of latest inbound, message count, sourcing campaigns badges (which campaigns drove outbounds on this thread).
-
-Filter: unread / opted-out / by-campaign. Search: customer name, message body content.
-
-Vellum tokens, vocabulary compliance, WCAG 2.2 AA.
-
-### Chunk 11 — Conversation detail UI (`apps/web/app/app/conversations/[customerId]/page.tsx`)
-
-Single thread view. Inbound messages left-aligned, outbounds right-aligned. Each message: timestamp, body, status badge (delivered/failed for outbounds), sentiment chip + intent chip on inbounds, source campaign badge + bandit arm label on outbounds.
-
-Header: customer summary card (lifecycle, last order, propensity, opt-out status). Action buttons: "Mark opt-out" (manual merchant override), "Open in Shopify" (link out).
-
-No reply composition UI in v1 — replies are AI-generated. Sprint 07b or v2 may add merchant manual reply override.
-
-### Chunk 12 — E2E test (`apps/web/e2e/conversation-engine.spec.ts`)
-
-Playwright flow:
-1. Seed: an approved campaign from Sprint 06, a customer in the snapshot
-2. Trigger launch-campaigns cron → assert outbound message_event written + Twilio mock called with correct body
-3. Mock Twilio inbound webhook POST with a positive-intent reply body
-4. Assert: inbound event written, sentiment classified, reply generated and sent back as TwiML, bandit posterior updated (alpha incremented)
-5. Mock Twilio inbound with "STOP" body → assert opt-out recorded both in customer_opt_outs and Twilio mock
-6. Re-trigger launch-campaigns → assert opted-out customer is excluded
-
-Plus failure paths: invalid Twilio signature returns 403; Sonnet classifier timeout falls back to safe reply; opt-out customer cannot be re-targeted.
-
-### Chunk 13 — HANDOFF.md with evidence-required self-scores
-
-Standard format from CLAUDE.md → "Evidence-required HANDOFF format". Every rubric self-score: file:line implementation + file:line tests + named assertion + test case count.
-
-Include a "Deliberate deviations from SPRINT.md" section if any structural deviations occur during the build (per the Sprint 06 pattern).
-
-## Quality rubric (10 criteria — score each 0–3)
-
-| # | Criterion | What 3/3 looks like |
-|---|---|---|
-| 1 | **Conversation per-customer integrity** | One conversation row per (merchant, customer); messages thread correctly across campaigns; multi-campaign customer test passes |
-| 2 | **Twilio webhook signature validation** | Every inbound validates signature before further processing; tampered request test returns 403; validation logic unit-tested with golden vectors |
-| 3 | **Synchronous reply latency** | 5-second p99 budget enforced via timeout + fallback; degraded-mode path tested; structured log includes elapsed_ms at each step |
-| 4 | **Sentiment classification** | `tool_choice` structured output; retry ≤2 attempts; PII pre-flight; mocked tests cover all 6 intent values + opt-out variants; confidence threshold documented |
-| 5 | **Opt-out immediate honor** | `assertNotOptedOut` gates every outbound; dual-recorded (table + Twilio); STOP keyword + Sonnet intent both tested; opted-out customer excluded from launch-campaigns cron |
-| 6 | **Reply generation in brand voice** | Uses active `voice_versions` row; conversation history (last 10) included; output PII-checked; generation tests assert tone descriptors are honored |
-| 7 | **PII redaction in reply path** | Dual gate at classifier + generator entry; output of generator also PII-checked (catches hallucinated PII); reuse of Sprint 05 pii-redactor verified |
-| 8 | **RLS tenancy isolation** | All 4 new tables have merchant-scoped policies; cross-merchant access tests pass; opt-out table cross-merchant test (don't leak which customers opted out) |
-| 9 | **Bandit posterior updates** | Wired from classify-reply output to `updatePosterior`; positive+engagement/purchase = success; no-reply cron sweeps inactive outbounds; deterministic given seed |
-| 10 | **Observability + evidence-required HANDOFF** | Structured logs at every phase (queued/sent/inbound/classified/generated/replied); spec-adherence-auditor dispatched per chunk; mid-sprint checkpoint APPROVED at chunk 7; evidence-required self-scores in HANDOFF |
-
-## Required environment variables
-
-| Variable | Default | Notes |
-|---|---|---|
-| `TWILIO_ACCOUNT_SID` | — | Already in env per pre-sprint check |
-| `TWILIO_AUTH_TOKEN` | — | Already in env per pre-sprint check |
-| `TWILIO_PHONE_NUMBER` | — | The merchant outbound number; may become per-merchant in v2 |
-| `OUTBOUND_DAILY_CAP_DEFAULT` | `200` | Outbound SMS per merchant per UTC day (cost discipline) |
-| `INBOUND_REPLY_LATENCY_BUDGET_MS` | `5000` | Total budget for sync reply generation; 4s soft cap before fallback |
-| `NO_REPLY_SWEEP_DAYS` | `7` | Days after outbound with no inbound before posterior=false |
-| Existing: `SONNET_MODEL`, `ANTHROPIC_API_KEY`, `SUPABASE_*` | — | Reused |
-
-Add to: `apps/web/app/lib/env.ts`, `turbo.json` env array, `scripts/vercel-env-check.mjs`. Surface manual Vercel UI action in HANDOFF.
-
-## Pre-sprint preflight
-
-**Before launching the build session, run `pnpm db:diagnose` to confirm all prior migrations are applied to production Supabase.** Per CLAUDE.md → "Pre-sprint preflight". This was the gap that bit Sprint 06; do not skip.
-
-Also verify Twilio test credentials are configured for the build session's integration tests — Twilio provides a Test Credentials pair that lets you exercise the API without sending real SMS.
+Sprint 08 closes the credibility loop. Sprint 07 makes lapsed.ai *do things* — it sends SMS, classifies replies, fires bandit posteriors on leading signals. Sprint 08 makes it *prove things* — when an order arrives within a campaign's attribution window from a customer who received the outbound, that order is incrementally attributed against a matched holdout cohort, the bandit's arm-level posterior is updated against ground-truth, and the merchant sees a per-campaign dollar number defensible to an external audit.
+
+This is the make-or-break sprint for monetisation. Sprint 09 (Stripe billing on incremental revenue) literally consumes Sprint 08's output as the meter. If the attribution math is wrong, the invoices are wrong. If the holdout-matching is wrong, the lift numbers are inflated and merchants who audit will leave. If the LTV restoration calculation is over-confident, the case studies become legally risky.
+
+**Not in scope this sprint:** Stripe billing (Sprint 09), multi-touch attribution (v2), customer-journey reconstruction (v2), LTV forecasting beyond restoration delta (v2), A/B-test orchestration UI (v2), email/web-channel attribution (v2), per-merchant attribution-model selection (v2), retroactive attribution-window changes on existing proposals (v2).
+
+---
+
+## Acceptance Criteria
+
+- [ ] Shopify `orders/create` webhook ingests orders idempotently with HMAC signature validation; orders are append-only event-sourced.
+- [ ] Each campaign proposal at approval time is stamped with its merchant's current `attribution_window_days` (default 14, per-merchant configurable in `merchant_attribution_config`); the stamp is immutable for that proposal.
+- [ ] Treatment cohort attribution: for each campaign within its window, the set of customers who received at least one outbound is materialised and their attributed orders counted.
+- [ ] Holdout cohort attribution: for each campaign, the holdout snapshot from Sprint 06 is queried, and orders from those customers within the same time-window are counted.
+- [ ] Incremental revenue calculator returns: `treatment_revenue_per_customer - holdout_revenue_per_customer`, multiplied by treatment cohort size; with a 95% confidence interval (Welch's t-test on per-customer revenue distributions); with an explicit `insufficient_evidence` flag when either cohort has fewer than 30 customers.
+- [ ] LTV restoration calculator returns per-campaign delta: `(avg_30d_post_revenue_per_treatment_customer - avg_30d_post_revenue_per_holdout_customer) × treatment_cohort_size`, with cohort-relative scaling.
+- [ ] Bandit dual-signal posterior: each arm now maintains BOTH `sentiment_alpha`/`sentiment_beta` (Sprint 07) AND `order_alpha`/`order_beta` (this sprint). Selection at proposal-creation time uses the order posterior when `order_observation_count ≥ 30`, else falls back to the sentiment posterior. Posterior updates from orders are idempotent (per-order).
+- [ ] Single-attribution rule: a customer who received outbounds from N campaigns within their respective windows is attributed to the most recent outbound preceding the order — never to multiple campaigns simultaneously.
+- [ ] Daily attribution batch cron materialises `attribution_results` from `order_events` + `message_events` + `campaign_group_snapshots`. Idempotent: re-running produces identical output.
+- [ ] Per-campaign attribution UI shows treatment cohort size, holdout cohort size, incremental revenue with CI, LTV restored with CI, attribution window in effect; explicit "insufficient evidence — need 30+ orders per cohort" state when below threshold.
+- [ ] Merchant rollup UI aggregates across campaigns: total revenue restored (last 30/90/all-time), total LTV restored, top 5 campaigns by lift, holdout-rate effectiveness sanity check (should approximate the configured rate).
+- [ ] RLS tenancy on every new table: orders, order_events, attribution_decisions, attribution_results, ltv_snapshots, merchant_attribution_config.
+- [ ] No "cohort", "segment", "blast", "customer journey" in any new UI string (vocabulary compliance per existing rule).
+- [ ] HANDOFF.md uses the evidence-required format with file:line citations, test file:line citations, test count, named assertions per criterion. Constructed-scenario validation (chunk 12) is the criterion-5 + criterion-6 evidence.
+
+---
 
 ## Definition of Done
 
-- [ ] All 13 chunks landed as commits
-- [ ] All 10 rubric criteria scored 3/3 with evidence (file:line refs in HANDOFF)
-- [ ] `pnpm typecheck` exits 0
-- [ ] `pnpm lint` exits 0
-- [ ] `pnpm test` exits 0
-- [ ] `pnpm build` exits 0 for all 3 apps
-- [ ] `pnpm grep:pii` exits 0
-- [ ] `pnpm vercel:env:check` exits 0
-- [ ] `pnpm db:diagnose` exits 0 (against production Supabase, with migration 0008 applied before merge)
-- [ ] No architecture-guardian violations (now enumerating all 19 decisions after this sprint's harness chore)
-- [ ] No code-reviewer Critical or High findings
-- [ ] No spec-adherence-auditor gaps
-- [ ] Mid-sprint checkpoint evaluator returned APPROVE (or ADJUST remediated) at chunk 7
-- [ ] Final evaluator returned APPROVE FOR MERGE (or REMEDIATE with only Medium/Low items → BACKLOG.md)
-- [ ] HANDOFF.md committed using evidence-required self-score format
-- [ ] Migration 0008 applied to production Supabase before PR merges (decision-13/Sprint-06 pre-merge gate pattern)
-- [ ] Twilio webhook URL configured to point at production `/api/sms/inbound` route
+- [ ] All 13 acceptance criteria checked with evidence.
+- [ ] All 10 rubric criteria self-scored 3/3 in HANDOFF with full evidence trail.
+- [ ] CI gates green: pnpm typecheck, lint, test, build, grep:pii, vercel:env:check, db:diagnose.
+- [ ] Mid-sprint checkpoint at chunk 7 passed (APPROVE or ADJUST-then-remediated).
+- [ ] Branch pushed; PR not opened by build agent (human gate).
 
-## Out of scope (carry-forward to later sprints)
+---
 
-- **Sprint 08**: Attribution reconciliation against Shopify orders (the "real" success signal); LTV restoration math; holdout-vs-treated revenue lift; bandit posterior corrections from order data.
-- **Sprint 09**: Stripe billing on incremental revenue.
-- **v2**: Multi-step / multi-message campaign sequences; email channel; WhatsApp/iMessage; voice/IVR; human handoff; merchant manual reply override in conversation UI; per-merchant Twilio numbers; A/B testing the reply generator itself; conversation-level analytics dashboard.
-- **Explicit safety exclusion**: Auto-approval of replies (replies are AI-generated and auto-sent — there is no merchant-in-the-loop reply approval in v1, by design). If product feedback later demands merchant approval before reply send, that's a v2 architectural decision change requiring CLAUDE.md amendment.
+## Architectural Decisions Added This Sprint (20–26)
+
+20. **Attribution window is per-merchant configurable, immutable per proposal.** Default 14 days. Stamped at proposal approval. Future merchant-default changes affect new proposals only.
+
+21. **Single-attribution per order.** Most-recent-preceding-outbound wins. No double-counting across overlapping campaigns.
+
+22. **Bandit posterior dual-signal.** Sentiment posterior (leading, Sprint 07) and order posterior (lagging, Sprint 08) tracked separately on `bandit_state`. Selection uses order when `order_observation_count ≥ 30`, sentiment otherwise.
+
+23. **LTV restoration = cohort-relative delta.** Simple, explainable, no stay-probability modelling. Aggregates per-customer delta against holdout baseline.
+
+24. **Order events are event-sourced (decision 12 extended).** Append-only `order_events`. Materialised `orders` table is the read view. All writes go through `appendOrderEvent`.
+
+25. **Order ingestion via Shopify `orders/create` webhook.** Real-time. HMAC-validated. Idempotent on `order_gid`. Re-delivery safe (Shopify retries are real).
+
+26. **Attribution is computed nightly, materialised into `attribution_results`.** Per-campaign + per-customer rows. UI reads from the materialised table. Re-runnable from event log. The cron is the only write path to `attribution_results`.
+
+Decisions 1–19 remain. New cumulative count: 26.
+
+---
+
+## Chunk Sequence (13 chunks, checkpoint barrier after chunk 7)
+
+### Chunk 1 — Migration 0009: attribution schema
+
+`packages/db/supabase/migrations/0009_attribution.sql`
+
+New tables:
+- `orders` — materialised view; one row per Shopify order. Columns: `id` (PK), `merchant_id`, `customer_id` (gid as text, per Sprint 07 convention), `order_gid` (UNIQUE on `(merchant_id, order_gid)`), `total_amount` (numeric), `currency` (text), `placed_at` (timestamptz), `created_at`, `updated_at`. RLS: merchant-scoped read.
+- `order_events` — append-only source. Columns: `id` (PK), `merchant_id`, `order_id` (FK orders), `customer_id`, `event_type` (text — `'received'`, `'attributed'`, `'refunded'`), `data` (jsonb), `appended_at`. Append-only trigger per decision 12.
+- `attribution_decisions` — append-only audit. Columns: `id` (PK), `merchant_id`, `order_id` (FK orders), `attributed_campaign_id` (FK campaign_proposals nullable — null = "no qualifying outbound"), `attributed_message_id` (FK messages nullable), `attribution_window_days` (int), `decided_at` (timestamptz). Append-only trigger.
+- `attribution_results` — materialised view; one row per (campaign, window-close-date). Columns: `id`, `merchant_id`, `campaign_id` (FK), `window_close_date` (date), `treatment_cohort_size` (int), `holdout_cohort_size` (int), `treatment_revenue_cents` (bigint), `holdout_revenue_cents` (bigint), `incremental_revenue_cents` (bigint), `incremental_ci_low_cents`, `incremental_ci_high_cents`, `ltv_restored_cents`, `insufficient_evidence` (bool), `computed_at`. UNIQUE on `(campaign_id, window_close_date)`. Cron is the only write path.
+- `ltv_snapshots` — per-customer pre/post LTV markers. Columns: `id`, `merchant_id`, `customer_id`, `campaign_id` (FK), `pre_30d_revenue_cents`, `post_30d_revenue_cents`, `delta_cents`, `snapshot_at`.
+- `merchant_attribution_config` — per-merchant settings. Columns: `merchant_id` (PK), `attribution_window_days` (int default 14), `ltv_evaluation_window_days` (int default 30), `created_at`, `updated_at`.
+
+Schema additions:
+- `campaign_proposals.attribution_window_days` (int, NOT NULL, stamped at approval time)
+- `bandit_state.order_alpha`, `bandit_state.order_beta`, `bandit_state.order_observation_count`, `bandit_state.order_last_updated_at` — dual-signal posterior columns per decision 22
+
+Indexes:
+- `orders (merchant_id, customer_id, placed_at)` — attribution lookups
+- `orders (merchant_id, placed_at)` — window scans
+- `order_events (order_id, appended_at)` — audit traversal
+- `attribution_decisions (order_id)` — one-decision-per-order lookups
+- `attribution_results (merchant_id, window_close_date)` — rollup queries
+- Partial unique: `attribution_decisions (order_id)` ensures one final attribution per order
+
+RLS: every new table gets merchant-scoped read + service-role write. Verified by RLS tests.
+
+**No embedding columns on these tables.** Decision 2's embedding requirement applies to narrative-content tables (customer_events, conversations, messages, voice_profile, campaign_proposals). Sprint 08's tables are quantitative. Note this explicitly in the migration header comment to prevent architecture-guardian false-flagging.
+
+### Chunk 2 — Shopify orders/create webhook handler
+
+`apps/web/app/api/shopify/webhooks/orders/route.ts`
+
+- HMAC signature validation using `SHOPIFY_API_SECRET` (already in env). Reject 401 BEFORE body parsing.
+- Idempotent on `(merchant_id, order_gid)`: if exists, return 200 (don't error — Shopify retries).
+- Customer-gid resolution: match `customer.id` from payload to `customers.shopify_customer_gid`. If unmatched: write the order anyway with `customer_id = null`, append an order_event of type `'unmatched_customer'`, log structured warning. Don't fail.
+- Append `order_events.received` with full payload as `data`.
+- Insert into `orders` materialised view.
+- Response: 200 JSON `{ok: true}` always (except 401 for HMAC failure).
+- Structured logs: `merchant_id`, `order_gid`, `customer_matched` (bool), `elapsed_ms`.
+
+`packages/core/src/order-events.ts` — `appendOrderEvent`, similar shape to `appendMessageEvent`.
+
+`packages/core/src/shopify-orders-ingest.ts` — `ingestShopifyOrder` orchestrator (parse payload → resolve customer → append event → upsert orders row).
+
+Tests: HMAC pass/fail, idempotent re-delivery, customer-matched + customer-unmatched cases, structured-log assertions.
+
+### Chunk 3 — Attribution window resolver + proposal stamping
+
+`packages/core/src/attribution-config.ts`
+
+- `getAttributionWindow(merchantId)` — returns `merchant_attribution_config.attribution_window_days`, default 14 if no row.
+- `getLtvEvaluationWindow(merchantId)` — same pattern, default 30.
+
+`packages/core/src/campaign-approval.ts` (extend Sprint 06)
+- At approval time, BEFORE inserting the approval event, call `getAttributionWindow(merchantId)` and stamp into `campaign_proposals.attribution_window_days`.
+- For proposals approved before this sprint (already in main): backfill migration in 0009 sets `attribution_window_days = 14` for all existing approved proposals.
+
+Tests: default fallback, per-merchant override, stamp immutability (subsequent merchant-config change does NOT update the stamped value on existing proposals).
+
+### Chunk 4 — Treatment cohort engine
+
+`packages/core/src/attribution-treatment.ts`
+
+- `getTreatmentCohort(campaignId, windowDays)` — returns the set of `customer_id`s who received at least one outbound from the campaign. Sourced from `messages` where `direction = 'outbound'` and `campaign_id = $1`.
+- `getTreatmentOrders(campaignId, windowStart, windowEnd, treatmentCustomerIds)` — orders from those customers placed within `[outbound_sent_at, outbound_sent_at + windowDays]`. Per-customer window relative to THEIR outbound timing.
+- Returns: `{cohort: customer_id[], orders: Order[], revenue_cents: number, customers_with_orders: number}`.
+
+Single-attribution implementation: if a customer received outbounds from multiple campaigns in overlapping windows, the treatment query joins to the most-recent-preceding outbound per order and only returns orders where this campaign IS that most-recent outbound.
+
+Tests: single-campaign happy path, multi-campaign single-attribution (customer in 2 campaigns, order attributed to most recent), order-outside-window exclusion, empty cohort.
+
+### Chunk 5 — Holdout cohort engine
+
+`packages/core/src/attribution-holdout.ts`
+
+- `getHoldoutCohort(campaignId)` — sourced from `campaign_group_snapshots` where `is_holdout = true` and `campaign_proposal_id = $1`. This is the frozen snapshot per decision 15.
+- `getHoldoutOrders(campaignId, windowStart, windowEnd, holdoutCustomerIds)` — orders from holdout customers within the same calendar window as the treatment cohort's send dates (NOT per-customer offset, since holdouts have no send-time anchor).
+- Returns: same shape as treatment.
+
+Tests: holdout-snapshot-frozen verification (modifying group memberships post-snapshot doesn't affect this), correct window-bounding, no-overlap with treatment cohort (the snapshot guarantees disjoint sets).
+
+### Chunk 6 — Incremental revenue calculator
+
+`packages/core/src/incremental-revenue.ts`
+
+- `computeIncrementalRevenue(campaignId)` orchestrates chunks 4 + 5, then:
+  - `treatment_per_customer = treatment_revenue / treatment_cohort_size`
+  - `holdout_per_customer = holdout_revenue / holdout_cohort_size`
+  - `incremental_per_customer = treatment_per_customer - holdout_per_customer`
+  - `incremental_total = incremental_per_customer × treatment_cohort_size`
+  - 95% CI via Welch's t-test on the per-customer revenue distributions (NOT bootstrap — Welch is exact for unequal variances and small samples, well-suited here)
+  - If `treatment_cohort_size < 30` OR `holdout_cohort_size < 30`: return `insufficient_evidence: true` with the raw numbers but no CI.
+
+The Welch t-test math is in `packages/core/src/stats/welch.ts` — exposed as `welchConfidenceInterval(treatment_values, holdout_values, alpha=0.05)`. Standard formula: pooled standard error, Welch–Satterthwaite degrees of freedom, t-critical via the existing math import (or hand-rolled if no stats lib).
+
+Tests:
+- Known-input test: synthetic distributions with known mean difference; verify CI brackets the true mean difference.
+- Insufficient-evidence path: 29 customers per cohort returns insufficient.
+- Negative-lift case: holdout outperforms treatment → returns negative incremental, no special handling (let the UI surface).
+- Currency arithmetic: all amounts in cents (integer), avoid float drift.
+
+### Chunk 7 — Bandit dual-signal posterior (CHECKPOINT BARRIER)
+
+`packages/core/src/bandit-order.ts`
+
+- `recordOrderArrival(orderId)` — called from the attribution batch cron when a treatment order is finalised:
+  1. Look up the order's attributed campaign + attributed message
+  2. Look up the message's arm_id
+  3. Idempotency: check `attribution_decisions` for prior `recordOrderArrival` event for this order; if present, no-op
+  4. UPDATE `bandit_state.order_alpha`, `order_beta`, `order_observation_count`, `order_last_updated_at` for that arm
+  5. Append `attribution_decisions` row recording the posterior update
+- `selectArm(campaignId)` (extending Sprint 06's `packages/core/src/bandit.ts`):
+  - For each arm, look at `order_observation_count`:
+    - If `≥ 30`: use `(order_alpha, order_beta)` for the Thompson sample
+    - Else: use `(sentiment_alpha, sentiment_beta)` (Sprint 07's existing posterior)
+  - Selection logs which posterior was used per arm — structured `bandit_selection` event with `posterior_source: 'order'` or `'sentiment'`
+
+Architecture-guardian note: arm identity is still immutable per decision 14. Only the alpha/beta/observation_count/last_updated_at columns are touched. The `order_*` columns are new but the immutability rule covers them — arms can't be deleted or have their template_text/voice_attributes changed.
+
+Tests:
+- Order arrival from positive-sentiment-fired arm: sentiment posterior had alpha=2/beta=1 from Sprint 07; order arrives; order posterior moves alpha=2/beta=1 (independent track).
+- Order arrival from negative-sentiment-fired arm (Sprint 07 fired beta + 1): order arrives anyway; order alpha + 1 (the lagging signal can override the leading signal's prior expectation).
+- No-order case (no arrival within window): order_beta + 1 (the failure signal). This update fires from the attribution batch cron at window-close, not from order arrival (which never fires).
+- Selection threshold: arm with 29 order observations falls back to sentiment; arm with 30 uses order.
+- Idempotency: same order processed twice does NOT double-update.
+
+**MID-SPRINT CHECKPOINT BARRIER.** After chunk 7 lands and is auditor-clean, the build agent surfaces:
+> "Chunk 7 complete. Mid-sprint checkpoint evaluator should now run. Awaiting human to launch a separate Claude Code session for checkpoint per CLAUDE.md → Mid-sprint checkpoint evaluator protocol."
+
+Do not proceed to chunk 8 until APPROVE (or ADJUST-then-remediated).
+
+### Chunk 8 — LTV restoration calculator
+
+`packages/core/src/ltv-restoration.ts`
+
+- `computeLtvRestoration(campaignId)` returns per-campaign LTV delta per decision 23:
+  - For each treatment-cohort customer: their revenue in the 30 days AFTER their outbound
+  - For each holdout-cohort customer: their revenue in the 30 days AFTER the campaign's median send time (since holdouts have no individual outbound time)
+  - Per-customer delta: post_treatment_revenue - cohort_mean_holdout_revenue
+  - Aggregated: sum of per-customer deltas
+  - CI via Welch's t-test on the per-customer revenue distributions (same pattern as chunk 6)
+  - Materialise into `ltv_snapshots` rows per treatment customer + a campaign-level summary
+- Insufficient-evidence threshold same as chunk 6: < 30 customers per cohort.
+
+Tests:
+- High-restoration case: treatment cohort's avg 30d revenue substantially higher than holdout's → positive delta
+- Zero-restoration case: cohorts indistinguishable → ~0 delta with wide CI
+- Per-customer snapshot persistence: verify ltv_snapshots rows are written
+
+### Chunk 9 — Attribution batch cron
+
+`apps/web/app/api/cron/attribution-batch/route.ts`
+
+- CRON_SECRET authentication (existing pattern).
+- Iterates merchants → campaigns approved-and-launched → for each:
+  1. Determine window-close date = `min(now(), launched_at + attribution_window_days)`
+  2. If window-close <= today AND no `attribution_results` row exists for `(campaign_id, window_close_date)`:
+     - Run `computeIncrementalRevenue(campaignId)` and `computeLtvRestoration(campaignId)`
+     - For each attributed order: call `recordOrderArrival(orderId)` (idempotent)
+     - For each treatment-cohort customer with NO order in window: append `attribution_decisions` of type `'no_order'` and update bandit `order_beta + 1` (the failure signal feeds the order posterior)
+     - INSERT into `attribution_results`
+- Structured logs with `merchant_id`, `campaign_id`, `window_close_date`, `treatment_size`, `holdout_size`, `incremental_revenue_cents`, `elapsed_ms`.
+- Idempotency: the UNIQUE on `attribution_results (campaign_id, window_close_date)` prevents duplicate inserts. Re-running the cron the next day skips already-computed campaigns.
+
+`vercel.json` adds:
+```json
+{ "path": "/api/cron/attribution-batch", "schedule": "0 6 * * *" }
+```
+(06:00 UTC = 16:00 AEST, well after rfm/score nightly batches finish.)
+
+Tests:
+- Idempotent re-run: second invocation produces no new `attribution_results` rows
+- Insufficient-evidence path: writes `attribution_results` with `insufficient_evidence = true`, does NOT update bandit posteriors (don't pollute the bandit with low-confidence signal)
+- Window-not-closed path: campaigns still inside their window are skipped
+
+### Chunk 10 — Per-campaign attribution UI
+
+`apps/web/app/app/campaigns/[id]/attribution/page.tsx`
+
+- Server component reads from `attribution_results` for the given campaign
+- Sections:
+  - **Window in effect**: shows the `attribution_window_days` value stamped on the proposal
+  - **Cohorts**: treatment size, holdout size, percentages
+  - **Incremental revenue**: dollar amount with CI low/high in parentheses; if `insufficient_evidence: true`, replace with explicit "Insufficient evidence — need 30+ customers per cohort. Currently treatment: X, holdout: Y." card
+  - **LTV restored**: same pattern
+  - **Attributed orders table**: list of orders attributed to this campaign with linked customer + outbound message
+- Vellum tokens only. No hex/rgb. WCAG 2.2 AA.
+- Vocabulary: NO "cohort" in UI strings (use "group" — per existing Sprint 04 vocabulary). Internal code can use "cohort" because it's the technical term for the math; UI translates.
+
+### Chunk 11 — Merchant rollup attribution UI
+
+`apps/web/app/app/dashboard/attribution/page.tsx`
+
+- Server component reads aggregates from `attribution_results` joined to `campaign_proposals`
+- Sections:
+  - **Headline**: "Revenue restored this month: $X". Three tabs: last 30d / last 90d / all-time.
+  - **Top 5 campaigns by incremental revenue**: sortable table
+  - **LTV restored**: same headline pattern
+  - **Holdout effectiveness check**: the configured `HOLDOUT_RATE` env value compared against the realised average across campaigns. If they diverge >10%, surface a warning ("Holdout assignment may be skewed").
+  - **Time series chart**: revenue restored by week, last 12 weeks (recharts, Vellum tokens)
+- Same UI rules as chunk 10.
+
+### Chunk 12 — E2E + constructed-scenario validation
+
+`apps/web/e2e/attribution-scenarios.spec.ts` (Playwright) AND `packages/core/src/__tests__/attribution-scenarios.test.ts` (Vitest)
+
+**The defensibility test.** Five constructed scenarios run against the live attribution engine with synthetic data:
+
+1. **High-lift scenario.** Treatment cohort of 100 customers, 40 of whom place orders ($50 avg). Holdout cohort of 30 customers, 6 of whom place orders. Expected: positive incremental, narrow CI excluding 0, LTV restored positive.
+2. **Zero-lift scenario.** Treatment 100 customers, 20 orders. Holdout 30 customers, 6 orders. Both cohorts ~20% conversion. Expected: ~$0 incremental, CI brackets 0, LTV restored ≈ 0.
+3. **Negative-lift scenario.** Treatment 100 customers, 10 orders. Holdout 30 customers, 12 orders. Holdout outperforms. Expected: negative incremental, negative LTV, surfaced cleanly in UI without crashing or hiding the result.
+4. **Insufficient-evidence scenario.** Treatment 25 customers, 5 orders. Holdout 10 customers, 2 orders. Expected: `insufficient_evidence: true`, raw numbers shown, no CI, UI shows the "need 30+ per cohort" message.
+5. **Multi-campaign-overlap scenario.** Customer X in both campaign A and campaign B (treatment for both). Customer X places an order 5 days after A's outbound, 2 days after B's outbound. Expected: attributed to B only (most-recent-preceding). A's treatment_cohort still includes X (membership), but A's attributed orders does not include this order.
+
+Each scenario seeds synthetic data via direct DB inserts (NOT via the Shopify webhook — the math is what's being tested), runs `computeIncrementalRevenue` and `computeLtvRestoration`, and asserts against expected outcomes within tight tolerances.
+
+### Chunk 13 — HANDOFF.md
+
+Evidence-required format per CLAUDE.md. 10 rubric criteria, each with:
+- Primary implementation file path:line range
+- Test file path:line range
+- Test count
+- Named assertion(s)
+
+Deliberate deviations section (anticipate at least one — math choices, threshold tuning, etc.).
+
+---
+
+## Quality Rubric (10 criteria, score 0–3 each)
+
+| # | Criterion | What 3/3 looks like |
+|---|---|---|
+| 1 | Order ingestion via Shopify webhook | HMAC validated, idempotent on order_gid, customer-match + unmatched both handled, structured logs |
+| 2 | Per-merchant attribution window | `merchant_attribution_config` table, `getAttributionWindow` helper, proposal-stamping at approval, immutability test |
+| 3 | Treatment cohort attribution | `getTreatmentCohort` + `getTreatmentOrders`, single-attribution rule enforced, per-customer-window math |
+| 4 | Holdout cohort attribution | `getHoldoutCohort` queries frozen snapshot, no-overlap with treatment, calendar-window correct |
+| 5 | Incremental revenue + CI | Welch t-test implementation, integer cents arithmetic, insufficient-evidence threshold, constructed-scenario passing |
+| 6 | LTV restoration | Cohort-relative delta per decision 23, per-customer ltv_snapshots persisted, CI calculated |
+| 7 | Bandit dual-signal | `bandit_state.order_*` columns, `recordOrderArrival` write path, selection threshold at 30 observations, idempotent |
+| 8 | RLS tenancy | Every new table has merchant-scoped read + service-role write; RLS tests pass |
+| 9 | Attribution dashboard UI | Per-campaign + rollup pages, insufficient-evidence state, Vellum tokens, WCAG 2.2 AA, vocabulary compliance |
+| 10 | Observability + HANDOFF | Structured logs at every cron step, deliberate-deviations section in HANDOFF, evidence-required format compliance |
+
+---
+
+## Out of Scope
+
+- Stripe billing on incremental revenue → Sprint 09
+- Multi-touch attribution (multiple campaigns share credit) → v2
+- Customer-journey reconstruction across channels → v2
+- LTV forecasting beyond observed restoration delta → v2 (would require stay-probability modelling)
+- A/B-test orchestration UI → v2
+- Email/web-channel attribution → v2 (channel-agnostic infra exists per decision 3 but no other channel ingestion built)
+- Per-merchant attribution-model selection → v2 (v1 ships one model)
+- Retroactive attribution-window changes on existing proposals → v2 (would invalidate already-computed results)
+- Order refund handling beyond appending refund event → v2 (UI surfacing + posterior corrections deferred)
