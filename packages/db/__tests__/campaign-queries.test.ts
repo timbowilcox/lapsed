@@ -509,6 +509,30 @@ describe("getProposalsByStatus", () => {
     expect(items.map((i) => i.proposalId)).not.toContain("p4");
   });
 
+  it("surfaces an edited proposal in the all filter only, with edited status", async () => {
+    const editedSeed = {
+      campaign_events: [
+        ev("p5", "campaign_proposed", "2026-05-12T10:00:01.000Z"),
+        ev("p5", "proposal_edited", "2026-05-12T14:00:00.000Z", MERCHANT_ID, {
+          superseded_by: "p6",
+        }),
+      ],
+      campaign_proposals: [
+        proposal("p5", { generated_at: "2026-05-12T10:00:00.000Z", status: "edited" }),
+      ],
+      campaign_arms: [arm("p5", 0)],
+    };
+    expect(
+      (await getProposalsByStatus(makeClient(editedSeed), MERCHANT_ID, "all")).map((i) => ({
+        id: i.proposalId,
+        status: i.status,
+      })),
+    ).toEqual([{ id: "p5", status: "edited" }]);
+    expect(await getProposalsByStatus(makeClient(editedSeed), MERCHANT_ID, "pending")).toEqual([]);
+    expect(await getProposalsByStatus(makeClient(editedSeed), MERCHANT_ID, "approved")).toEqual([]);
+    expect(await getProposalsByStatus(makeClient(editedSeed), MERCHANT_ID, "rejected")).toEqual([]);
+  });
+
   it("returns an empty array when the merchant has no proposals", async () => {
     expect(await getProposalsByStatus(makeClient({ campaign_events: [] }), MERCHANT_ID, "all")).toEqual(
       [],

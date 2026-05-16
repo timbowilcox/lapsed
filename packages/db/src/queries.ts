@@ -999,6 +999,13 @@ function matchesFilter(status: CampaignProposalStatus, filter: CampaignListFilte
  * getProposalById. Only proposals that completed generation (have a
  * `campaign_proposed` event) are included; a cap-exhausted zombie is excluded.
  * Results are newest-first by generated_at.
+ *
+ * KNOWN SCALING LIMIT: this fetches the merchant's entire campaign_events row
+ * set and derives status in memory. The per-merchant daily proposal cap bounds
+ * growth for v1, but this is not a query that scales to arbitrary history. When
+ * a merchant accumulates enough campaigns to matter, the status derivation
+ * should move into SQL (a view or RPC over campaign_events). Tracked as a
+ * post-v1 follow-up — see HANDOFF.md.
  */
 export async function getProposalsByStatus(
   client: LapsedSupabaseClient,

@@ -28,7 +28,8 @@ export default async function CampaignListPage({ searchParams }: PageProps) {
   });
 
   // Fetch the full set once; the client component handles tab + search
-  // filtering. Sprint 06's per-merchant daily cap keeps this set small.
+  // filtering. getProposalsByStatus derives status in memory — see its
+  // KNOWN SCALING LIMIT note; status derivation moves into SQL post-v1.
   const items = await getProposalsByStatus(client, merchant.id, "all");
 
   return (

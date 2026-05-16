@@ -32,11 +32,11 @@ const TABS: ReadonlyArray<{ value: TabValue; label: string }> = [
 
 const STATUS_META: Record<
   CampaignProposalStatus,
-  { label: string; tone: "converted" | "churned" | "active" | "stalled" }
+  { label: string; tone: "converted" | "active" | "stalled" }
 > = {
   proposed: { label: "Pending review", tone: "active" },
   approved: { label: "Approved", tone: "converted" },
-  rejected: { label: "Rejected", tone: "churned" },
+  rejected: { label: "Rejected", tone: "stalled" },
   edited: { label: "Edited", tone: "stalled" },
 };
 
