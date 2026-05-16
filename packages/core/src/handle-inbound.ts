@@ -657,6 +657,13 @@ async function appendDegradedEvent(
  * arm to update — the reply is skipped, logged, and not an error. The updated
  * outbound message is stamped `posterior_updated_at` so the chunk-9 no-reply
  * sweep does not also fire a (false) posterior for it.
+ *
+ * IDEMPOTENT (decision 19 integrity): if the target outbound is ALREADY
+ * stamped `posterior_updated_at`, the posterior is not fired again. This makes
+ * the function safe to call more than once for the same outbound — e.g. a
+ * classify-phase degraded retry (chunk 9) that fired the posterior then failed
+ * at generation will, on the next sweep tick, find the outbound already
+ * stamped and skip rather than double-update the arm.
  */
 export async function routeBanditPosterior(
   deps: HandleInboundDeps,
@@ -664,7 +671,7 @@ export async function routeBanditPosterior(
 ): Promise<void> {
   const { data, error } = await deps.serviceClient
     .from("messages")
-    .select("id, arm_id")
+    .select("id, arm_id, posterior_updated_at")
     .eq("conversation_id", input.conversationId)
     .eq("direction", "outbound")
     .order("sent_at", { ascending: false })
@@ -675,6 +682,12 @@ export async function routeBanditPosterior(
   const armId = data?.arm_id ?? null;
   if (!outboundId || !armId) {
     logStep("posterior_skip_no_arm", { conversation_id: input.conversationId });
+    return;
+  }
+  if (data?.posterior_updated_at) {
+    // The arm already had a posterior folded in for this outbound — firing
+    // again would double-count the evidence. Skip (decision 19 integrity).
+    logStep("posterior_skip_already_updated", { conversation_id: input.conversationId });
     return;
   }
 

@@ -13,7 +13,7 @@ import type { LapsedSupabaseClient } from "@lapsed/db";
 export type FakeRow = Record<string, unknown>;
 
 interface Filter {
-  kind: "eq" | "in" | "contains" | "gte" | "lt" | "lte" | "is";
+  kind: "eq" | "in" | "contains" | "gte" | "gt" | "lt" | "lte" | "is" | "not_is";
   col: string;
   value: unknown;
 }
@@ -64,9 +64,13 @@ function matches(row: FakeRow, filters: Filter[]): boolean {
     if (f.kind === "eq") return v === f.value;
     if (f.kind === "in") return (f.value as unknown[]).includes(v);
     if (f.kind === "gte") return (v as string) >= (f.value as string);
+    if (f.kind === "gt") return (v as string) > (f.value as string);
     if (f.kind === "lt") return (v as string) < (f.value as string);
     if (f.kind === "lte") return (v as string) <= (f.value as string);
     if (f.kind === "is") return f.value === null ? v === null || v === undefined : v === f.value;
+    if (f.kind === "not_is") {
+      return f.value === null ? v !== null && v !== undefined : v !== f.value;
+    }
     if (f.kind === "contains") {
       return Array.isArray(v) && (f.value as unknown[]).every((x) => v.includes(x));
     }
@@ -193,8 +197,17 @@ export function makeFakeSupabase(
       filters.push({ kind: "gte", col, value });
       return builder;
     };
+    builder.gt = (col: string, value: unknown) => {
+      filters.push({ kind: "gt", col, value });
+      return builder;
+    };
     builder.lt = (col: string, value: unknown) => {
       filters.push({ kind: "lt", col, value });
+      return builder;
+    };
+    builder.not = (col: string, op: string, value: unknown) => {
+      // Only the `.not(col, "is", null)` form is used by the codebase.
+      if (op === "is") filters.push({ kind: "not_is", col, value });
       return builder;
     };
     builder.lte = (col: string, value: unknown) => {

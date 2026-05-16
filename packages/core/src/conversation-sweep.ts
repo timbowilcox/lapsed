@@ -21,9 +21,18 @@ import type { LapsedSupabaseClient, Json } from "@lapsed/db";
 import { updatePosterior } from "./bandit";
 import { classifyReply, OPT_OUT_CONFIDENCE_THRESHOLD } from "./classify-reply";
 import { generateReply } from "./generate-reply";
-import { appendMessageEvent } from "./message-events";
-import { recordOptOut } from "./opt-out-registry";
+import { appendMessageEvent, DegradedModePhase } from "./message-events";
+import { recordOptOut, isOptedOut } from "./opt-out-registry";
 import { sendMessage } from "./send-message";
+
+/**
+ * Only degraded inbounds sent within this window are retried. Past it, the
+ * customer's moment has passed — a stale "we'll get back to you" reply is
+ * worse than none, and the no-reply sweep still folds the posterior in. This
+ * also bounds the retry: a persistently-failing inbound is abandoned rather
+ * than re-classified every night forever.
+ */
+export const DEGRADED_RETRY_WINDOW_DAYS = 3;
 import {
   routeBanditPosterior,
   loadConversationHistory,
@@ -71,12 +80,14 @@ export async function sweepNoReplyPosteriors(
     .eq("merchant_id", opts.merchantId)
     .eq("direction", "outbound")
     .is("posterior_updated_at", null)
+    .not("arm_id", "is", null)
     .lte("sent_at", cutoff);
   if (error) throw error;
 
   // Only campaign-driven outbounds carry an arm to update; a non-campaign
-  // reply (arm_id null) has no posterior and is left alone.
-  const stale = (data ?? []).filter((m) => m.arm_id !== null);
+  // reply (arm_id null) has no posterior. The `.not("arm_id", "is", null)`
+  // filter excludes them at the query level so they are not re-scanned nightly.
+  const stale = data ?? [];
 
   let sweptCount = 0;
   for (const m of stale) {
@@ -157,13 +168,27 @@ export async function retryDegradedReplies(
     stillDegraded: 0,
   };
 
-  const degraded = await loadOpenDegradedInbounds(deps.serviceClient, opts.merchantId);
+  const degraded = await loadOpenDegradedInbounds(
+    deps.serviceClient,
+    opts.merchantId,
+    now(),
+  );
 
   for (const entry of degraded) {
     const inbound = await loadInboundForRetry(deps.serviceClient, entry.inboundMessageId);
     if (!inbound) continue;
     const customerId = await loadConversationCustomer(deps.serviceClient, entry.conversationId);
     if (!customerId) continue;
+
+    // Decision 18: a customer who opted out between the original inbound and
+    // this sweep must not get a retried reply. Pre-flight before the LLM calls.
+    if (await isOptedOut(deps.serviceClient, opts.merchantId, customerId)) {
+      logStructured("degraded_retry_skipped_opted_out", {
+        merchant_id: opts.merchantId,
+        conversation_id: entry.conversationId,
+      });
+      continue;
+    }
 
     try {
       // Re-classify the deferred inbound.
@@ -286,15 +311,24 @@ export async function retryDegradedReplies(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns degraded inbounds that have NOT yet been replied to. A degraded
- * inbound has a `degraded_mode` event; "no reply yet" means no outbound
- * message exists on the conversation at or after the inbound's sent_at (the
- * synchronous fallback TwiML is never persisted as a messages row).
+ * Returns at most ONE open degraded inbound PER CONVERSATION — the latest one
+ * still awaiting a reply. Rationale: a conversation that degraded several
+ * times should get a single fresh reply addressing the customer's most recent
+ * message, not a backlog of stale replies. "Open" means no outbound message
+ * exists strictly after that inbound's sent_at (the synchronous fallback TwiML
+ * is never persisted as a messages row). Only inbounds within
+ * DEGRADED_RETRY_WINDOW_DAYS are returned — older ones are abandoned (the
+ * no-reply sweep still folds the posterior in), which bounds the retry.
  */
 async function loadOpenDegradedInbounds(
   serviceClient: LapsedSupabaseClient,
   merchantId: string,
+  now: Date,
 ): Promise<DegradedEntry[]> {
+  const windowStart = new Date(
+    now.getTime() - DEGRADED_RETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
   const { data, error } = await serviceClient
     .from("message_events")
     .select("message_id, conversation_id, payload")
@@ -302,7 +336,11 @@ async function loadOpenDegradedInbounds(
     .eq("event_type", "degraded_mode");
   if (error) throw error;
 
-  const open: DegradedEntry[] = [];
+  // Reduce to the latest in-window degraded inbound per conversation.
+  const latestByConversation = new Map<
+    string,
+    { inboundMessageId: string; conversationId: string; phase: string; sentAt: string }
+  >();
   for (const ev of data ?? []) {
     if (!ev.message_id) continue;
     const inbound = await serviceClient
@@ -312,22 +350,43 @@ async function loadOpenDegradedInbounds(
       .maybeSingle();
     if (inbound.error) throw inbound.error;
     if (!inbound.data) continue;
+    const sentAt = inbound.data.sent_at as string;
+    if (sentAt < windowStart) continue; // outside the retry window — abandon
 
+    // Validate the phase against the enum; an unknown value cannot drive the
+    // posterior decision. (routeBanditPosterior is itself idempotent, so a
+    // wrong guess cannot double-fire — but validate for correctness anyway.)
+    const phaseParsed = DegradedModePhase.safeParse(payloadString(ev.payload, "phase"));
+    const phase = phaseParsed.success ? phaseParsed.data : "generate";
+
+    const prior = latestByConversation.get(ev.conversation_id);
+    if (!prior || sentAt > prior.sentAt) {
+      latestByConversation.set(ev.conversation_id, {
+        inboundMessageId: ev.message_id,
+        conversationId: ev.conversation_id,
+        phase,
+        sentAt,
+      });
+    }
+  }
+
+  // Keep only conversations with no outbound AFTER the latest degraded inbound.
+  const open: DegradedEntry[] = [];
+  for (const entry of latestByConversation.values()) {
     const reply = await serviceClient
       .from("messages")
       .select("id")
-      .eq("conversation_id", ev.conversation_id)
+      .eq("conversation_id", entry.conversationId)
       .eq("direction", "outbound")
-      .gte("sent_at", inbound.data.sent_at)
+      .gt("sent_at", entry.sentAt)
       .limit(1)
       .maybeSingle();
     if (reply.error) throw reply.error;
     if (reply.data) continue; // already replied — nothing to retry
-
     open.push({
-      inboundMessageId: ev.message_id,
-      conversationId: ev.conversation_id,
-      phase: payloadString(ev.payload, "phase") ?? "classify",
+      inboundMessageId: entry.inboundMessageId,
+      conversationId: entry.conversationId,
+      phase: entry.phase,
     });
   }
   return open;

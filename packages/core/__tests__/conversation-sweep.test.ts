@@ -212,7 +212,14 @@ function deps(fake: ReturnType<typeof makeFakeSupabase>, classify: unknown, gene
   };
 }
 
-const retryOpts = { merchantId: MERCHANT, fromNumber: "+18888800461", outboundDailyCap: 200 };
+// A fixed clock so the DEGRADED_RETRY_WINDOW_DAYS window is deterministic
+// relative to the seeded inbound sent_at values (2026-05-15).
+const retryOpts = {
+  merchantId: MERCHANT,
+  fromNumber: "+18888800461",
+  outboundDailyCap: 200,
+  now: () => new Date("2026-05-16T12:00:00.000Z"),
+};
 
 describe("retryDegradedReplies", () => {
   it("re-classifies, generates, and sends a reply for a degraded inbound", async () => {
@@ -272,5 +279,47 @@ describe("retryDegradedReplies", () => {
     expect(first.retried).toBe(1);
     const second = await retryDegradedReplies(deps(fake, POSITIVE, REPLY), retryOpts);
     expect(second.retried).toBe(0);
+  });
+
+  it("does NOT re-fire the posterior when a classify-phase retry fails at generate twice", async () => {
+    // First retry: classify succeeds → posterior fires (alpha 1→2); generate
+    // throws → stillDegraded, no reply. Second retry: classify succeeds again,
+    // but routeBanditPosterior finds the outbound already stamped → skips.
+    const fake = seedDegraded({ phase: "classify" });
+    const first = await retryDegradedReplies(
+      deps(fake, POSITIVE, { throws: new Error("anthropic 500") }),
+      retryOpts,
+    );
+    expect(first.stillDegraded).toBe(1);
+    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+
+    const second = await retryDegradedReplies(
+      deps(fake, POSITIVE, { throws: new Error("anthropic 500") }),
+      retryOpts,
+    );
+    expect(second.stillDegraded).toBe(1);
+    // alpha must still be 2 — the posterior was NOT double-fired.
+    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+  });
+
+  it("counts a capped send as stillDegraded (sendMessage ok:false)", async () => {
+    const fake = seedDegraded();
+    const result = await retryDegradedReplies(deps(fake, POSITIVE, REPLY), {
+      ...retryOpts,
+      outboundDailyCap: 0, // kill switch — sendMessage returns cap_reached
+    });
+    expect(result.retried).toBe(0);
+    expect(result.stillDegraded).toBe(1);
+  });
+
+  it("counts an opt-out even when the customer has no phone (recordOptOut skipped)", async () => {
+    const fake = seedDegraded();
+    (fake.tables.customers[0] as FakeRow).phone = null;
+    const result = await retryDegradedReplies(
+      deps(fake, { sentiment: "negative", intent: "opt_out", confidence: 0.95 }, REPLY),
+      retryOpts,
+    );
+    expect(result.optedOut).toBe(1);
+    expect(fake.tables.customer_opt_outs ?? []).toHaveLength(0);
   });
 });
