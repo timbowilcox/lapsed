@@ -157,6 +157,11 @@ export {
 } from "./bandit-order";
 
 export {
+  computeLtvRestoration,
+  type LtvRestorationResult,
+} from "./ltv-restoration";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,

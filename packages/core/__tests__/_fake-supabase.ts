@@ -153,11 +153,15 @@ export function makeFakeSupabase(
         const ignoreDuplicates = upsertOpts?.ignoreDuplicates === true;
         for (const raw of rowsArr) {
           const row = applyDefaults(table, raw);
-          if (ignoreDuplicates && conflictCols.length > 0) {
-            const dup = tableOf(table).some((existing) =>
-              conflictCols.every((col) => existing[col] === row[col]),
+          if (conflictCols.length > 0) {
+            const existing = tableOf(table).find((r) =>
+              conflictCols.every((col) => r[col] === row[col]),
             );
-            if (dup) continue; // ON CONFLICT DO NOTHING
+            if (existing) {
+              // ON CONFLICT: DO NOTHING when ignoreDuplicates, else DO UPDATE.
+              if (!ignoreDuplicates) Object.assign(existing, row);
+              continue;
+            }
           }
           tableOf(table).push(row);
         }
