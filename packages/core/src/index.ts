@@ -138,6 +138,16 @@ export {
 } from "./propose-campaign";
 
 export {
+  approveProposal,
+  rejectProposal,
+  editProposal,
+  type ApproveProposalResult,
+  type RejectProposalResult,
+  type EditProposalResult,
+  type VariantEdit,
+} from "./campaign-approval";
+
+export {
   initializeBanditArm,
   updatePosterior,
   thompsonSample,
