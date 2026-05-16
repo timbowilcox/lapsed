@@ -22,6 +22,9 @@ Read CLAUDE.md, section "Architectural load-bearing decisions". Internalize the 
 10. **PII redaction mandatory before any LLM call (Sprint 05).** Two gates: orchestrator pre-flight (`assertNoPii` on redacted snapshot) and synthesizer entry boundary. Cannot be bypassed by any caller. Throws `PiiLeakError` rather than silently passing PII through.
 11. **Functional agent identity, no personal names (Sprint 05).** Role descriptors drawn from a closed `ROLE_TAXONOMY` const union enforced at type level. DB `agent_profiles_role_descriptor_shape` CHECK is the backstop. No freeform persona text input anywhere.
 12. **Voice events are event-sourced (Sprint 05).** All voice state changes write to `voice_events` via `appendVoiceEvent` (Zod-validated, `.strict()` payloads). `voice_events` has UPDATE/DELETE/TRUNCATE-blocking triggers. `agent_profiles` and `voice_versions` are materialized caches regeneratable from events.
+13. **Campaign proposals merchant-approved before any send (Sprint 06).** No auto-launch. Sprint 07's conversation engine queries `getReadyCampaigns()` which filters to proposals where the latest event is `campaign_approved`. Auto-approve timers or escalation paths are violations.
+14. **Bandit arms versioned and immutable (Sprint 06).** Arms created at approval time are never UPDATE'd in identity/contract. Posterior statistics updates are a separate pattern (writes to alpha/beta on the existing row). Editing a campaign creates new arms via a new proposal version.
+15. **Group snapshots frozen at proposal creation (Sprint 06).** `campaign_group_snapshots` rows are written at proposal time. Subsequent changes to the underlying group definition do not change the campaign's customer set. Attribution math depends on this — never live-recompute a campaign's targets.
 
 # What to audit
 
