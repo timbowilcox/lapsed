@@ -84,7 +84,8 @@ async function seedProposal(
      returning id`,
     [merchantId, groupSlug, generatedAt],
   );
-  const proposalId = rows[0]!.id;
+  if (!rows[0]) throw new Error("seedProposal: proposal insert returned no row");
+  const proposalId = rows[0].id;
 
   await pg.query(
     `insert into public.campaign_arms
@@ -100,7 +101,10 @@ async function seedProposal(
     [proposalId, merchantId],
   );
 
-  for (let i = 0; i < 5; i++) {
+  // 10 customers, 1 held out — a 10% holdout, matching the production rate
+  // (decision 5). The approval surface renders these counts, so the test
+  // asserts on them rather than seeding decorative, unverified data.
+  for (let i = 0; i < 10; i++) {
     await pg.query(
       `insert into public.campaign_group_snapshots
          (proposal_id, merchant_id, customer_id, included_in_holdout)
@@ -153,7 +157,8 @@ test.beforeAll(async () => {
       `select id from public.merchants where shopify_shop_domain = $1`,
       [TEST_MERCHANT_SHOP],
     );
-    merchantId = rows[0]!.id;
+    if (!rows[0]) throw new Error("test merchant not found after seedTestMerchant()");
+    merchantId = rows[0].id;
 
     // Idempotent: clear anything a prior aborted run left behind.
     await purgeCampaignData(pg);
@@ -196,6 +201,11 @@ test("approving a proposal moves it to the Approved tab and initializes bandit a
   await expect(page.getByText("Variant 1", { exact: true })).toBeVisible();
   await expect(page.getByText("Variant 2", { exact: true })).toBeVisible();
   await expect(page.getByText("Variant 3", { exact: true })).toBeVisible();
+  // The seeded snapshot — 10 customers, 1 held out (a 10% holdout) — surfaces
+  // in the detail header, so the seed data is verified, not decorative.
+  await expect(
+    page.getByText(/10 customers · 1 held back to measure lift/),
+  ).toBeVisible();
 
   // Approve — the dialog closes and the proposal leaves the pending list.
   await page.getByRole("button", { name: "Approve campaign" }).click();
@@ -219,8 +229,9 @@ test("approving a proposal moves it to the Approved tab and initializes bandit a
   await expect(page.getByText("Mean response rate")).toBeVisible();
   const armRows = page.locator("tbody tr");
   await expect(armRows).toHaveCount(3);
-  // Beta(1,1) mean is 50.0%; observation counts are 0 (no campaign has run).
-  await expect(page.getByText("50.0%").first()).toBeVisible();
+  // Each of the 3 arms initialized at Beta(1,1) — mean 50.0% — so the mean
+  // column shows 50.0% exactly three times (decision 4: state is per arm).
+  await expect(page.getByText("50.0%")).toHaveCount(3);
 
   // getReadyCampaigns — the surface Sprint 07's conversation engine consumes —
   // now returns the approved proposal (decision 13: ready only after approval).
