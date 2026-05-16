@@ -56,7 +56,10 @@ function makeServiceClient(opts: MockOptions = {}): LapsedSupabaseClient {
   const capRow = {
     id: "cap-id",
     daily_token_cap: opts.dailyTokenCap ?? 10_000_000,
-    period_start: "2026-05-15",
+    // Today's UTC date — the cap logic resets tokens_used_today when
+    // period_start < today, so a hardcoded date makes the fixture stale
+    // (and tokensUsedToday silently ignored) once the calendar advances.
+    period_start: new Date().toISOString().slice(0, 10),
     tokens_used_today: opts.tokensUsedToday ?? 0,
   };
 
