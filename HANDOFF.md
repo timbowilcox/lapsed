@@ -81,7 +81,7 @@ The mid-sprint checkpoint ran after chunk 7 and returned **APPROVE**.
 
 **Implementation evidence:**
 - Primary file: `packages/core/src/campaign-approval.ts:216-404` (`editProposal` — inserts a new `campaign_proposals` row with `version_number + 1` and `supersedes_proposal_id` set; new arms; the prior row is retained)
-- Supporting files: `packages/db/src/queries.ts:680-826` (`deriveProposalState` / `getProposalById` — status derived from the `campaign_events` log, never the cache), `packages/db/supabase/migrations/0007_campaign_proposals.sql:112-114` (partial-unique index keeps the version lineage linear)
+- Supporting files: `packages/db/src/queries.ts:680-721` (`deriveProposalState`) and `:835-893` (`getProposalById`) — status derived from the `campaign_events` log, never the cache; `packages/db/supabase/migrations/0007_campaign_proposals.sql:112-114` (partial-unique index keeps the version lineage linear)
 
 **Test evidence:**
 - Test file: `packages/core/__tests__/campaign-approval.test.ts:220-396` (`editProposal` describe block)
@@ -121,7 +121,7 @@ The mid-sprint checkpoint ran after chunk 7 and returned **APPROVE**.
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/campaign-designer.ts:322-` (`designCampaign` — Sonnet 4.6 `tool_choice` structured output, `maxRetries: 0` + manual retry loop at `:366`)
+- Primary file: `packages/core/src/campaign-designer.ts:322-424` (`designCampaign` — Sonnet 4.6 `tool_choice` structured output, `maxRetries: 0` + manual retry loop at `:366`)
 - Supporting files: `campaign-designer.ts:182` (tool schema `minItems: 3` / `maxItems: 3`), `:24` (`MAX_RETRIES = 3`), `:131` (`CampaignProposalSchema` with per-axis diversity refinement)
 
 **Test evidence:**
