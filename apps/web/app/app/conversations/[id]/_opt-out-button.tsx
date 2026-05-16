@@ -20,12 +20,15 @@ export function OptOutButton({ conversationId }: { conversationId: string }) {
         method: "POST",
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        toast.error(
-          body.error === "no_phone"
-            ? "This customer has no phone number on file."
-            : "Could not record the opt-out. Please try again.",
-        );
+        // Branch on the HTTP status — a 401/404 will never succeed on retry,
+        // so "please try again" would be misleading.
+        if (res.status === 401) {
+          toast.error("Your session has expired — please reload the page.");
+        } else if (res.status === 404) {
+          toast.error("This conversation no longer exists.");
+        } else {
+          toast.error("Could not record the opt-out. Please try again.");
+        }
         return;
       }
       toast.success("Customer marked as opted out.");

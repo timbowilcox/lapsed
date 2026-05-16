@@ -1111,7 +1111,7 @@ interface CustomerNameRow {
 }
 
 /** Best-effort display name: full name, else email, else a short gid suffix. */
-function customerDisplayName(row: CustomerNameRow | undefined, gid: string): string {
+export function customerDisplayName(row: CustomerNameRow | undefined, gid: string): string {
   if (row) {
     const full = [row.first_name, row.last_name].filter((p) => p && p.trim()).join(" ");
     if (full) return full;
@@ -1121,14 +1121,25 @@ function customerDisplayName(row: CustomerNameRow | undefined, gid: string): str
   return `Customer ${tail}`;
 }
 
+/** Secondary identifier for a list row: email, else a short gid suffix. */
+export function customerHandleOf(row: CustomerNameRow | undefined, gid: string): string {
+  if (row?.email && row.email.trim()) return row.email;
+  const tail = gid.split("/").pop() ?? gid;
+  return `#${tail}`;
+}
+
 export interface ConversationListItem {
   /** conversations.id — the route param for the detail view. */
   conversationId: string;
   /** shopify_customer_gid. */
   customerId: string;
   customerName: string;
+  /** Secondary identifier shown under the name — email, else a short gid. */
+  customerHandle: string;
   /** Truncated body of the most recent message; "" when the thread is empty. */
   latestPreview: string;
+  /** Lower-cased concatenation of every message body — backs full-text search. */
+  searchText: string;
   latestDirection: "inbound" | "outbound" | null;
   /** sentiment of the most recent INBOUND message; null if none / unclassified. */
   latestInboundSentiment: string | null;
@@ -1156,6 +1167,20 @@ interface ConvMessageRow {
 
 const PREVIEW_MAX = 90;
 
+/**
+ * Upper bound on the per-merchant message scan in getConversationList.
+ *
+ * KNOWN SCALING LIMIT (mirrors getProposalsByStatus): getConversationList
+ * assembles the list in memory from a single bounded message fetch — the most
+ * recent MESSAGE_SCAN_LIMIT messages, newest first. For a v1 merchant this
+ * covers every thread comfortably. A merchant who accumulates more than this
+ * many messages would see stale previews on their least-active threads until
+ * the latest-message-per-conversation reduction moves into SQL (a denormalized
+ * `conversations.latest_message` column, or a lateral join). Tracked as a
+ * post-v1 follow-up — see HANDOFF.md.
+ */
+const MESSAGE_SCAN_LIMIT = 5000;
+
 /** Returns every conversation for a merchant, newest activity first (chunk 10). */
 export async function getConversationList(
   client: LapsedSupabaseClient,
@@ -1176,7 +1201,9 @@ export async function getConversationList(
       .select(
         "id, conversation_id, direction, body, sentiment, intent, campaign_id, arm_id, status, sent_at",
       )
-      .eq("merchant_id", merchantId),
+      .eq("merchant_id", merchantId)
+      .order("sent_at", { ascending: false })
+      .limit(MESSAGE_SCAN_LIMIT),
     client
       .from("customers")
       .select("shopify_customer_gid, first_name, last_name, email")
@@ -1203,9 +1230,13 @@ export async function getConversationList(
   const slugByProposal = new Map((proposalsRes.data ?? []).map((p) => [p.id, p.group_slug]));
 
   return conversations.map((conv) => {
-    const msgs = (messagesByConversation.get(conv.id) ?? [])
-      .slice()
-      .sort((a, b) => (a.sent_at < b.sent_at ? 1 : a.sent_at > b.sent_at ? -1 : 0));
+    // Newest-first, tie-broken deterministically on id so the latest-message
+    // reduction (preview / hasUnread) is stable across renders when two
+    // messages share an exact sent_at.
+    const msgs = (messagesByConversation.get(conv.id) ?? []).slice().sort((a, b) => {
+      if (a.sent_at !== b.sent_at) return a.sent_at < b.sent_at ? 1 : -1;
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+    });
     const latest = msgs[0];
     const latestInbound = msgs.find((m) => m.direction === "inbound");
     const sourceSlugs = Array.from(
@@ -1216,11 +1247,14 @@ export async function getConversationList(
           .filter((s): s is string => Boolean(s)),
       ),
     );
+    const customerRow = customerByGid.get(conv.customer_id);
     return {
       conversationId: conv.id,
       customerId: conv.customer_id,
-      customerName: customerDisplayName(customerByGid.get(conv.customer_id), conv.customer_id),
+      customerName: customerDisplayName(customerRow, conv.customer_id),
+      customerHandle: customerHandleOf(customerRow, conv.customer_id),
       latestPreview: latest ? truncate(latest.body, PREVIEW_MAX) : "",
+      searchText: msgs.map((m) => m.body).join("  ").toLowerCase(),
       latestDirection: latest ? (latest.direction === "inbound" ? "inbound" : "outbound") : null,
       latestInboundSentiment: latestInbound?.sentiment ?? null,
       messageCount: conv.message_count,
@@ -1316,12 +1350,17 @@ export async function getConversationThread(
       .limit(1)
       .maybeSingle(),
     campaignIds.length > 0
-      ? client.from("campaign_proposals").select("id, group_slug").in("id", campaignIds)
+      ? client
+          .from("campaign_proposals")
+          .select("id, group_slug")
+          .eq("merchant_id", merchantId)
+          .in("id", campaignIds)
       : Promise.resolve({ data: [] as Array<{ id: string; group_slug: string }>, error: null }),
     armIds.length > 0
       ? client
           .from("campaign_arms")
           .select("bandit_arm_id, variant_index, tone")
+          .eq("merchant_id", merchantId)
           .in("bandit_arm_id", armIds)
       : Promise.resolve({
           data: [] as Array<{ bandit_arm_id: string; variant_index: number; tone: string }>,
@@ -1370,7 +1409,7 @@ export async function getConversationThread(
 }
 
 /** Truncates a string for a list preview, appending an ellipsis when cut. */
-function truncate(s: string, max: number): string {
+export function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1).trimEnd()}…`;
 }

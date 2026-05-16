@@ -151,8 +151,14 @@ export async function assertNotOptedOut(
 const RecordOptOutInputSchema = z.object({
   merchantId: z.string().uuid("merchantId must be a UUID"),
   customerId: z.string().min(1, "customerId is required"),
-  /** Customer phone, E.164. The inbound webhook supplies Twilio's `From`. */
-  phoneNumber: z.string().min(1, "phoneNumber is required"),
+  /**
+   * Customer phone, E.164. The inbound webhook supplies Twilio's `From`. May
+   * be empty for a merchant_manual opt-out of a customer with no phone on
+   * file — decision 18 requires the opt-out to ALWAYS be recordable; the
+   * phone is needed only for the (best-effort) Twilio leg, not for the
+   * customer_opt_outs source-of-truth row.
+   */
+  phoneNumber: z.string(),
   source: OptOutSource,
   /** The inbound message that triggered the opt-out; absent for merchant_manual. */
   inboundMessageId: z.string().uuid().optional(),
@@ -219,8 +225,19 @@ export async function recordOptOut(
 
   // 2. Twilio leg (decision 18 safety net). A failure here does NOT throw —
   //    the opt-out is already honored by our table — but it IS a critical
-  //    structured-log event so the divergence is observable.
+  //    structured-log event so the divergence is observable. With no phone on
+  //    file there is nothing for the provider to suppress; the table row
+  //    still stands as the enforcement gate.
   let twilioRecorded = true;
+  if (v.phoneNumber.trim().length === 0) {
+    twilioRecorded = false;
+    logStructured("opt_out_no_phone_for_twilio_leg", {
+      merchant_id: v.merchantId,
+      customer_id: v.customerId,
+      source: v.source,
+    });
+    return { recorded: true, alreadyOptedOut: false, twilioRecorded };
+  }
   try {
     await twilioClient.recordOptOut(v.phoneNumber);
   } catch (err) {

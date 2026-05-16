@@ -366,10 +366,19 @@ describe("recordOptOut — input validation", () => {
     await expect(recordOptOut(client, twilio, input({ customerId: "" }))).rejects.toThrow();
   });
 
-  it("rejects an empty phoneNumber", async () => {
-    const { client } = makeFakeSupabase();
-    const { client: twilio } = fakeTwilio();
-    await expect(recordOptOut(client, twilio, input({ phoneNumber: "" }))).rejects.toThrow();
+  it("records a merchant_manual opt-out even with an empty phoneNumber (decision 18)", async () => {
+    const { client, tables } = makeFakeSupabase();
+    const { client: twilio, optOutCalls } = fakeTwilio();
+    const result = await recordOptOut(
+      client,
+      twilio,
+      input({ phoneNumber: "", source: "merchant_manual" }),
+    );
+    // The opt-out IS recorded — the table is the source of truth.
+    expect(result).toEqual({ recorded: true, alreadyOptedOut: false, twilioRecorded: false });
+    expect(tables.customer_opt_outs).toHaveLength(1);
+    // No phone → the Twilio leg is skipped (nothing to suppress).
+    expect(optOutCalls).toHaveLength(0);
   });
 
   it("rejects an invalid source", async () => {

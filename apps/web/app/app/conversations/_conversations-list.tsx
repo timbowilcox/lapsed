@@ -69,7 +69,10 @@ export function ConversationsList({ items }: { items: ConversationListItem[] }) 
       const matchesSearch =
         q.length === 0 ||
         item.customerName.toLowerCase().includes(q) ||
-        item.latestPreview.toLowerCase().includes(q);
+        item.customerHandle.toLowerCase().includes(q) ||
+        // searchText is the lower-cased concatenation of every message body —
+        // search covers full message content, not just the truncated preview.
+        item.searchText.includes(q);
       const matchesStatus =
         status === "all" ||
         (status === "unread" && item.hasUnread) ||
@@ -152,6 +155,7 @@ export function ConversationsList({ items }: { items: ConversationListItem[] }) 
             <TableRow>
               <TableHead>Customer</TableHead>
               <TableHead>Latest message</TableHead>
+              <TableHead>Messages</TableHead>
               <TableHead>Campaigns</TableHead>
               <TableHead>Last activity</TableHead>
               <TableHead>Latest reply</TableHead>
@@ -166,22 +170,28 @@ export function ConversationsList({ items }: { items: ConversationListItem[] }) 
                     className="flex items-center gap-12 hover:text-ink-900"
                   >
                     <Avatar initials={initialsOf(item.customerName)} size="sm" />
-                    <span className="flex items-center gap-8">
-                      <span className="text-body-strong text-ink-900">{item.customerName}</span>
-                      {item.hasUnread && (
-                        <>
-                          <span
-                            className="inline-block h-6 w-6 rounded-full bg-lavender-400"
-                            aria-hidden="true"
-                          />
-                          <span className="sr-only">Unread reply</span>
-                        </>
-                      )}
+                    <span className="flex flex-col">
+                      <span className="flex items-center gap-8">
+                        <span className="text-body-strong text-ink-900">{item.customerName}</span>
+                        {item.hasUnread && (
+                          <>
+                            <span
+                              className="inline-block h-6 w-6 rounded-full bg-lavender-400"
+                              aria-hidden="true"
+                            />
+                            <span className="sr-only">Unread reply</span>
+                          </>
+                        )}
+                      </span>
+                      <span className="text-mini text-ink-500">{item.customerHandle}</span>
                     </span>
                   </Link>
                 </TableCell>
                 <TableCell className="max-w-[300px] truncate text-mini text-ink-500">
                   {item.latestPreview || "—"}
+                </TableCell>
+                <TableCell className="text-mini text-ink-500 tabular-nums">
+                  {item.messageCount}
                 </TableCell>
                 <TableCell>
                   <span className="flex flex-wrap gap-4">

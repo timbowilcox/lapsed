@@ -51,6 +51,10 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  // The phone is only needed for the (best-effort) Twilio leg. Decision 18
+  // requires the opt-out to ALWAYS be recordable, so a missing phone is NOT a
+  // block — recordOptOut writes the customer_opt_outs source-of-truth row
+  // regardless and simply skips the provider call when the phone is empty.
   const { data: customer, error: custErr } = await client
     .from("customers")
     .select("phone")
@@ -59,9 +63,6 @@ export async function POST(
     .maybeSingle();
   if (custErr) {
     return NextResponse.json({ error: "lookup_failed" }, { status: 500 });
-  }
-  if (!customer?.phone || customer.phone.trim().length === 0) {
-    return NextResponse.json({ error: "no_phone" }, { status: 409 });
   }
 
   const twilioClient = createTwilioClient({
@@ -73,7 +74,7 @@ export async function POST(
     const result = await recordOptOut(client, twilioClient, {
       merchantId: merchant.id,
       customerId: conv.customer_id,
-      phoneNumber: customer.phone,
+      phoneNumber: customer?.phone ?? "",
       source: "merchant_manual",
     });
     return NextResponse.json(result);

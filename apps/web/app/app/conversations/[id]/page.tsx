@@ -167,7 +167,8 @@ export default async function ConversationDetailPage({ params, searchParams }: P
                     rel="noreferrer"
                     className="text-meta font-medium text-lavender-700 hover:text-ink-900"
                   >
-                    Open in Shopify →
+                    Open in Shopify <span aria-hidden="true">→</span>
+                    <span className="sr-only">(opens in a new tab)</span>
                   </a>
                 )}
               </div>
@@ -196,7 +197,7 @@ function MessageBubble({
           isInbound ? "bg-cream-200 text-ink-900" : "bg-lavender-400 text-ink-900"
         }`}
       >
-        <div className="mb-4 text-[11px] uppercase tracking-wide text-ink-700 opacity-70">
+        <div className="mb-4 text-[11px] uppercase tracking-wide text-ink-700">
           {isInbound ? customerName : "lapsed.ai"}
         </div>
         <div className="text-body">{message.body}</div>
@@ -216,17 +217,17 @@ function MessageBubble({
           <div className="mt-8 flex flex-wrap items-center gap-6">
             <Badge tone={badge.tone}>{badge.label}</Badge>
             {message.campaignSlug && (
-              <span className="text-[11px] text-ink-700 opacity-70">
+              <span className="text-[11px] text-ink-700">
                 {groupLabel(message.campaignSlug)}
               </span>
             )}
             {message.armLabel && (
-              <span className="text-[11px] text-ink-700 opacity-70">· {message.armLabel}</span>
+              <span className="text-[11px] text-ink-700">· {message.armLabel}</span>
             )}
           </div>
         )}
 
-        <div className="mt-6 text-[11px] text-ink-700 opacity-60">
+        <div className="mt-6 text-[11px] text-ink-700">
           {formatDateTime(message.sentAt)}
         </div>
       </div>
