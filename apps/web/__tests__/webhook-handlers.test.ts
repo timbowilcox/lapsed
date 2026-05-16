@@ -25,11 +25,17 @@ type UpsertCall = { table: string; row: Record<string, unknown>; opts?: unknown 
 type UpdateCall = { table: string; values: Record<string, unknown> };
 type RpcCall = { fn: string; args: Record<string, unknown> };
 
-function makeClient() {
+function makeClient(opts: { customerExists?: boolean; orderExists?: boolean } = {}) {
   const upserts: UpsertCall[] = [];
   const updates: UpdateCall[] = [];
   const rpcs: RpcCall[] = [];
   const tables = new Set<string>();
+  // When true, the customers select().eq().eq().maybeSingle() read resolves to
+  // a row — used by ordersPaid tests to exercise the customer-matched path.
+  const customerRow = opts.customerExists ? { id: "existing-customer-id" } : null;
+  // When true, the orders select().eq().eq().maybeSingle() read resolves to a
+  // row — used by ordersPaid tests to exercise the redelivery (idempotency) path.
+  const orderRow = opts.orderExists ? { id: "existing-order-id" } : null;
 
   // Stateful store: customer_events upserts are returned by subsequent reads
   // so materializeCustomer can rebuild identity from the event just written.
@@ -80,6 +86,11 @@ function makeClient() {
 
       if (table === "orders") {
         return {
+          // ordersPaid redelivery pre-check: select().eq().eq().maybeSingle()
+          select: vi.fn(() => ({
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: orderRow, error: null }),
+          })),
           upsert: vi.fn((row: Record<string, unknown>, opts?: unknown) => {
             upserts.push({ table, row, opts });
             return Promise.resolve({ data: null, error: null });
@@ -89,11 +100,11 @@ function makeClient() {
 
       if (table === "customers") {
         return {
-          // materializeCustomer profile_version read path:
-          // select().eq().eq().maybeSingle()
+          // materializeCustomer profile_version read path + ordersPaid
+          // customer-match read path: select().eq().eq().maybeSingle()
           select: vi.fn(() => ({
             eq: vi.fn().mockReturnThis(),
-            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            maybeSingle: vi.fn().mockResolvedValue({ data: customerRow, error: null }),
           })),
           // materializeCustomer upsert path:
           // upsert().select().maybeSingle()
@@ -378,6 +389,77 @@ describe("ordersPaid handler", () => {
     const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 1, customer: { id: 2 }, total_price: "10.00", created_at: "2024-01-01T00:00:00Z" }, serviceClient: client });
     expect(logSpy).toHaveBeenCalledWith(expect.not.stringContaining(SHOP_DOMAIN));
+    logSpy.mockRestore();
+  });
+
+  it("appends an unmatched_customer order event when the customer is not in our table", async () => {
+    const client = makeClient({ customerExists: false });
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 77, customer: { id: 9 }, total_price: "20.00", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+
+    const orderEvents = client._upserts.filter((u) => u.table === "order_events");
+    expect(orderEvents.map((e) => e.row.event_type).sort()).toEqual(["order_paid", "unmatched_customer"]);
+    // The order is still persisted — unmatched orders are never dropped.
+    expect(client._upserts.find((u) => u.table === "orders")?.row.shopify_order_gid).toBe(
+      "gid://shopify/Order/77",
+    );
+  });
+
+  it("does NOT append unmatched_customer when the customer is already matched", async () => {
+    const client = makeClient({ customerExists: true });
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 78, customer: { id: 9 }, total_price: "20.00", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+
+    const orderEvents = client._upserts.filter((u) => u.table === "order_events");
+    expect(orderEvents.map((e) => e.row.event_type)).toEqual(["order_paid"]);
+    // The order is persisted and the customer counters are incremented (a
+    // first delivery — not a redelivery).
+    expect(client._upserts.some((u) => u.table === "orders")).toBe(true);
+    expect(client._rpcs.map((r) => r.fn)).toEqual(["increment_customer_order"]);
+  });
+
+  it("a redelivery (order already ingested) does NOT re-run the increment RPC", async () => {
+    const client = makeClient({ customerExists: true, orderExists: true });
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 78, customer: { id: 9 }, total_price: "20.00", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+    // increment_customer_order would double-count order_count + LTV — it must
+    // be skipped on a redelivery. appendOrderEvent / orders upsert remain
+    // idempotent on their own keys, so they may still run harmlessly.
+    expect(client._rpcs).toHaveLength(0);
+  });
+
+  it("redelivery flag is surfaced in the structured log", async () => {
+    const client = makeClient({ customerExists: true, orderExists: true });
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 78, customer: { id: 9 }, total_price: "20.00", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+    expect(logSpy.mock.calls[0]?.[0] as string).toContain("redelivery=true");
+    logSpy.mockRestore();
+  });
+
+  it("converts a fractional price to integer cents without drift", async () => {
+    const client = makeClient({ customerExists: true });
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 81, customer: { id: 9 }, total_price: "19.99", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+    const orderUpsert = client._upserts.find((u) => u.table === "orders");
+    expect(orderUpsert?.row.total_price_cents).toBe(1999);
+    expect(client._rpcs[0]?.args.p_amount_cents).toBe(1999);
+  });
+
+  it("structured log carries merchant_id, order_gid, customer_matched, and elapsed_ms", async () => {
+    const client = makeClient({ customerExists: true });
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 79, customer: { id: 9 }, total_price: "20.00", created_at: "2026-05-01T00:00:00Z" }, serviceClient: client });
+    const line = logSpy.mock.calls[0]?.[0] as string;
+    expect(line).toContain(`merchant=${MERCHANT_ID}`);
+    expect(line).toContain("order_gid=gid://shopify/Order/79");
+    expect(line).toContain("customer_matched=true");
+    expect(line).toMatch(/elapsed_ms=\d+/);
+    logSpy.mockRestore();
+  });
+
+  it("a guest order (no customer) is not persisted but is logged", async () => {
+    const client = makeClient();
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    await ordersPaid({ merchantId: MERCHANT_ID, shopDomain: SHOP_DOMAIN, topic: "orders/paid", payload: { id: 80, customer: null }, serviceClient: client });
+    expect(client._upserts).toHaveLength(0);
+    expect(client._rpcs).toHaveLength(0);
+    expect(logSpy.mock.calls[0]?.[0] as string).toContain("guest=true");
     logSpy.mockRestore();
   });
 });

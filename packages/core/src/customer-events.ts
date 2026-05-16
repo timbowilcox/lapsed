@@ -16,6 +16,10 @@ export const CustomerEventType = z.enum([
 export const OrderEventType = z.enum([
   "order_paid",
   "order_backfilled",
+  // Sprint 08: the order's Shopify customer was not found in our customers
+  // table at ingestion time. The order is still persisted; this event is the
+  // audit marker (chunk 2 / decision 25 — unmatched orders are never dropped).
+  "unmatched_customer",
 ]);
 
 export type CustomerEventType = z.infer<typeof CustomerEventType>;
