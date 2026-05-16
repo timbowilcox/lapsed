@@ -105,6 +105,30 @@ export {
 } from "./campaign-events";
 
 export {
+  designCampaign,
+  createCampaignClient,
+  parseCampaignProposal,
+  CampaignDesignError,
+  CampaignProposalSchema,
+  OFFER_TYPE_TAXONOMY,
+  SEND_TIME_WINDOWS,
+  PROMPT_VERSION as CAMPAIGN_PROMPT_VERSION,
+  SYSTEM_PROMPT_TEMPLATE as CAMPAIGN_SYSTEM_PROMPT_TEMPLATE,
+  MAX_RETRIES as CAMPAIGN_MAX_RETRIES,
+  type OfferType,
+  type SendTimeWindow,
+  type CampaignTone,
+  type CampaignVariant,
+  type ExpectedImpact,
+  type CampaignProposalDraft,
+  type GroupSummary,
+  type DesignCampaignInput,
+  type DesignCampaignResult,
+  type CampaignClientOptions,
+  type CampaignDesignReason,
+} from "./campaign-designer";
+
+export {
   initializeBanditArm,
   updatePosterior,
   thompsonSample,
