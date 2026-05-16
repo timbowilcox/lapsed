@@ -195,6 +195,25 @@ export {
 } from "./opt-out-registry";
 
 export {
+  classifyReply,
+  createClassifyClient,
+  parseReplyClassification,
+  ClassifyReplyError,
+  CLASSIFY_SYSTEM_PROMPT,
+  MAX_CLASSIFY_ATTEMPTS,
+  OPT_OUT_CONFIDENCE_THRESHOLD,
+  REPLY_SENTIMENTS,
+  REPLY_INTENTS,
+  type ReplySentiment,
+  type ReplyIntent,
+  type ReplyClassification,
+  type ClassifyReplyInput,
+  type ClassifyReplyResult,
+  type ClassifyReplyReason,
+  type ClassifyClientOptions,
+} from "./classify-reply";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
