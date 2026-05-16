@@ -8,11 +8,13 @@
 // remove) never change which customers a proposal targets — attribution math
 // in Sprint 08 reads the frozen snapshot, never a live recompute.
 //
-// Holdout assignment is deterministic: a customer is held out iff
-// hash(`${proposalId}::${customerId}`) modulo `divisor` === 0, where
-// `divisor = round(1 / holdoutRate)` (10 for the default 0.1 rate). The same
+// Holdout assignment is deterministic: a customer is held out iff the
+// SHA-256 hash of `${proposalId}::${customerId}`, normalized to the unit
+// interval [0, 1), falls below `holdoutRate` (0.1 by default). The same
 // (proposalId, customerId) pair always lands in or out of the holdout, so the
-// assignment is reproducible and the snapshot write is idempotent.
+// assignment is reproducible and the snapshot write is idempotent. The
+// fractional comparison honours any rate exactly — unlike a modulo-divisor
+// scheme, a rate like 0.15 yields ~15%, not a rounded 1/7th.
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -25,22 +27,19 @@ export const HOLDOUT_RATE_DEFAULT = 0.1;
 // Deterministic holdout assignment (pure)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Returns the holdout divisor for a given rate: a customer is held out when
- * the hash modulo this value is 0. rate 0.1 → 10, rate 0.2 → 5, etc.
- */
-function holdoutDivisor(holdoutRate: number): number {
-  return Math.max(1, Math.round(1 / holdoutRate));
-}
+/** 2^32 — the number of distinct values a 32-bit unsigned integer can take. */
+const UINT32_SPACE = 0x1_0000_0000;
 
 /**
  * Deterministically decides whether `customerId` is in the holdout for
  * `proposalId`. Pure: same inputs → same output, no I/O.
  *
- * Uses SHA-256 over `${proposalId}::${customerId}` truncated to a 32-bit
- * unsigned integer. SHA-256 has excellent uniform distribution, so the
- * modulo bucket is unbiased — every customer has a `holdoutRate` chance of
- * being held out, independent of group size or customer ordering.
+ * Uses SHA-256 over `${proposalId}::${customerId}`. The first 8 hex digits
+ * are read as a 32-bit unsigned integer (always < 2^32, so safe-integer) and
+ * normalized to [0, 1). SHA-256 has excellent uniform distribution, so the
+ * normalized value is unbiased: a customer is held out iff it falls below
+ * `holdoutRate`, giving an exact ~`holdoutRate` fraction independent of
+ * group size, customer ordering, or whether the rate is a clean 1/n.
  */
 export function isHeldOut(
   proposalId: string,
@@ -50,10 +49,8 @@ export function isHeldOut(
   const digest = createHash("sha256")
     .update(`${proposalId}::${customerId}`)
     .digest("hex");
-  // First 8 hex chars → 32-bit unsigned int. parseInt on 8 hex digits never
-  // exceeds 2^32, so this stays within safe-integer range.
   const bucket = parseInt(digest.slice(0, 8), 16);
-  return bucket % holdoutDivisor(holdoutRate) === 0;
+  return bucket / UINT32_SPACE < holdoutRate;
 }
 
 /**
@@ -132,10 +129,20 @@ export async function snapshotGroup(
     included_in_holdout: holdoutSet.has(customerId),
   }));
 
-  const { error } = await serviceClient
-    .from("campaign_group_snapshots")
-    .upsert(rows, { onConflict: "proposal_id,customer_id", ignoreDuplicates: true });
-  if (error) throw error;
+  // Lapsed groups for a $2M–$50M merchant can run to tens of thousands of
+  // customers. A single upsert of every row risks exceeding the PostgREST
+  // request-size limit, so the write is chunked. ON CONFLICT DO NOTHING keeps
+  // each chunk independently idempotent.
+  for (let i = 0; i < rows.length; i += SNAPSHOT_WRITE_BATCH_SIZE) {
+    const batch = rows.slice(i, i + SNAPSHOT_WRITE_BATCH_SIZE);
+    const { error } = await serviceClient
+      .from("campaign_group_snapshots")
+      .upsert(batch, { onConflict: "proposal_id,customer_id", ignoreDuplicates: true });
+    if (error) throw error;
+  }
 
   return { customerIds, holdoutIds };
 }
+
+/** Rows per campaign_group_snapshots upsert; bounds PostgREST request size. */
+const SNAPSHOT_WRITE_BATCH_SIZE = 500;

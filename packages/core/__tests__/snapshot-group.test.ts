@@ -101,8 +101,48 @@ describe("isHeldOut — rate distribution", () => {
     expect(fraction).toBeLessThan(0.24);
   });
 
+  it("holds out roughly 15% at the non-1/n rate 0.15", () => {
+    // 0.15 is deliberately not a clean 1/n — the fractional comparison must
+    // still honour it exactly (a modulo-divisor scheme would round to 1/7th).
+    const ids = makeCustomerIds(5000);
+    const heldOut = ids.filter((id) => isHeldOut(PROPOSAL_ID, id, 0.15)).length;
+    const fraction = heldOut / ids.length;
+    expect(fraction).toBeGreaterThan(0.12);
+    expect(fraction).toBeLessThan(0.18);
+  });
+
   it("HOLDOUT_RATE_DEFAULT is 0.1", () => {
     expect(HOLDOUT_RATE_DEFAULT).toBe(0.1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isHeldOut — golden vectors (regression guard for the hash algorithm,
+// the `::` separator, and the 32-bit normalization)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("isHeldOut — golden vectors", () => {
+  // proposalId 1111…, computed from SHA-256(`${proposalId}::${customerId}`)
+  // first 8 hex chars / 2^32. If the hash algorithm, separator, or
+  // normalization changes, these pinned verdicts fail and surface it.
+  const GOLDEN_PROPOSAL = "11111111-1111-4111-8111-111111111111";
+
+  it("Customer/27 (normalized 0.0333) is held out at the default 0.1 rate", () => {
+    expect(isHeldOut(GOLDEN_PROPOSAL, "gid://shopify/Customer/27", 0.1)).toBe(true);
+  });
+
+  it("Customer/42 (normalized 0.6999) is NOT held out at the default 0.1 rate", () => {
+    expect(isHeldOut(GOLDEN_PROPOSAL, "gid://shopify/Customer/42", 0.1)).toBe(false);
+  });
+
+  it("Customer/42 (normalized 0.6999) IS held out once the rate exceeds 0.70", () => {
+    expect(isHeldOut(GOLDEN_PROPOSAL, "gid://shopify/Customer/42", 0.71)).toBe(true);
+  });
+
+  it("Customer/27 stays held out at the default rate across processes (stable digest)", () => {
+    // A second call must reproduce the pinned verdict — the hash is process-
+    // independent, so this verdict is reproducible by Sprint 08 attribution.
+    expect(isHeldOut(GOLDEN_PROPOSAL, "gid://shopify/Customer/27")).toBe(true);
   });
 });
 

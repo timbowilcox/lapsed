@@ -87,8 +87,6 @@ export {
 
 export {
   snapshotGroup,
-  computeGroupSnapshot,
-  isHeldOut,
   HOLDOUT_RATE_DEFAULT,
   type SnapshotGroupInput,
   type SnapshotGroupResult,
