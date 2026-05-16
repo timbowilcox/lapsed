@@ -16,6 +16,7 @@
     "clean": "rm -rf .turbo .next node_modules/.cache"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
     "@lapsed/core": "workspace:*",
     "@lapsed/db": "workspace:*",
     "@lapsed/fixtures": "workspace:*",

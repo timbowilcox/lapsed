@@ -1,5 +1,5 @@
 import type { LapsedSupabaseClient } from "./index";
-import type { Database } from "./types";
+import type { Database, Json } from "./types";
 
 type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
@@ -357,4 +357,234 @@ export async function getMerchantSummary(
     total_lapsed_count: countResult.count ?? 0,
     last_synced_at: merchant?.last_backfill_at ?? null,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getExtractionStatus — voice-extraction progress for the onboarding UI
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ExtractionPhase =
+  | "analyzing"
+  | "extracting"
+  | "generating"
+  | "ready"
+  | "failed";
+
+export interface ExtractionStatus {
+  phase: ExtractionPhase;
+  /** occurred_at of the current run's `extraction_started` event; null if no run is recorded yet. */
+  startedAt: string | null;
+  /** occurred_at of the terminal event when phase is `ready`/`failed`; null while in progress. */
+  completedAt: string | null;
+  /** `extraction_failed` reason when phase is `failed`; null otherwise. */
+  errorMessage: string | null;
+  /** Voice version id once `voice_extracted` has landed; null before then. */
+  voiceVersionId: string | null;
+}
+
+interface VoiceEventRow {
+  event_type: string;
+  occurred_at: string;
+  payload: Json;
+}
+
+/** Map a voice_events event_type to the extraction phase it represents. */
+function phaseForEvent(eventType: string): ExtractionPhase {
+  switch (eventType) {
+    case "extraction_started":
+      return "analyzing";
+    case "storefront_fetched":
+    case "pii_redacted":
+      return "extracting";
+    case "voice_extracted":
+      return "generating";
+    case "voice_activated":
+    case "voice_edited":
+      return "ready";
+    case "extraction_failed":
+      return "failed";
+    default:
+      // Unknown event type — treat as in-progress rather than crash the UI poll.
+      return "analyzing";
+  }
+}
+
+/** Reads a string field from a jsonb payload object, or null. */
+function payloadString(payload: Json, key: string): string | null {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const value = (payload as Record<string, unknown>)[key];
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+/**
+ * Derives the current voice-extraction status for a merchant from the
+ * `voice_events` log (Sprint 05, decision 12 — events are the source of
+ * truth). Powers the onboarding progress UI (chunk 9), which polls this
+ * every 2 seconds.
+ *
+ * Phase derivation maps the most recent event:
+ *   extraction_started               → analyzing
+ *   storefront_fetched / pii_redacted → extracting
+ *   voice_extracted                  → generating
+ *   voice_activated / voice_edited    → ready
+ *   extraction_failed                → failed
+ *
+ * The "current run" is every event at or after the most recent
+ * `extraction_started`, so a re-extraction never surfaces a stale version id
+ * from a prior run. The run boundary is resolved with a dedicated query for
+ * the latest `extraction_started` rather than a fixed row limit — accumulated
+ * re-extraction + edit history can be arbitrarily long. `startedAt` is that
+ * event's occurred_at; `completedAt` is the terminal event's occurred_at
+ * (`voice_activated` for `ready`, `extraction_failed` for `failed`).
+ */
+export async function getExtractionStatus(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<ExtractionStatus> {
+  const notStarted: ExtractionStatus = {
+    phase: "analyzing",
+    startedAt: null,
+    completedAt: null,
+    errorMessage: null,
+    voiceVersionId: null,
+  };
+
+  // Resolve the current run's boundary: the most recent extraction_started.
+  const { data: startedRow, error: startedErr } = await client
+    .from("voice_events")
+    .select("occurred_at")
+    .eq("merchant_id", merchantId)
+    .eq("event_type", "extraction_started")
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (startedErr) throw startedErr;
+  if (!startedRow) return notStarted;
+
+  const startedAt = startedRow.occurred_at;
+
+  // Fetch every event in the current run — at or after the boundary. The
+  // boundary event itself satisfies the filter, so the result is non-empty.
+  const { data, error } = await client
+    .from("voice_events")
+    .select("event_type, occurred_at, payload")
+    .eq("merchant_id", merchantId)
+    .gte("occurred_at", startedAt)
+    .order("occurred_at", { ascending: false });
+  if (error) throw error;
+
+  const events = (data ?? []) as VoiceEventRow[];
+  if (events.length === 0) return { ...notStarted, startedAt };
+
+  const latest = events[0]!;
+  const phase = phaseForEvent(latest.event_type);
+
+  const completedAt = phase === "ready" || phase === "failed" ? latest.occurred_at : null;
+  const errorMessage = phase === "failed" ? payloadString(latest.payload, "reason") : null;
+
+  // version_id is carried by voice_activated / voice_edited / voice_extracted
+  // payloads — take it from the most recent carrier in the current run.
+  let voiceVersionId: string | null = null;
+  for (const event of events) {
+    const versionId = payloadString(event.payload, "version_id");
+    if (versionId) {
+      voiceVersionId = versionId;
+      break;
+    }
+  }
+
+  return { phase, startedAt, completedAt, errorMessage, voiceVersionId };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getActiveVoiceProfile — the merchant's currently-active brand voice profile
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ActiveVoiceProfile {
+  versionId: string;
+  versionNumber: number;
+  /** Structured VoiceProfile jsonb (validated at write time by @lapsed/core). */
+  profile: Json;
+  modelVersion: string;
+  extractedAt: string;
+}
+
+/**
+ * Returns the merchant's active voice profile — the `voice_versions` row
+ * pointed at by `agent_profiles.active_voice_version_id` — or null when no
+ * extraction has produced an active version yet. Used by the onboarding
+ * voice preview (chunk 10) and the Settings brand-voice tab (chunk 11).
+ */
+export async function getActiveVoiceProfile(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<ActiveVoiceProfile | null> {
+  const { data: agentProfile, error: apError } = await client
+    .from("agent_profiles")
+    .select("active_voice_version_id")
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (apError) throw apError;
+
+  const versionId = agentProfile?.active_voice_version_id ?? null;
+  if (!versionId) return null;
+
+  const { data: version, error: versionError } = await client
+    .from("voice_versions")
+    .select("id, version_number, profile, model_version, extracted_at")
+    .eq("merchant_id", merchantId)
+    .eq("id", versionId)
+    .maybeSingle();
+  if (versionError) throw versionError;
+  if (!version) return null;
+
+  return {
+    versionId: version.id,
+    versionNumber: version.version_number,
+    profile: version.profile,
+    modelVersion: version.model_version,
+    extractedAt: version.extracted_at,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listVoiceVersions — all voice profile versions for a merchant
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VoiceVersionSummary {
+  id: string;
+  versionNumber: number;
+  modelVersion: string;
+  extractedAt: string;
+  /** Structured VoiceProfile jsonb (validated at write time by @lapsed/core). */
+  profile: Json;
+}
+
+/**
+ * Returns every `voice_versions` row for a merchant, newest first. Powers
+ * the Settings brand-voice version-history list (chunk 11). Decision 7 —
+ * prior versions are retained and never mutated, so the full history is
+ * always available.
+ */
+export async function listVoiceVersions(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<VoiceVersionSummary[]> {
+  const { data, error } = await client
+    .from("voice_versions")
+    .select("id, version_number, model_version, extracted_at, profile")
+    .eq("merchant_id", merchantId)
+    .order("extracted_at", { ascending: false })
+    .order("version_number", { ascending: false });
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    versionNumber: row.version_number,
+    modelVersion: row.model_version,
+    extractedAt: row.extracted_at,
+    profile: row.profile,
+  }));
 }

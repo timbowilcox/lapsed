@@ -16,12 +16,19 @@ export {
   getReadyToReactivateCount,
   getLatestScoringRun,
   getMerchantSummary,
+  getExtractionStatus,
+  getActiveVoiceProfile,
+  listVoiceVersions,
   type LapsedCustomersPage,
   type LapsedCustomersWithSignalsPage,
   type MerchantSummaryRow,
   type CustomerInferredStateRow,
   type ScoringRunRow,
   type CustomerRfmRow,
+  type ExtractionPhase,
+  type ExtractionStatus,
+  type ActiveVoiceProfile,
+  type VoiceVersionSummary,
 } from "./queries";
 
 const ROLE = "authenticated";

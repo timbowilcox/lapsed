@@ -38,6 +38,8 @@ const EXPECTED_ALL = [
   "CRON_SECRET",
   "PROPENSITY_READY_THRESHOLD",
   "SCORING_TOKEN_CAP_DEFAULT",
+  "VOICE_EXTRACTION_DAILY_CAP_DEFAULT",
+  "SONNET_MODEL",
 ];
 
 const missingFromTurbo = EXPECTED_ALL.filter((k) => !turboEnv.has(k));

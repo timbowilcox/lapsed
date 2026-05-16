@@ -44,3 +44,66 @@ export {
   type ScoreCustomersResult,
   type ScoreCustomersOpts,
 } from "./score-customers";
+
+export {
+  redact,
+  redactSnapshot,
+  assertNoPii,
+  PiiLeakError,
+  SnapshotShapeError,
+  type PiiKind,
+  type PiiMatch,
+  type RedactResult,
+} from "./pii-redactor";
+
+export {
+  runVoiceExtraction,
+  type RunVoiceExtractionInput,
+  type RunVoiceExtractionResult,
+} from "./run-voice-extraction";
+
+export {
+  deriveAgentIdentity,
+  isRoleDescriptor,
+  ROLE_TAXONOMY,
+  CHANNELS,
+  type RoleDescriptor,
+  type Channel,
+  type ChannelPreferences,
+  type FallbackCriteria,
+  type AgentIdentityDefaults,
+} from "./derive-agent-identity";
+
+export {
+  appendVoiceEvent,
+  materializeVoice,
+  insertVoiceVersion,
+  VoiceEventType,
+  VoiceEventSource,
+  VoiceFailurePhase,
+  type VoiceEventInput,
+  type InsertVoiceVersionInput,
+} from "./voice-events";
+
+export {
+  synthesizeVoice,
+  createVoiceClient,
+  parseVoiceProfile,
+  VoiceSynthesisError,
+  SONNET_MODEL_DEFAULT,
+  PROMPT_VERSION,
+  SYSTEM_PROMPT_TEMPLATE,
+  TONE_TAXONOMY,
+  SENTENCE_LENGTHS,
+  REGISTERS,
+  EMOJI_POLICIES,
+  type VoiceProfile,
+  type ToneDescriptor,
+  type SentenceLength,
+  type Register,
+  type EmojiPolicy,
+  type SynthesizeVoiceInput,
+  type SynthesizeVoiceResult,
+  type VoiceSynthesisReason,
+  type VoiceClientOptions,
+} from "./voice-synthesizer";

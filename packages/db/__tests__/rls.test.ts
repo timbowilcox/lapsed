@@ -92,10 +92,11 @@ beforeAll(async () => {
        where table_schema = 'public'
          and table_name in (
            'customer_events','conversation_messages','order_events',
-           'customers','scoring_runs'
+           'customers','scoring_runs',
+           'storefront_snapshots','voice_events','voice_versions','agent_profiles'
          )`,
     );
-    if ((rows[0]?.count ?? 0) < 5) {
+    if ((rows[0]?.count ?? 0) < 9) {
       schemaReady = false;
       console.warn("[rls.test] Required tables missing — skipping all RLS tests");
       return;
@@ -223,6 +224,55 @@ beforeAll(async () => {
               ($3, $4, 'new',    ARRAY[]::text[])`,
       [merchantIdA, GID_A, merchantIdB, GID_B],
     );
+
+    // Sprint 05: storefront_snapshots — A and B, distinct source_hash per row
+    const snapshotRes = await pg.query<{ id: string; merchant_id: string }>(
+      `insert into public.storefront_snapshots
+         (merchant_id, raw_content, redacted_content, pii_match_summary, source_hash)
+       values ($1, '{"about":"about-A"}'::jsonb, '{"about":"about-A"}'::jsonb, '{}'::jsonb, 'hash_A_rls'),
+              ($2, '{"about":"about-B"}'::jsonb, '{"about":"about-B"}'::jsonb, '{}'::jsonb, 'hash_B_rls')
+       returning id, merchant_id`,
+      [merchantIdA, merchantIdB],
+    );
+    const snapshotIdByMerchant = new Map<string, string>();
+    for (const row of snapshotRes.rows) snapshotIdByMerchant.set(row.merchant_id, row.id);
+
+    // Sprint 05: voice_events — append-only, one per merchant
+    await pg.query(
+      `insert into public.voice_events
+         (merchant_id, event_type, source, payload, occurred_at)
+       values ($1, 'voice_extracted', 'install_orchestrator', '{"version_id":"00000000-0000-0000-0000-000000000001"}'::jsonb, now()),
+              ($2, 'voice_extracted', 'install_orchestrator', '{"version_id":"00000000-0000-0000-0000-000000000002"}'::jsonb, now())`,
+      [merchantIdA, merchantIdB],
+    );
+
+    // Sprint 05: voice_versions — one row per merchant, bound to the snapshot
+    const versionRes = await pg.query<{ id: string; merchant_id: string }>(
+      `insert into public.voice_versions
+         (merchant_id, version_number, source_snapshot_id, profile, model_version, prompt_version)
+       values ($1, 1, $3, '{"tone_descriptors":["warm"]}'::jsonb, 'claude-sonnet-4-6-test', 'v1'),
+              ($2, 1, $4, '{"tone_descriptors":["direct"]}'::jsonb, 'claude-sonnet-4-6-test', 'v1')
+       returning id, merchant_id`,
+      [
+        merchantIdA, merchantIdB,
+        snapshotIdByMerchant.get(merchantIdA),
+        snapshotIdByMerchant.get(merchantIdB),
+      ],
+    );
+    const versionIdByMerchant = new Map<string, string>();
+    for (const row of versionRes.rows) versionIdByMerchant.set(row.merchant_id, row.id);
+
+    // Sprint 05: agent_profiles — one row per merchant
+    await pg.query(
+      `insert into public.agent_profiles
+         (merchant_id, active_voice_version_id, role_descriptor)
+       values ($1, $2, 'win_back_specialist'),
+              ($3, $4, 'win_back_specialist')`,
+      [
+        merchantIdA, versionIdByMerchant.get(merchantIdA),
+        merchantIdB, versionIdByMerchant.get(merchantIdB),
+      ],
+    );
   } finally {
     await pg.end();
   }
@@ -234,8 +284,9 @@ afterAll(async () => {
   await pg.connect();
   try {
     // session_replication_role = 'replica' disables non-replica triggers for this
-    // session so that the append-only BEFORE DELETE triggers on customer_events and
-    // order_events don't block cleanup. Revert immediately after event-table deletes.
+    // session so that the append-only BEFORE DELETE triggers on customer_events,
+    // order_events, and voice_events don't block cleanup. Revert immediately after
+    // event-table deletes.
     await pg.query(`set session_replication_role = 'replica'`);
 
     // Delete in FK dependency order (leaf tables before parent tables).
@@ -288,6 +339,24 @@ afterAll(async () => {
     );
     await pg.query(
       `delete from public.merchant_scoring_caps where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+
+    // Sprint 05 tables — agent_profiles -> voice_versions -> voice_events -> storefront_snapshots
+    await pg.query(
+      `delete from public.agent_profiles where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.voice_versions where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.voice_events where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.storefront_snapshots where merchant_id = any($1::uuid[])`,
       [[merchantIdA, merchantIdB]],
     );
 
@@ -913,5 +982,400 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_inferred_state (Sprint 04
       .from("customer_inferred_state")
       .select("id");
     expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 RLS — storefront_snapshots (service-role only; deny authenticated)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — storefront_snapshots (Sprint 05, deny all authenticated)", () => {
+  it("merchant A JWT cannot read storefront_snapshots", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("storefront_snapshots")
+      .select("id");
+    expect(error).toBeNull();
+    expect(data ?? []).toEqual([]);
+  });
+
+  it("merchant B JWT cannot read storefront_snapshots", async () => {
+    const { data, error } = await (await clientFor(SHOP_B))
+      .from("storefront_snapshots")
+      .select("id");
+    expect(error).toBeNull();
+    expect(data ?? []).toEqual([]);
+  });
+
+  it("merchant A JWT cannot insert into storefront_snapshots", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("storefront_snapshots")
+      .insert({
+        merchant_id: merchantIdA,
+        raw_content: { about: "x" },
+        redacted_content: { about: "x" },
+        source_hash: "hash_attempted_insert",
+      });
+    expect(error).not.toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 RLS — voice_events
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — voice_events (Sprint 05)", () => {
+  it("merchant A sees only their own voice events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("voice_events")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's voice events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("voice_events")
+      .select("merchant_id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("wrong JWT secret returns zero rows from voice_events", async () => {
+    const wrongJwt = await mintMerchantJwt({
+      shopDomain: SHOP_A,
+      jwtSecret: "wrong-secret",
+    });
+    const { data } = await createMerchantClient({
+      url: env.url,
+      publishableKey: env.publishableKey,
+      merchantJwt: wrongJwt,
+    })
+      .from("voice_events")
+      .select("id");
+    expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 append-only triggers — voice_events
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — voice_events (Sprint 05)", () => {
+  it("UPDATE on voice_events raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `update public.voice_events set source = 'test'
+           where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("DELETE on voice_events raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `delete from public.voice_events where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("TRUNCATE on voice_events raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(`truncate public.voice_events`),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 RLS — voice_versions
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — voice_versions (Sprint 05)", () => {
+  it("merchant A sees only their own voice version", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("voice_versions")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's voice version", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("voice_versions")
+      .select("merchant_id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("wrong JWT secret returns zero rows from voice_versions", async () => {
+    const wrongJwt = await mintMerchantJwt({
+      shopDomain: SHOP_A,
+      jwtSecret: "wrong-secret",
+    });
+    const { data } = await createMerchantClient({
+      url: env.url,
+      publishableKey: env.publishableKey,
+      merchantJwt: wrongJwt,
+    })
+      .from("voice_versions")
+      .select("id");
+    expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 RLS — agent_profiles
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — agent_profiles (Sprint 05)", () => {
+  it("merchant A sees only their own agent profile", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("agent_profiles")
+      .select("merchant_id,role_descriptor");
+    expect(error).toBeNull();
+    expect(data?.length).toBe(1);
+    expect(data?.[0]?.merchant_id).toBe(merchantIdA);
+  });
+
+  it("merchant A cannot see merchant B's agent profile", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("agent_profiles")
+      .select("merchant_id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("wrong JWT secret returns zero rows from agent_profiles", async () => {
+    const wrongJwt = await mintMerchantJwt({
+      shopDomain: SHOP_A,
+      jwtSecret: "wrong-secret",
+    });
+    const { data } = await createMerchantClient({
+      url: env.url,
+      publishableKey: env.publishableKey,
+      merchantJwt: wrongJwt,
+    })
+      .from("agent_profiles")
+      .select("merchant_id");
+    expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 — agent_profiles role_descriptor shape CHECK (decision 11)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("agent_profiles role_descriptor CHECK rejects freeform names", () => {
+  it("a capitalized persona name like 'Sarah' is rejected by the CHECK", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.agent_profiles (merchant_id, role_descriptor)
+           values ($1, 'Sarah')
+           on conflict (merchant_id) do update set role_descriptor = excluded.role_descriptor`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/role_descriptor_shape|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("a value with whitespace is rejected by the CHECK", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.agent_profiles (merchant_id, role_descriptor)
+           values ($1, 'sarah from lapsed')
+           on conflict (merchant_id) do update set role_descriptor = excluded.role_descriptor`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/role_descriptor_shape|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 — RLS write-rejection (decisions 7 + 12 — only service role may mutate)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS write-rejection — Sprint 05 tables", () => {
+  it("merchant A JWT cannot insert into voice_events", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("voice_events")
+      .insert({
+        merchant_id: merchantIdA,
+        event_type: "voice_extracted",
+        source: "install_orchestrator",
+        payload: { version_id: "00000000-0000-0000-0000-000000000099" },
+        occurred_at: new Date().toISOString(),
+      });
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot insert into voice_versions", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("voice_versions")
+      .insert({
+        merchant_id: merchantIdA,
+        version_number: 99,
+        source_snapshot_id: "00000000-0000-0000-0000-000000000099",
+        profile: { tone_descriptors: ["warm"] },
+        model_version: "claude-sonnet-4-6-test",
+        prompt_version: "v1",
+      });
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot upsert into agent_profiles", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("agent_profiles")
+      .upsert(
+        {
+          merchant_id: merchantIdA,
+          role_descriptor: "win_back_specialist",
+        },
+        { onConflict: "merchant_id" },
+      );
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot UPDATE an existing voice_versions row", async () => {
+    const client = await clientFor(SHOP_A);
+    // Capture the seeded profile via the merchant's read path BEFORE attempting the mutation.
+    const before = await client
+      .from("voice_versions")
+      .select("id,profile")
+      .eq("merchant_id", merchantIdA);
+    expect(before.error).toBeNull();
+    expect(before.data?.length ?? 0).toBeGreaterThan(0);
+    const seededDescriptor = (before.data![0]!.profile as { tone_descriptors?: string[] })
+      .tone_descriptors?.[0];
+    expect(seededDescriptor).toBe("warm");
+
+    // Attempt the update with `.select()` so Supabase returns the affected rows.
+    // An RLS-blocked update either errors OR returns an empty `data` array.
+    const update = await client
+      .from("voice_versions")
+      .update({ profile: { tone_descriptors: ["edgy"] } })
+      .eq("merchant_id", merchantIdA)
+      .select();
+    expect(update.error !== null || (update.data ?? []).length === 0).toBe(true);
+
+    // Re-read to confirm the seeded descriptor is unchanged.
+    const after = await client
+      .from("voice_versions")
+      .select("profile")
+      .eq("merchant_id", merchantIdA);
+    expect(after.error).toBeNull();
+    expect(after.data?.length ?? 0).toBeGreaterThan(0);
+    expect(
+      (after.data ?? []).every((row) => {
+        const profile = row.profile as { tone_descriptors?: string[] };
+        return profile.tone_descriptors?.[0] === "warm";
+      }),
+    ).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 05 — uniqueness / idempotency constraints
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Idempotency constraints — Sprint 05 tables", () => {
+  it("voice_events_dedup_unique rejects duplicate (merchant_id, event_type, source, occurred_at)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    const occurredAt = new Date("2026-05-15T10:30:00.000Z").toISOString();
+    try {
+      // Insert the seed event
+      await pg.query(
+        `insert into public.voice_events
+           (merchant_id, event_type, source, payload, occurred_at)
+         values ($1, 'storefront_fetched', 'idempotency_test_source', '{}'::jsonb, $2)`,
+        [merchantIdA, occurredAt],
+      );
+      // Inserting the identical tuple again must violate the unique constraint
+      await expect(
+        pg.query(
+          `insert into public.voice_events
+             (merchant_id, event_type, source, payload, occurred_at)
+           values ($1, 'storefront_fetched', 'idempotency_test_source', '{}'::jsonb, $2)`,
+          [merchantIdA, occurredAt],
+        ),
+      ).rejects.toThrow(/voice_events_dedup_unique|unique/i);
+    } finally {
+      // Cleanup via session_replication_role to bypass append-only triggers
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.voice_events
+         where merchant_id = $1 and source = 'idempotency_test_source'`,
+        [merchantIdA],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
+      await pg.end();
+    }
+  });
+
+  it("voice_versions_merchant_version_unique rejects duplicate (merchant_id, version_number)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      const snap = await pg.query<{ id: string }>(
+        `select id from public.storefront_snapshots where merchant_id = $1 limit 1`,
+        [merchantIdA],
+      );
+      // version_number = 1 already exists in seed; inserting another version 1 must fail
+      await expect(
+        pg.query(
+          `insert into public.voice_versions
+             (merchant_id, version_number, source_snapshot_id, profile, model_version, prompt_version)
+           values ($1, 1, $2, '{"tone_descriptors":["edgy"]}'::jsonb, 'claude-sonnet-4-6-test', 'v1')`,
+          [merchantIdA, snap.rows[0]?.id],
+        ),
+      ).rejects.toThrow(/voice_versions_merchant_version_unique|unique/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("storefront_snapshots_merchant_hash_unique rejects duplicate (merchant_id, source_hash)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // 'hash_A_rls' already exists in seed for merchantIdA
+      await expect(
+        pg.query(
+          `insert into public.storefront_snapshots
+             (merchant_id, raw_content, redacted_content, source_hash)
+           values ($1, '{"about":"about-A-dup"}'::jsonb, '{"about":"about-A-dup"}'::jsonb, 'hash_A_rls')`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/storefront_snapshots_merchant_hash_unique|unique/i);
+    } finally {
+      await pg.end();
+    }
   });
 });

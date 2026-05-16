@@ -16,12 +16,27 @@ interface ServerEnv {
   propensityReadyThreshold: number;
   scoringTokenCapDefault: number;
   anthropicApiKey: string;
+  /** Sprint 05: max voice extractions per merchant per UTC day. Cap-exhaustion writes extraction_failed event. */
+  voiceExtractionDailyCapDefault: number;
+  /** Sprint 05: pinned Sonnet model for voice synthesis (decision 9). */
+  sonnetModel: string;
 }
 
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`required env var ${name} not set`);
   return v;
+}
+
+/**
+ * parseInt with a sentinel default that preserves explicit `"0"` (used as a
+ * kill switch for cost caps during incidents). `parseInt(...) || N` collapses
+ * 0 → N silently, which would defeat operator-set zero caps.
+ */
+function parseIntOr(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 let cached: ServerEnv | null = null;
@@ -40,8 +55,10 @@ export function serverEnv(): ServerEnv {
     tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
     cronSecret: required("CRON_SECRET"),
     propensityReadyThreshold: parseFloat(process.env.PROPENSITY_READY_THRESHOLD ?? "0.4"),
-    scoringTokenCapDefault: parseInt(process.env.SCORING_TOKEN_CAP_DEFAULT ?? "10000000", 10) || 10_000_000,
+    scoringTokenCapDefault: parseIntOr(process.env.SCORING_TOKEN_CAP_DEFAULT, 10_000_000),
     anthropicApiKey: required("ANTHROPIC_API_KEY"),
+    voiceExtractionDailyCapDefault: parseIntOr(process.env.VOICE_EXTRACTION_DAILY_CAP_DEFAULT, 10),
+    sonnetModel: process.env.SONNET_MODEL ?? "claude-sonnet-4-6-latest",
   };
   return cached;
 }

@@ -25,3 +25,17 @@ export {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
 } from "./session-cookie";
+export {
+  fetchStorefrontSnapshot,
+  computeSourceHash,
+  stripHtml,
+  SHOPIFY_API_VERSION,
+  type StorefrontSnapshot,
+  type StorefrontProductSample,
+  type StorefrontBlogSample,
+  type StorefrontPolicies,
+  type FetchStorefrontInput,
+  type StorefrontFetchResult,
+  type StorefrontFetchFailure,
+  type StorefrontFetchFailureReason,
+} from "./storefront-fetcher";

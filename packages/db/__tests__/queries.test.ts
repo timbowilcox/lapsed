@@ -14,6 +14,9 @@ import {
   getReadyToReactivateCount,
   getLatestScoringRun,
   getMerchantSummary,
+  getExtractionStatus,
+  getActiveVoiceProfile,
+  listVoiceVersions,
 } from "../src/queries";
 
 const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440001";
@@ -620,5 +623,445 @@ describe("getLapsedCustomersWithSignals", () => {
     await expect(
       getLapsedCustomersWithSignals(client, { merchantId: MERCHANT_ID, limit: 10 }),
     ).rejects.toMatchObject({ message: "state query failed" });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getExtractionStatus
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VOICE_VERSION_ID = "99999999-9999-4999-8999-999999999999";
+
+/**
+ * Builds a client for getExtractionStatus, which issues TWO voice_events
+ * queries: (1) the boundary query for the latest extraction_started, ending
+ * in .maybeSingle(); (2) the current-run query, ending in .order().
+ */
+function makeExtractionStatusClient(opts: {
+  startedRow?: { occurred_at: string } | null;
+  runEvents?: Record<string, unknown>[];
+  startedError?: { message: string } | null;
+  runError?: { message: string } | null;
+}) {
+  const { startedRow = null, runEvents = [], startedError = null, runError = null } = opts;
+  let fromCall = 0;
+  const eqCalls: Array<[string, unknown]> = [];
+
+  const client = {
+    from: vi.fn(() => {
+      fromCall += 1;
+      if (fromCall === 1) {
+        // Boundary query: select → eq → eq → order → limit → maybeSingle
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: (c: string, v: unknown) => {
+            eqCalls.push([c, v]);
+            return chain;
+          },
+          order: () => chain,
+          limit: () => chain,
+          maybeSingle: () =>
+            Promise.resolve(
+              startedError ? { data: null, error: startedError } : { data: startedRow, error: null },
+            ),
+        };
+        return chain;
+      }
+      // Current-run query: select → eq → gte → order (awaited)
+      const runResult = runError
+        ? { data: null, error: runError }
+        : { data: runEvents, error: null };
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: (c: string, v: unknown) => {
+          eqCalls.push([c, v]);
+          return chain;
+        },
+        gte: () => chain,
+        order: () => Promise.resolve(runResult),
+      };
+      return chain;
+    }),
+  } as unknown as LapsedSupabaseClient;
+  return { client, eqCalls };
+}
+
+const STARTED_T0 = "2026-05-16T10:00:00.000Z";
+
+describe("getExtractionStatus", () => {
+  it("returns analyzing with null fields when no extraction has started", async () => {
+    const { client } = makeExtractionStatusClient({ startedRow: null });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result).toEqual({
+      phase: "analyzing",
+      startedAt: null,
+      completedAt: null,
+      errorMessage: null,
+      voiceVersionId: null,
+    });
+  });
+
+  it("derives analyzing from a lone extraction_started event", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [{ event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} }],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
+    expect(result.startedAt).toBe(STARTED_T0);
+    expect(result.completedAt).toBeNull();
+    expect(result.voiceVersionId).toBeNull();
+  });
+
+  it("derives extracting from a storefront_fetched latest event", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("extracting");
+    expect(result.startedAt).toBe(STARTED_T0);
+  });
+
+  it("derives extracting from a pii_redacted latest event", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "pii_redacted", occurred_at: "2026-05-16T10:00:06.000Z", payload: {} },
+        { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("extracting");
+  });
+
+  it("derives generating from a voice_extracted latest event and exposes the version id", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_extracted",
+          occurred_at: "2026-05-16T10:00:10.000Z",
+          payload: { version_id: VOICE_VERSION_ID },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("generating");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+    expect(result.completedAt).toBeNull();
+  });
+
+  it("derives ready from voice_activated, with completedAt from its occurred_at", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_activated",
+          occurred_at: "2026-05-16T10:00:11.000Z",
+          payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
+        },
+        {
+          event_type: "voice_extracted",
+          occurred_at: "2026-05-16T10:00:10.000Z",
+          payload: { version_id: VOICE_VERSION_ID },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("ready");
+    expect(result.completedAt).toBe("2026-05-16T10:00:11.000Z");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+    expect(result.errorMessage).toBeNull();
+  });
+
+  it("derives ready from a voice_edited latest event (Settings edit)", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_edited",
+          occurred_at: "2026-05-16T12:00:00.000Z",
+          payload: { version_id: VOICE_VERSION_ID, previous_version_id: VOICE_VERSION_ID, fields_changed: ["register"] },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("ready");
+    expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
+  });
+
+  it("derives failed from extraction_failed, surfacing the reason as errorMessage", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "extraction_failed",
+          occurred_at: "2026-05-16T10:00:08.000Z",
+          payload: { phase: "synthesize", reason: "exhausted_retries" },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("failed");
+    expect(result.errorMessage).toBe("exhausted_retries");
+    expect(result.completedAt).toBe("2026-05-16T10:00:08.000Z");
+  });
+
+  it("failed with no reason in payload yields null errorMessage", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "extraction_failed", occurred_at: "2026-05-16T10:00:08.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("failed");
+    expect(result.errorMessage).toBeNull();
+  });
+
+  it("scopes to the current run — a re-extraction in progress shows no stale version id", async () => {
+    // The boundary query returns run 2's extraction_started; the run query
+    // (gte that timestamp) returns only run 2's events — run 1 is excluded.
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: "2026-05-16T14:00:00.000Z" },
+      runEvents: [
+        { event_type: "extraction_started", occurred_at: "2026-05-16T14:00:00.000Z", payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
+    expect(result.startedAt).toBe("2026-05-16T14:00:00.000Z");
+    // No version id from the prior run leaks into the in-progress run.
+    expect(result.voiceVersionId).toBeNull();
+  });
+
+  it("maps an unknown event type to analyzing rather than crashing", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "some_future_event", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
+  });
+
+  it("filters both queries by merchant_id", async () => {
+    const { client, eqCalls } = makeExtractionStatusClient({ startedRow: null });
+    await getExtractionStatus(client, MERCHANT_ID);
+    expect(eqCalls.some((c) => c[0] === "merchant_id" && c[1] === MERCHANT_ID)).toBe(true);
+  });
+
+  it("throws when the boundary query returns an error", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedError: { message: "boundary query failed" },
+    });
+    await expect(getExtractionStatus(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "boundary query failed",
+    });
+  });
+
+  it("throws when the current-run query returns an error", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runError: { message: "run query failed" },
+    });
+    await expect(getExtractionStatus(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "run query failed",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getActiveVoiceProfile
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * getActiveVoiceProfile issues two queries: (1) agent_profiles for the
+ * active_voice_version_id (select.eq.maybeSingle); (2) voice_versions for
+ * the row (select.eq.eq.maybeSingle).
+ */
+function makeActiveVoiceProfileClient(opts: {
+  activeVersionId?: string | null;
+  version?: Record<string, unknown> | null;
+  agentProfileError?: { message: string } | null;
+  versionError?: { message: string } | null;
+}) {
+  const {
+    activeVersionId = null,
+    version = null,
+    agentProfileError = null,
+    versionError = null,
+  } = opts;
+  let fromCall = 0;
+
+  const client = {
+    from: vi.fn(() => {
+      fromCall += 1;
+      if (fromCall === 1) {
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve(
+              agentProfileError
+                ? { data: null, error: agentProfileError }
+                : { data: { active_voice_version_id: activeVersionId }, error: null },
+            ),
+        };
+        return chain;
+      }
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: () => chain,
+        maybeSingle: () =>
+          Promise.resolve(
+            versionError ? { data: null, error: versionError } : { data: version, error: null },
+          ),
+      };
+      return chain;
+    }),
+  } as unknown as LapsedSupabaseClient;
+  return { client };
+}
+
+const VOICE_VERSION_ROW = {
+  id: VOICE_VERSION_ID,
+  version_number: 3,
+  profile: { tone_descriptors: ["warm"], register: "conversational" },
+  model_version: "claude-sonnet-4-6-latest",
+  extracted_at: "2026-05-16T10:00:11.000Z",
+};
+
+describe("getActiveVoiceProfile", () => {
+  it("returns null when the merchant has no agent_profiles row", async () => {
+    const { client } = makeActiveVoiceProfileClient({ activeVersionId: null });
+    expect(await getActiveVoiceProfile(client, MERCHANT_ID)).toBeNull();
+  });
+
+  it("returns null when active_voice_version_id is null", async () => {
+    const { client } = makeActiveVoiceProfileClient({ activeVersionId: null });
+    expect(await getActiveVoiceProfile(client, MERCHANT_ID)).toBeNull();
+  });
+
+  it("returns null when the referenced voice_versions row is missing", async () => {
+    const { client } = makeActiveVoiceProfileClient({
+      activeVersionId: VOICE_VERSION_ID,
+      version: null,
+    });
+    expect(await getActiveVoiceProfile(client, MERCHANT_ID)).toBeNull();
+  });
+
+  it("returns the active voice profile when found", async () => {
+    const { client } = makeActiveVoiceProfileClient({
+      activeVersionId: VOICE_VERSION_ID,
+      version: VOICE_VERSION_ROW,
+    });
+    const result = await getActiveVoiceProfile(client, MERCHANT_ID);
+    expect(result).toEqual({
+      versionId: VOICE_VERSION_ID,
+      versionNumber: 3,
+      profile: VOICE_VERSION_ROW.profile,
+      modelVersion: "claude-sonnet-4-6-latest",
+      extractedAt: "2026-05-16T10:00:11.000Z",
+    });
+  });
+
+  it("throws when the agent_profiles query errors", async () => {
+    const { client } = makeActiveVoiceProfileClient({
+      agentProfileError: { message: "agent_profiles query failed" },
+    });
+    await expect(getActiveVoiceProfile(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "agent_profiles query failed",
+    });
+  });
+
+  it("throws when the voice_versions query errors", async () => {
+    const { client } = makeActiveVoiceProfileClient({
+      activeVersionId: VOICE_VERSION_ID,
+      versionError: { message: "voice_versions query failed" },
+    });
+    await expect(getActiveVoiceProfile(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "voice_versions query failed",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listVoiceVersions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** voice_versions query: select.eq.order.order — resolved via a thenable chain. */
+function makeListVoiceVersionsClient(
+  rows: Record<string, unknown>[] | null,
+  error?: { message: string } | null,
+) {
+  const result = error ? { data: null, error } : { data: rows, error: null };
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq: () => chain,
+    order: () => chain,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve),
+  };
+  return { from: vi.fn(() => chain) } as unknown as LapsedSupabaseClient;
+}
+
+describe("listVoiceVersions", () => {
+  const ROWS = [
+    {
+      id: "v2",
+      version_number: 2,
+      model_version: "claude-sonnet-4-6-latest",
+      extracted_at: "2026-05-16T11:00:00.000Z",
+      profile: { tone_descriptors: ["warm"] },
+    },
+    {
+      id: "v1",
+      version_number: 1,
+      model_version: "claude-sonnet-4-6-latest",
+      extracted_at: "2026-05-15T11:00:00.000Z",
+      profile: { tone_descriptors: ["direct"] },
+    },
+  ];
+
+  it("maps voice_versions rows to version summaries", async () => {
+    const client = makeListVoiceVersionsClient(ROWS);
+    const result = await listVoiceVersions(client, MERCHANT_ID);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({
+      id: "v2",
+      versionNumber: 2,
+      modelVersion: "claude-sonnet-4-6-latest",
+      extractedAt: "2026-05-16T11:00:00.000Z",
+      profile: { tone_descriptors: ["warm"] },
+    });
+  });
+
+  it("returns an empty array when the merchant has no versions", async () => {
+    const client = makeListVoiceVersionsClient([]);
+    expect(await listVoiceVersions(client, MERCHANT_ID)).toEqual([]);
+  });
+
+  it("returns an empty array when data is null", async () => {
+    const client = makeListVoiceVersionsClient(null);
+    expect(await listVoiceVersions(client, MERCHANT_ID)).toEqual([]);
+  });
+
+  it("throws when Supabase returns an error", async () => {
+    const client = makeListVoiceVersionsClient(null, { message: "voice_versions list failed" });
+    await expect(listVoiceVersions(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "voice_versions list failed",
+    });
   });
 });

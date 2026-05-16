@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card, Panel, PanelHeader, PanelBody } from "@lapsed/ui";
 import { Check, ArrowRight, Plug, Clock4, Send } from "lucide-react";
+import { OnboardingVoiceStep } from "./_onboarding-voice-step";
 
 const steps = [
   {
@@ -76,19 +77,21 @@ export function OnboardingFlow() {
                   <IconComp strokeWidth={1.75} size={28} />
                 </div>
                 <p className="max-w-[420px] text-body text-ink-700">{step.description}</p>
-                <Card className="w-full bg-cream-100 p-16 text-left">
-                  <div className="text-mini font-semibold uppercase tracking-wide text-ink-500">
-                    Step {idx + 1} preview
-                  </div>
-                  <div className="mt-6 text-body text-ink-900">
-                    {step.key === "connect" &&
-                      "Shop: bondi-goods.myshopify.com · 14,221 customers · 38,402 orders"}
-                    {step.key === "cadence" &&
-                      "Detected cadence: 38 days. 2,847 customers currently past their typical reorder window."}
-                    {step.key === "first-campaign" &&
-                      "Group: lapsed 60–90 days repeat buyers · Offer: $20 off · Estimated revenue lift: $18,400"}
-                  </div>
-                </Card>
+                {step.key === "connect" ? (
+                  <OnboardingVoiceStep />
+                ) : (
+                  <Card className="w-full bg-cream-100 p-16 text-left">
+                    <div className="text-mini font-semibold uppercase tracking-wide text-ink-500">
+                      Step {idx + 1} preview
+                    </div>
+                    <div className="mt-6 text-body text-ink-900">
+                      {step.key === "cadence" &&
+                        "Detected cadence: 38 days. 2,847 customers currently past their typical reorder window."}
+                      {step.key === "first-campaign" &&
+                        "Group: lapsed 60–90 days repeat buyers · Offer: $20 off · Estimated revenue lift: $18,400"}
+                    </div>
+                  </Card>
+                )}
                 <div className="flex w-full justify-between">
                   <Button
                     variant="secondary"

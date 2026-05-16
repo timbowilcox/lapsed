@@ -29,7 +29,9 @@
         "CRON_SECRET",
         "PROPENSITY_READY_THRESHOLD",
         "SCORING_TOKEN_CAP_DEFAULT",
-        "ANTHROPIC_API_KEY"
+        "ANTHROPIC_API_KEY",
+        "VOICE_EXTRACTION_DAILY_CAP_DEFAULT",
+        "SONNET_MODEL"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },
