@@ -28,7 +28,8 @@ import {
   toneLabel,
   readImpact,
   money,
-  restoredRange,
+  projectedRange,
+  signaturePhrasesUsed,
   MESSAGE_MAX,
   SEND_WINDOWS,
 } from "./_labels";
@@ -41,10 +42,15 @@ interface EditableVariant {
   sendTimeWindow: string;
 }
 
+const EMPTY_EDIT: EditableVariant = { messageDraft: "", offerValue: "", sendTimeWindow: "" };
+
 export function ApprovalSurface({ operatorId }: { operatorId: string }) {
   const [proposals, setProposals] = useState<PendingProposalSummary[]>([]);
+  const [voicePhrases, setVoicePhrases] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  /** A calm, page-level notice that survives a modal close (e.g. after a 409). */
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<DetailMode>("view");
@@ -75,13 +81,31 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
     }
   }, []);
 
+  // The merchant's brand signature phrases — used to show, per variant,
+  // which of the brand's phrases a message draft picks up (design tenet 3).
+  const loadVoicePhrases = useCallback(async () => {
+    try {
+      const res = await fetch("/api/voice/profile", { cache: "no-store" });
+      if (!res.ok || !mountedRef.current) return;
+      const body = (await res.json()) as { profile?: { signature_phrases?: unknown } } | null;
+      if (!mountedRef.current) return;
+      const phrases = body?.profile?.signature_phrases;
+      if (Array.isArray(phrases)) {
+        setVoicePhrases(phrases.filter((p): p is string => typeof p === "string"));
+      }
+    } catch {
+      /* non-fatal — the detail view simply omits the brand-phrase indicator */
+    }
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     void loadPending();
+    void loadVoicePhrases();
     return () => {
       mountedRef.current = false;
     };
-  }, [loadPending]);
+  }, [loadPending, loadVoicePhrases]);
 
   const selected = proposals.find((p) => p.proposalId === selectedId) ?? null;
 
@@ -89,6 +113,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
     setSelectedId(proposal.proposalId);
     setMode("view");
     setActionError(null);
+    setStaleNotice(null);
   }, []);
 
   const closeDetail = useCallback(() => {
@@ -115,41 +140,44 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
-  async function runAction(
-    path: string,
-    payload: Record<string, unknown>,
-  ): Promise<boolean> {
-    setActionPending(true);
-    setActionError(null);
-    try {
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!mountedRef.current) return false;
-      if (!res.ok) {
-        setActionError(
-          res.status === 409
-            ? "This campaign changed since you opened it. Refreshing the list."
-            : "Something went wrong. Please try again.",
-        );
+  const runAction = useCallback(
+    async (path: string, payload: Record<string, unknown>): Promise<boolean> => {
+      setActionPending(true);
+      setActionError(null);
+      try {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!mountedRef.current) return false;
         if (res.status === 409) {
+          // The proposal changed under the merchant (e.g. a concurrent edit).
+          // Surface a page-level notice that survives the modal close, then
+          // refresh so the list reflects reality.
+          setStaleNotice(
+            "That campaign changed since you opened it. The list has been refreshed.",
+          );
           await loadPending();
           closeDetail();
+          return false;
+        }
+        if (!res.ok) {
+          setActionError("Something went wrong. Please try again.");
+          return false;
+        }
+        return true;
+      } catch {
+        if (mountedRef.current) {
+          setActionError("Something went wrong. Please try again.");
         }
         return false;
+      } finally {
+        if (mountedRef.current) setActionPending(false);
       }
-      return true;
-    } catch {
-      if (mountedRef.current) {
-        setActionError("Something went wrong. Please try again.");
-      }
-      return false;
-    } finally {
-      if (mountedRef.current) setActionPending(false);
-    }
-  }
+    },
+    [loadPending, closeDetail],
+  );
 
   const handleApprove = useCallback(async () => {
     if (!selected) return;
@@ -160,8 +188,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
       await loadPending();
       closeDetail();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, operatorId, loadPending, closeDetail]);
+  }, [selected, operatorId, runAction, loadPending, closeDetail]);
 
   const handleReject = useCallback(async () => {
     if (!selected || rejectReason.trim().length === 0) return;
@@ -173,8 +200,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
       await loadPending();
       closeDetail();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, operatorId, rejectReason, loadPending, closeDetail]);
+  }, [selected, operatorId, rejectReason, runAction, loadPending, closeDetail]);
 
   const handleSaveEdits = useCallback(async () => {
     if (!selected) return;
@@ -192,8 +218,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
       await loadPending();
       closeDetail();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, operatorId, edits, loadPending, closeDetail]);
+  }, [selected, operatorId, edits, runAction, loadPending, closeDetail]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -201,8 +226,9 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
     return (
       <Panel>
         <div
-          className="h-160 w-full rounded-lg bg-cream-200 motion-safe:animate-pulse"
+          role="status"
           aria-label="Loading campaigns"
+          className="h-160 w-full rounded-lg bg-cream-200 motion-safe:animate-pulse"
         />
       </Panel>
     );
@@ -220,20 +246,33 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
 
   if (proposals.length === 0) {
     return (
-      <Panel>
-        <div className="flex flex-col items-center justify-center py-64 text-center">
-          <p className="text-body-strong text-ink-900">No campaigns are waiting for review.</p>
-          <p className="mt-8 max-w-md text-meta text-ink-500">
-            When the agent finishes preparing a campaign for one of your customer groups, it will
-            appear here for your approval.
+      <>
+        {staleNotice && (
+          <p className="mb-12 text-meta text-ink-500" role="status">
+            {staleNotice}
           </p>
-        </div>
-      </Panel>
+        )}
+        <Panel>
+          <div className="flex flex-col items-center justify-center py-64 text-center">
+            <p className="text-body-strong text-ink-900">No campaigns are waiting for review.</p>
+            <p className="mt-8 max-w-md text-meta text-ink-500">
+              When the agent finishes preparing a campaign for one of your customer groups, it
+              will appear here for your approval.
+            </p>
+          </div>
+        </Panel>
+      </>
     );
   }
 
   return (
     <>
+      {staleNotice && (
+        <p className="mb-12 text-meta text-ink-500" role="status">
+          {staleNotice}
+        </p>
+      )}
+
       <ul className="flex flex-col gap-12">
         {proposals.map((proposal) => (
           <li key={proposal.proposalId}>
@@ -263,6 +302,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
               {mode === "view" && (
                 <ProposalDetailView
                   variants={selected.variants}
+                  voicePhrases={voicePhrases}
                   onApprove={() => void handleApprove()}
                   onEdit={() => startEditing(selected)}
                   onReject={() => {
@@ -281,7 +321,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
                   onChange={(index, patch) =>
                     setEdits((prev) => ({
                       ...prev,
-                      [index]: { ...prev[index]!, ...patch },
+                      [index]: { ...(prev[index] ?? EMPTY_EDIT), ...patch },
                     }))
                   }
                   onSave={() => void handleSaveEdits()}
@@ -345,9 +385,9 @@ function ProposalCard({
           </div>
         </div>
         <div className="text-right">
-          <div className="text-label text-ink-500">Est. restored revenue</div>
+          <div className="text-label text-ink-500">Projected revenue</div>
           <div className="text-body-strong text-ink-900">
-            {restoredRange(proposal.variants.map((v) => v.expectedImpact))}
+            {projectedRange(proposal.variants.map((v) => v.expectedImpact))}
           </div>
         </div>
       </div>
@@ -371,12 +411,14 @@ function ProposalCard({
 
 function ProposalDetailView({
   variants,
+  voicePhrases,
   onApprove,
   onEdit,
   onReject,
   actionPending,
 }: {
   variants: ProposalVariant[];
+  voicePhrases: string[];
   onApprove: () => void;
   onEdit: () => void;
   onReject: () => void;
@@ -384,12 +426,19 @@ function ProposalDetailView({
 }) {
   return (
     <div>
+      <p className="mb-12 text-meta text-ink-500">
+        These are the agent&apos;s three recommended approaches for this group. The figures are
+        pre-send projections — once a campaign runs, the held-back customers let you measure its
+        true lift.
+      </p>
+
       <div className="grid grid-cols-1 gap-12 md:grid-cols-3">
-        {variants.map((v, i) => {
+        {variants.map((v) => {
           const impact = readImpact(v.expectedImpact);
+          const used = signaturePhrasesUsed(v.messageDraft, voicePhrases);
           return (
             <Card key={v.armId} className="flex flex-col gap-8 p-16">
-              <div className="text-micro uppercase text-ink-300">Variant {i + 1}</div>
+              <div className="text-micro uppercase text-ink-500">Variant {v.variantIndex + 1}</div>
               <div className="flex flex-wrap gap-6">
                 <Tag tone="active">{offerTypeLabel(v.offerType)}</Tag>
                 <Tag tone="stalled">{toneLabel(v.tone)}</Tag>
@@ -400,9 +449,16 @@ function ProposalDetailView({
               <p className="rounded-sm bg-cream-100 p-10 text-body text-ink-900">
                 {v.messageDraft}
               </p>
-              <div className="text-mini text-ink-300">{v.messageDraft.length}/{MESSAGE_MAX} characters</div>
+              <div className="text-mini text-ink-500">
+                {v.messageDraft.length}/{MESSAGE_MAX} characters
+              </div>
+              <div className="text-mini text-ink-500">
+                {used.length > 0
+                  ? `Brand phrases used: ${used.join(", ")}`
+                  : "No brand signature phrases used"}
+              </div>
               <div className="mt-auto border-t border-border pt-8 text-mini text-ink-500">
-                Est. response {Math.round(impact.rate * 100)}% · {money(impact.revenue)} restored
+                Est. response {Math.round(impact.rate * 100)}% · {money(impact.revenue)} projected
               </div>
             </Card>
           );
@@ -429,6 +485,27 @@ function ProposalDetailView({
 // and tone are the agent's structural choices and are read-only.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** True if any editor field differs from the agent's original variant. */
+function hasAnyChange(
+  variants: ProposalVariant[],
+  edits: Record<number, EditableVariant>,
+): boolean {
+  return variants.some((v) => {
+    const e = edits[v.variantIndex];
+    if (!e) return false;
+    return (
+      e.messageDraft !== v.messageDraft ||
+      e.offerValue !== v.offerValue ||
+      e.sendTimeWindow !== v.sendTimeWindow
+    );
+  });
+}
+
+/** True if any edited message draft exceeds the SMS length ceiling. */
+function anyMessageOverLimit(edits: Record<number, EditableVariant>): boolean {
+  return Object.values(edits).some((e) => e.messageDraft.length > MESSAGE_MAX);
+}
+
 function ProposalEditor({
   variants,
   edits,
@@ -444,46 +521,48 @@ function ProposalEditor({
   onCancel: () => void;
   actionPending: boolean;
 }) {
+  const changed = hasAnyChange(variants, edits);
+  const overLimit = anyMessageOverLimit(edits);
+
   return (
     <div>
       <div className="flex flex-col gap-16">
-        {variants.map((v, i) => {
+        {variants.map((v) => {
           const edit = edits[v.variantIndex];
           if (!edit) return null;
-          const overLimit = edit.messageDraft.length > MESSAGE_MAX;
+          const len = edit.messageDraft.length;
+          const isOver = len > MESSAGE_MAX;
+          const countId = `count-${v.armId}`;
+          const countClass = isOver
+            ? "mt-2 text-mini text-danger-500"
+            : len >= 150
+              ? "mt-2 text-mini text-warning-500"
+              : "mt-2 text-mini text-ink-500";
           return (
             <Card key={v.armId} className="flex flex-col gap-10 p-16">
               <div className="flex items-center gap-6">
-                <span className="text-micro uppercase text-ink-300">Variant {i + 1}</span>
+                <span className="text-micro uppercase text-ink-500">
+                  Variant {v.variantIndex + 1}
+                </span>
                 <Tag tone="stalled">{offerTypeLabel(v.offerType)}</Tag>
                 <Tag tone="stalled">{toneLabel(v.tone)}</Tag>
               </div>
 
               <div>
-                <label
-                  htmlFor={`msg-${v.armId}`}
-                  className="mb-4 block text-label text-ink-700"
-                >
+                <label htmlFor={`msg-${v.armId}`} className="mb-4 block text-label text-ink-700">
                   Message
                 </label>
                 <textarea
                   id={`msg-${v.armId}`}
                   value={edit.messageDraft}
-                  maxLength={MESSAGE_MAX}
                   rows={3}
+                  aria-describedby={countId}
+                  aria-invalid={isOver}
                   onChange={(e) => onChange(v.variantIndex, { messageDraft: e.target.value })}
                   className="w-full rounded-sm border border-cream-300 bg-cream-50 p-10 text-body text-ink-900 focus-visible:border-lavender-500 focus-visible:outline-none focus-visible:shadow-focus"
                 />
-                <div
-                  className={
-                    overLimit
-                      ? "mt-2 text-mini text-danger-500"
-                      : edit.messageDraft.length >= 150
-                        ? "mt-2 text-mini text-warning-500"
-                        : "mt-2 text-mini text-ink-300"
-                  }
-                >
-                  {edit.messageDraft.length}/{MESSAGE_MAX} characters
+                <div id={countId} className={countClass} aria-live="polite">
+                  {len}/{MESSAGE_MAX} characters{isOver ? " — too long for one SMS" : ""}
                 </div>
               </div>
 
@@ -533,7 +612,7 @@ function ProposalEditor({
         <Button variant="secondary" onClick={onCancel} disabled={actionPending}>
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={actionPending}>
+        <Button onClick={onSave} disabled={actionPending || !changed || overLimit}>
           {actionPending ? "Saving…" : "Save changes"}
         </Button>
       </div>

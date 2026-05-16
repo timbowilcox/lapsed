@@ -103,14 +103,30 @@ export function money(wholeUnits: number): string {
 }
 
 /**
- * The restored-revenue range across a proposal's variants: "$900" when every
+ * The projected-revenue range across a proposal's variants: "$900" when every
  * variant agrees, "$900–$2,400" otherwise. `impacts` is the list of each
  * variant's expected_impact jsonb.
+ *
+ * NOTE: this is a pre-send GROSS projection from the AI Campaign Designer —
+ * not a measured outcome. "Restored revenue" is reserved for the
+ * holdout-validated, incrementality-adjusted figure Sprint 08 computes
+ * (decision 6 + design tenet 4). The UI must label this "projected", never
+ * "restored".
  */
-export function restoredRange(impacts: unknown[]): string {
+export function projectedRange(impacts: unknown[]): string {
   if (impacts.length === 0) return money(0);
   const revenues = impacts.map((i) => readImpact(i).revenue);
   const lo = Math.min(...revenues);
   const hi = Math.max(...revenues);
   return lo === hi ? money(lo) : `${money(lo)}–${money(hi)}`;
+}
+
+/**
+ * Returns the merchant's brand signature phrases that appear in a message
+ * draft (case-insensitive substring match). Pure — powers the detail view's
+ * "brand phrases used" indicator.
+ */
+export function signaturePhrasesUsed(messageDraft: string, phrases: string[]): string[] {
+  const haystack = messageDraft.toLowerCase();
+  return phrases.filter((p) => p.trim().length > 0 && haystack.includes(p.toLowerCase()));
 }

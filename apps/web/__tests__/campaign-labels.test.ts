@@ -10,7 +10,8 @@ import {
   toneLabel,
   readImpact,
   money,
-  restoredRange,
+  projectedRange,
+  signaturePhrasesUsed,
 } from "../app/app/campaigns/_labels";
 
 describe("groupLabel", () => {
@@ -73,10 +74,10 @@ describe("money", () => {
   });
 });
 
-describe("restoredRange", () => {
+describe("projectedRange", () => {
   it("shows a single value when every variant agrees", () => {
     expect(
-      restoredRange([
+      projectedRange([
         { estimated_recovered_revenue: 900 },
         { estimated_recovered_revenue: 900 },
         { estimated_recovered_revenue: 900 },
@@ -86,7 +87,7 @@ describe("restoredRange", () => {
 
   it("shows a low–high range when variants differ", () => {
     expect(
-      restoredRange([
+      projectedRange([
         { estimated_recovered_revenue: 900 },
         { estimated_recovered_revenue: 2400 },
         { estimated_recovered_revenue: 1500 },
@@ -94,7 +95,29 @@ describe("restoredRange", () => {
     ).toBe("$900–$2,400");
   });
 
+  it("coerces a malformed impact entry to 0", () => {
+    expect(
+      projectedRange([{ wrong: 1 }, { estimated_recovered_revenue: 500 }]),
+    ).toBe("$0–$500");
+  });
+
   it("returns $0 for an empty variant list", () => {
-    expect(restoredRange([])).toBe("$0");
+    expect(projectedRange([])).toBe("$0");
+  });
+});
+
+describe("signaturePhrasesUsed", () => {
+  it("returns the brand phrases that appear in the draft (case-insensitive)", () => {
+    expect(
+      signaturePhrasesUsed("Come back for our SMALL BATCH roast", ["small batch", "hand-poured"]),
+    ).toEqual(["small batch"]);
+  });
+
+  it("returns an empty array when no brand phrase is used", () => {
+    expect(signaturePhrasesUsed("Here is 10% off", ["small batch"])).toEqual([]);
+  });
+
+  it("ignores blank phrases", () => {
+    expect(signaturePhrasesUsed("anything", ["   ", ""])).toEqual([]);
   });
 });
