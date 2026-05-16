@@ -355,4 +355,114 @@ describe("editProposal", () => {
     expect(newProposed).toHaveLength(1);
     expect((newProposed[0]!.payload as FakeRow).tokens_input).toBe(0);
   });
+
+  it("throws when an edit targets a variant index that does not exist", async () => {
+    const pid = randomUUID();
+    const seed = seedPendingProposal(pid);
+    seed.campaign_arms = [armRow(pid, 0)]; // only variant 0 exists
+    const { client } = makeFakeSupabase(seed);
+    await expect(
+      editProposal(client, MERCHANT_ID, pid, USER_ID, [{ variantIndex: 2, messageDraft: "x" }]),
+    ).rejects.toThrow(/variant 2, which does not exist/);
+  });
+
+  it("throws when editing a rejected proposal", async () => {
+    const pid = randomUUID();
+    const seed = seedPendingProposal(pid);
+    seed.campaign_events.push(eventRow(pid, "campaign_rejected", "2026-05-16T11:00:00.000Z"));
+    const { client } = makeFakeSupabase(seed);
+    await expect(
+      editProposal(client, MERCHANT_ID, pid, USER_ID, [{ variantIndex: 0, messageDraft: "x" }]),
+    ).rejects.toThrow(/only a pending proposal can be edited/);
+  });
+
+  it("copies no snapshot rows when the original proposal has none", async () => {
+    const pid = randomUUID();
+    const seed = seedPendingProposal(pid);
+    seed.campaign_group_snapshots = [];
+    const { client, tables } = makeFakeSupabase(seed);
+    const result = await editProposal(client, MERCHANT_ID, pid, USER_ID, [
+      { variantIndex: 0, messageDraft: "x" },
+    ]);
+    expect(
+      tables.campaign_group_snapshots!.filter((s) => s.proposal_id === result.newProposalId),
+    ).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State-machine guards + DB-error propagation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("approval state-machine guards", () => {
+  function seedEdited(pid: string) {
+    const seed = seedPendingProposal(pid);
+    seed.campaign_events.push(eventRow(pid, "proposal_edited", "2026-05-16T11:00:00.000Z"));
+    return seed;
+  }
+
+  it("approveProposal throws on an edited (superseded) proposal", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedEdited(pid));
+    await expect(approveProposal(client, MERCHANT_ID, pid, USER_ID)).rejects.toThrow(
+      /edited and cannot be approved/,
+    );
+  });
+
+  it("rejectProposal throws on an edited (superseded) proposal", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedEdited(pid));
+    await expect(rejectProposal(client, MERCHANT_ID, pid, USER_ID, "x")).rejects.toThrow(
+      /edited and cannot be rejected/,
+    );
+  });
+
+  it("rejectProposal throws when the proposal belongs to a different merchant", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid));
+    await expect(rejectProposal(client, OTHER_MERCHANT, pid, USER_ID, "x")).rejects.toThrow(
+      /not found for merchant/,
+    );
+  });
+
+  it("approveProposal propagates a campaign_events write error", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_events", op: "upsert" }],
+    });
+    await expect(approveProposal(client, MERCHANT_ID, pid, USER_ID)).rejects.toThrow(/fake error/);
+  });
+
+  it("rejectProposal propagates a campaign_events write error", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_events", op: "upsert" }],
+    });
+    await expect(
+      rejectProposal(client, MERCHANT_ID, pid, USER_ID, "x"),
+    ).rejects.toThrow(/fake error/);
+  });
+
+  it("editProposal propagates a new-proposal insert error", async () => {
+    const pid = randomUUID();
+    const { client } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_proposals", op: "insert" }],
+    });
+    await expect(
+      editProposal(client, MERCHANT_ID, pid, USER_ID, [{ variantIndex: 0, messageDraft: "x" }]),
+    ).rejects.toThrow(/fake error/);
+  });
+
+  it("approveProposal reconciles missing bandit_state on a re-approve (idempotent init)", async () => {
+    // Simulate a partial prior approval: the campaign_approved event exists but
+    // no bandit_state rows were written. A re-approve must initialize them.
+    const pid = randomUUID();
+    const seed = seedPendingProposal(pid);
+    seed.campaign_events.push(eventRow(pid, "campaign_approved", "2026-05-16T11:00:00.000Z"));
+    const { client, tables } = makeFakeSupabase(seed);
+    expect(tables.bandit_state ?? []).toHaveLength(0);
+    const result = await approveProposal(client, MERCHANT_ID, pid, USER_ID);
+    expect(result.alreadyApproved).toBe(true);
+    expect(tables.bandit_state).toHaveLength(3);
+  });
 });

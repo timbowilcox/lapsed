@@ -683,14 +683,20 @@ interface CampaignEventLite {
  * log — `proposed | approved | rejected | edited`. Read-only; does not touch
  * the materialized cache. The latest event wins, tie-broken on
  * (occurred_at, ingested_at, id) descending.
+ *
+ * Scoped to `merchantId` for defense-in-depth beyond RLS, consistent with the
+ * other campaign read helpers — a cross-merchant proposalId yields `proposed`
+ * (the no-events default) rather than another tenant's real status.
  */
 export async function getCampaignStatus(
   client: LapsedSupabaseClient,
+  merchantId: string,
   proposalId: string,
 ): Promise<CampaignProposalStatus> {
   const { data, error } = await client
     .from("campaign_events")
     .select("event_type")
+    .eq("merchant_id", merchantId)
     .eq("proposal_id", proposalId)
     .order("occurred_at", { ascending: false })
     .order("ingested_at", { ascending: false })
@@ -807,6 +813,12 @@ export async function getProposalById(
   const counts = await fetchSnapshotCounts(client, merchantId, [proposalId]);
   const c = counts.get(proposalId) ?? { customerCount: 0, holdoutCount: 0 };
 
+  // Derive status from the event log rather than trusting the materialized
+  // `campaign_proposals.status` cache, consistent with getCampaignStatus —
+  // the detail view is where a merchant acts on the proposal, so a stale
+  // cache value must never surface here.
+  const status = await getCampaignStatus(client, merchantId, proposalId);
+
   const { data: banditRows, error: banditErr } = await client
     .from("bandit_state")
     .select("arm_id, alpha, beta, observation_count, last_updated_at")
@@ -819,7 +831,7 @@ export async function getProposalById(
     merchantId: proposal.merchant_id,
     groupSlug: proposal.group_slug,
     versionNumber: proposal.version_number,
-    status: proposal.status as CampaignProposalStatus,
+    status,
     modelVersion: proposal.model_version,
     generatedAt: proposal.generated_at,
     approvedAt: proposal.approved_at,

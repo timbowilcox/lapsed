@@ -60,31 +60,30 @@ export async function approveProposal(
   // does not belong to the merchant) and returns the current status.
   const before = await materializeCampaign(serviceClient, merchantId, proposalId);
 
-  if (before.status === "approved") {
-    const armIds = await getProposalArmIds(serviceClient, merchantId, proposalId);
-    return {
-      proposalId,
-      status: "approved",
-      alreadyApproved: true,
-      initializedArmIds: armIds,
-    };
-  }
   if (before.status === "rejected" || before.status === "edited") {
     throw new Error(
       `approveProposal: proposal ${proposalId} is ${before.status} and cannot be approved`,
     );
   }
 
-  await appendCampaignEvent(serviceClient, {
-    eventType: "campaign_approved",
-    merchantId,
-    proposalId,
-    occurredAt: new Date().toISOString(),
-    payload: { user_id: userId },
-  });
-  await materializeCampaign(serviceClient, merchantId, proposalId);
+  const alreadyApproved = before.status === "approved";
+  if (!alreadyApproved) {
+    await appendCampaignEvent(serviceClient, {
+      eventType: "campaign_approved",
+      merchantId,
+      proposalId,
+      occurredAt: new Date().toISOString(),
+      payload: { user_id: userId },
+    });
+    await materializeCampaign(serviceClient, merchantId, proposalId);
+  }
 
   // Initialize the Beta(1,1) bandit posterior for each arm (decision 14).
+  // This runs on both the fresh and the already-approved path:
+  // initializeBanditArm is idempotent (read-first), so a re-approve after a
+  // partial prior approval (crash between the event write and the bandit
+  // loop) reconciles the missing arms rather than silently leaving an
+  // approved campaign with no bandit state.
   const armIds = await getProposalArmIds(serviceClient, merchantId, proposalId);
   for (const armId of armIds) {
     await initializeBanditArm(serviceClient, { armId, merchantId, proposalId });
@@ -93,7 +92,7 @@ export async function approveProposal(
   return {
     proposalId,
     status: "approved",
-    alreadyApproved: false,
+    alreadyApproved,
     initializedArmIds: armIds,
   };
 }
@@ -258,6 +257,17 @@ export async function editProposal(
     throw new Error(`editProposal: proposal ${proposalId} has no arms to edit`);
   }
 
+  // Every edit must target an arm that actually exists — an edit aimed at a
+  // missing variant index would otherwise be silently dropped.
+  const armIndices = new Set(arms.map((a) => a.variant_index));
+  for (const e of validEdits) {
+    if (!armIndices.has(e.variantIndex)) {
+      throw new Error(
+        `editProposal: edit targets variant ${e.variantIndex}, which does not exist on proposal ${proposalId}`,
+      );
+    }
+  }
+
   // Apply the edits, recording which fields changed.
   const editByIndex = new Map(validEdits.map((e) => [e.variantIndex, e]));
   const fieldsChanged: string[] = [];
@@ -305,8 +315,19 @@ export async function editProposal(
     })
     .select("id")
     .single();
-  if (newProposalErr || !newProposal) {
-    throw newProposalErr ?? new Error("editProposal: new proposal insert returned no row");
+  if (newProposalErr) {
+    // The partial-unique index on supersedes_proposal_id serializes concurrent
+    // edits of the same proposal: the loser's insert fails with a unique
+    // violation. Surface a clear, actionable error rather than a raw 23505.
+    if ((newProposalErr as { code?: string }).code === "23505") {
+      throw new Error(
+        `editProposal: proposal ${proposalId} was concurrently edited; reload and retry`,
+      );
+    }
+    throw newProposalErr;
+  }
+  if (!newProposal) {
+    throw new Error("editProposal: new proposal insert returned no row");
   }
   const newProposalId = newProposal.id;
 

@@ -77,16 +77,28 @@ export interface FakeSupabase {
   tables: Record<string, FakeRow[]>;
 }
 
+export interface FakeSupabaseOptions {
+  /** Inject a failure for a specific table + operation. */
+  failOn?: Array<{ table: string; op: "select" | "insert" | "update" | "upsert" }>;
+}
+
 /**
  * Builds an in-memory Supabase fake. `seed` pre-populates tables; the returned
  * `tables` map can be inspected directly after running code under test.
+ * `opts.failOn` injects an error for a given table + operation.
  */
-export function makeFakeSupabase(seed: Record<string, FakeRow[]> = {}): FakeSupabase {
+export function makeFakeSupabase(
+  seed: Record<string, FakeRow[]> = {},
+  opts: FakeSupabaseOptions = {},
+): FakeSupabase {
   const tables: Record<string, FakeRow[]> = {};
   for (const [t, rows] of Object.entries(seed)) {
     tables[t] = rows.map((r) => ({ ...r }));
   }
   const tableOf = (t: string): FakeRow[] => (tables[t] ??= []);
+  const failOn = opts.failOn ?? [];
+  const shouldFail = (table: string, op: string): boolean =>
+    failOn.some((f) => f.table === table && f.op === op);
 
   function makeBuilder(table: string, op: "select" | "insert" | "update" | "upsert", payload?: unknown) {
     const filters: Filter[] = [];
@@ -97,6 +109,9 @@ export function makeFakeSupabase(seed: Record<string, FakeRow[]> = {}): FakeSupa
     let countHead = false;
 
     function run(): { data: unknown; error: unknown; count?: number } {
+      if (shouldFail(table, op)) {
+        return { data: null, error: { message: `fake error: ${op} on ${table}` } };
+      }
       if (op === "insert") {
         const rows = Array.isArray(payload) ? payload : [payload];
         const inserted = rows.map((r) => applyDefaults(table, r as FakeRow));
@@ -105,9 +120,23 @@ export function makeFakeSupabase(seed: Record<string, FakeRow[]> = {}): FakeSupa
         return { data: inserted, error: null };
       }
       if (op === "upsert") {
-        const rows = Array.isArray(payload) ? payload : [payload];
-        for (const raw of rows as FakeRow[]) {
+        const { rows, opts: upsertOpts } = payload as {
+          rows: FakeRow | FakeRow[];
+          opts?: { onConflict?: string; ignoreDuplicates?: boolean };
+        };
+        const rowsArr = Array.isArray(rows) ? rows : [rows];
+        const conflictCols = upsertOpts?.onConflict
+          ? upsertOpts.onConflict.split(",").map((c) => c.trim())
+          : [];
+        const ignoreDuplicates = upsertOpts?.ignoreDuplicates === true;
+        for (const raw of rowsArr) {
           const row = applyDefaults(table, raw);
+          if (ignoreDuplicates && conflictCols.length > 0) {
+            const dup = tableOf(table).some((existing) =>
+              conflictCols.every((col) => existing[col] === row[col]),
+            );
+            if (dup) continue; // ON CONFLICT DO NOTHING
+          }
           tableOf(table).push(row);
         }
         return { data: null, error: null };
@@ -185,7 +214,8 @@ export function makeFakeSupabase(seed: Record<string, FakeRow[]> = {}): FakeSupa
       },
       insert: (rows: unknown) => makeBuilder(table, "insert", rows),
       update: (row: unknown) => makeBuilder(table, "update", row),
-      upsert: (rows: unknown) => makeBuilder(table, "upsert", rows),
+      upsert: (rows: unknown, upsertOpts?: unknown) =>
+        makeBuilder(table, "upsert", { rows, opts: upsertOpts }),
     }),
   } as unknown as LapsedSupabaseClient;
 

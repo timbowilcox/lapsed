@@ -141,7 +141,7 @@ function snap(proposalId: string, customerId: string, holdout: boolean): Row {
 describe("getCampaignStatus", () => {
   it("returns proposed when there are no events", async () => {
     const client = makeClient({ campaign_events: [] });
-    expect(await getCampaignStatus(client, "p1")).toBe("proposed");
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("proposed");
   });
 
   it("returns proposed when the latest event is arms_initialized", async () => {
@@ -151,7 +151,7 @@ describe("getCampaignStatus", () => {
         ev("p1", "arms_initialized", "2026-05-16T10:00:02.000Z"),
       ],
     });
-    expect(await getCampaignStatus(client, "p1")).toBe("proposed");
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("proposed");
   });
 
   it("returns approved when the latest event is campaign_approved", async () => {
@@ -161,7 +161,7 @@ describe("getCampaignStatus", () => {
         ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z"),
       ],
     });
-    expect(await getCampaignStatus(client, "p1")).toBe("approved");
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("approved");
   });
 
   it("returns rejected when the latest event is campaign_rejected", async () => {
@@ -171,7 +171,7 @@ describe("getCampaignStatus", () => {
         ev("p1", "campaign_rejected", "2026-05-16T13:00:00.000Z"),
       ],
     });
-    expect(await getCampaignStatus(client, "p1")).toBe("rejected");
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("rejected");
   });
 
   it("returns edited when the latest event is proposal_edited", async () => {
@@ -181,7 +181,31 @@ describe("getCampaignStatus", () => {
         ev("p1", "proposal_edited", "2026-05-16T14:00:00.000Z"),
       ],
     });
-    expect(await getCampaignStatus(client, "p1")).toBe("edited");
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("edited");
+  });
+
+  it("tie-breaks two same-occurred_at events by ingested_at then id", async () => {
+    // Both events share occurred_at; the rejection was ingested later, so it
+    // is the latest event and wins.
+    const approved = {
+      ...ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z"),
+      id: "evt-aaaa",
+      ingested_at: "2026-05-16T12:00:00.100Z",
+    };
+    const rejected = {
+      ...ev("p1", "campaign_rejected", "2026-05-16T12:00:00.000Z"),
+      id: "evt-bbbb",
+      ingested_at: "2026-05-16T12:00:00.900Z",
+    };
+    const client = makeClient({ campaign_events: [approved, rejected] });
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("rejected");
+  });
+
+  it("ignores another merchant's events (returns proposed when none are own)", async () => {
+    const client = makeClient({
+      campaign_events: [ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z", OTHER_MERCHANT)],
+    });
+    expect(await getCampaignStatus(client, MERCHANT_ID, "p1")).toBe("proposed");
   });
 });
 
@@ -270,6 +294,17 @@ describe("getPendingProposals", () => {
     const client = makeClient({ campaign_events: [] });
     expect(await getPendingProposals(client, MERCHANT_ID)).toEqual([]);
   });
+
+  it("excludes another merchant's pending proposals", async () => {
+    const client = makeClient({
+      campaign_events: [
+        ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z", OTHER_MERCHANT),
+        ev("p1", "arms_initialized", "2026-05-16T10:00:02.000Z", OTHER_MERCHANT),
+      ],
+      campaign_proposals: [proposal("p1", { merchant_id: OTHER_MERCHANT })],
+    });
+    expect(await getPendingProposals(client, MERCHANT_ID)).toEqual([]);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +365,27 @@ describe("getProposalById", () => {
     expect(await getProposalById(client, OTHER_MERCHANT, "p1")).toBeNull();
   });
 
+  it("surfaces the rejection metadata on a rejected proposal", async () => {
+    const client = makeClient({
+      campaign_proposals: [
+        proposal("p1", {
+          status: "rejected",
+          rejected_at: "2026-05-16T13:00:00.000Z",
+          rejection_reason: "offer too aggressive",
+        }),
+      ],
+      campaign_arms: [arm("p1", 0)],
+      campaign_events: [
+        ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
+        ev("p1", "campaign_rejected", "2026-05-16T13:00:00.000Z"),
+      ],
+    });
+    const detail = await getProposalById(client, MERCHANT_ID, "p1");
+    expect(detail!.status).toBe("rejected");
+    expect(detail!.rejectedAt).toBe("2026-05-16T13:00:00.000Z");
+    expect(detail!.rejectionReason).toBe("offer too aggressive");
+  });
+
   it("surfaces the approval metadata on an approved proposal", async () => {
     const client = makeClient({
       campaign_proposals: [
@@ -340,10 +396,29 @@ describe("getProposalById", () => {
         }),
       ],
       campaign_arms: [arm("p1", 0)],
+      campaign_events: [
+        ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
+        ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z"),
+      ],
     });
     const detail = await getProposalById(client, MERCHANT_ID, "p1");
     expect(detail!.status).toBe("approved");
     expect(detail!.approvedByUserId).toBe("user_9");
     expect(detail!.approvedAt).toBe("2026-05-16T12:00:00.000Z");
+  });
+
+  it("derives status from the event log, not the stale campaign_proposals.status cache", async () => {
+    // The cache row still says 'proposed' but a campaign_approved event exists —
+    // getProposalById must report the event-derived 'approved'.
+    const client = makeClient({
+      campaign_proposals: [proposal("p1", { status: "proposed" })],
+      campaign_arms: [arm("p1", 0)],
+      campaign_events: [
+        ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
+        ev("p1", "campaign_approved", "2026-05-16T12:00:00.000Z"),
+      ],
+    });
+    const detail = await getProposalById(client, MERCHANT_ID, "p1");
+    expect(detail!.status).toBe("approved");
   });
 });
