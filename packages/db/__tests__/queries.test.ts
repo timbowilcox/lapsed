@@ -630,29 +630,65 @@ describe("getLapsedCustomersWithSignals", () => {
 
 const VOICE_VERSION_ID = "99999999-9999-4999-8999-999999999999";
 
-/** Builds a client whose voice_events query resolves to `events` (newest-first). */
-function makeExtractionStatusClient(
-  events: Record<string, unknown>[] | null,
-  error?: { message: string } | null,
-) {
-  const eqCall = vi.fn().mockReturnThis();
-  const limitCall = vi
-    .fn()
-    .mockResolvedValue(error ? { data: null, error } : { data: events, error: null });
+/**
+ * Builds a client for getExtractionStatus, which issues TWO voice_events
+ * queries: (1) the boundary query for the latest extraction_started, ending
+ * in .maybeSingle(); (2) the current-run query, ending in .order().
+ */
+function makeExtractionStatusClient(opts: {
+  startedRow?: { occurred_at: string } | null;
+  runEvents?: Record<string, unknown>[];
+  startedError?: { message: string } | null;
+  runError?: { message: string } | null;
+}) {
+  const { startedRow = null, runEvents = [], startedError = null, runError = null } = opts;
+  let fromCall = 0;
+  const eqCalls: Array<[string, unknown]> = [];
+
   const client = {
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      eq: eqCall,
-      order: vi.fn().mockReturnThis(),
-      limit: limitCall,
-    })),
+    from: vi.fn(() => {
+      fromCall += 1;
+      if (fromCall === 1) {
+        // Boundary query: select → eq → eq → order → limit → maybeSingle
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: (c: string, v: unknown) => {
+            eqCalls.push([c, v]);
+            return chain;
+          },
+          order: () => chain,
+          limit: () => chain,
+          maybeSingle: () =>
+            Promise.resolve(
+              startedError ? { data: null, error: startedError } : { data: startedRow, error: null },
+            ),
+        };
+        return chain;
+      }
+      // Current-run query: select → eq → gte → order (awaited)
+      const runResult = runError
+        ? { data: null, error: runError }
+        : { data: runEvents, error: null };
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: (c: string, v: unknown) => {
+          eqCalls.push([c, v]);
+          return chain;
+        },
+        gte: () => chain,
+        order: () => Promise.resolve(runResult),
+      };
+      return chain;
+    }),
   } as unknown as LapsedSupabaseClient;
-  return { client, eqCall, limitCall };
+  return { client, eqCalls };
 }
 
+const STARTED_T0 = "2026-05-16T10:00:00.000Z";
+
 describe("getExtractionStatus", () => {
-  it("returns analyzing with null fields when no voice events exist", async () => {
-    const { client } = makeExtractionStatusClient([]);
+  it("returns analyzing with null fields when no extraction has started", async () => {
+    const { client } = makeExtractionStatusClient({ startedRow: null });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result).toEqual({
       phase: "analyzing",
@@ -664,45 +700,55 @@ describe("getExtractionStatus", () => {
   });
 
   it("derives analyzing from a lone extraction_started event", async () => {
-    const { client } = makeExtractionStatusClient([
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [{ event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} }],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("analyzing");
-    expect(result.startedAt).toBe("2026-05-16T10:00:00.000Z");
+    expect(result.startedAt).toBe(STARTED_T0);
     expect(result.completedAt).toBeNull();
     expect(result.voiceVersionId).toBeNull();
   });
 
   it("derives extracting from a storefront_fetched latest event", async () => {
-    const { client } = makeExtractionStatusClient([
-      { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("extracting");
-    expect(result.startedAt).toBe("2026-05-16T10:00:00.000Z");
+    expect(result.startedAt).toBe(STARTED_T0);
   });
 
   it("derives extracting from a pii_redacted latest event", async () => {
-    const { client } = makeExtractionStatusClient([
-      { event_type: "pii_redacted", occurred_at: "2026-05-16T10:00:06.000Z", payload: {} },
-      { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "pii_redacted", occurred_at: "2026-05-16T10:00:06.000Z", payload: {} },
+        { event_type: "storefront_fetched", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("extracting");
   });
 
   it("derives generating from a voice_extracted latest event and exposes the version id", async () => {
-    const { client } = makeExtractionStatusClient([
-      {
-        event_type: "voice_extracted",
-        occurred_at: "2026-05-16T10:00:10.000Z",
-        payload: { version_id: VOICE_VERSION_ID },
-      },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_extracted",
+          occurred_at: "2026-05-16T10:00:10.000Z",
+          payload: { version_id: VOICE_VERSION_ID },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("generating");
     expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
@@ -710,19 +756,22 @@ describe("getExtractionStatus", () => {
   });
 
   it("derives ready from voice_activated, with completedAt from its occurred_at", async () => {
-    const { client } = makeExtractionStatusClient([
-      {
-        event_type: "voice_activated",
-        occurred_at: "2026-05-16T10:00:11.000Z",
-        payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
-      },
-      {
-        event_type: "voice_extracted",
-        occurred_at: "2026-05-16T10:00:10.000Z",
-        payload: { version_id: VOICE_VERSION_ID },
-      },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_activated",
+          occurred_at: "2026-05-16T10:00:11.000Z",
+          payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
+        },
+        {
+          event_type: "voice_extracted",
+          occurred_at: "2026-05-16T10:00:10.000Z",
+          payload: { version_id: VOICE_VERSION_ID },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("ready");
     expect(result.completedAt).toBe("2026-05-16T10:00:11.000Z");
@@ -731,68 +780,103 @@ describe("getExtractionStatus", () => {
   });
 
   it("derives ready from a voice_edited latest event (Settings edit)", async () => {
-    const { client } = makeExtractionStatusClient([
-      {
-        event_type: "voice_edited",
-        occurred_at: "2026-05-16T12:00:00.000Z",
-        payload: { version_id: VOICE_VERSION_ID, previous_version_id: VOICE_VERSION_ID, fields_changed: ["register"] },
-      },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "voice_edited",
+          occurred_at: "2026-05-16T12:00:00.000Z",
+          payload: { version_id: VOICE_VERSION_ID, previous_version_id: VOICE_VERSION_ID, fields_changed: ["register"] },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("ready");
     expect(result.voiceVersionId).toBe(VOICE_VERSION_ID);
   });
 
   it("derives failed from extraction_failed, surfacing the reason as errorMessage", async () => {
-    const { client } = makeExtractionStatusClient([
-      {
-        event_type: "extraction_failed",
-        occurred_at: "2026-05-16T10:00:08.000Z",
-        payload: { phase: "synthesize", reason: "exhausted_retries" },
-      },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        {
+          event_type: "extraction_failed",
+          occurred_at: "2026-05-16T10:00:08.000Z",
+          payload: { phase: "synthesize", reason: "exhausted_retries" },
+        },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("failed");
     expect(result.errorMessage).toBe("exhausted_retries");
     expect(result.completedAt).toBe("2026-05-16T10:00:08.000Z");
   });
 
+  it("failed with no reason in payload yields null errorMessage", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "extraction_failed", occurred_at: "2026-05-16T10:00:08.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("failed");
+    expect(result.errorMessage).toBeNull();
+  });
+
   it("scopes to the current run — a re-extraction in progress shows no stale version id", async () => {
-    // Run 1 completed (started → activated); run 2 just started. Newest-first.
-    const { client } = makeExtractionStatusClient([
-      { event_type: "extraction_started", occurred_at: "2026-05-16T14:00:00.000Z", payload: {} },
-      {
-        event_type: "voice_activated",
-        occurred_at: "2026-05-16T10:00:11.000Z",
-        payload: { version_id: VOICE_VERSION_ID, previous_version_id: null },
-      },
-      {
-        event_type: "voice_extracted",
-        occurred_at: "2026-05-16T10:00:10.000Z",
-        payload: { version_id: VOICE_VERSION_ID },
-      },
-      { event_type: "extraction_started", occurred_at: "2026-05-16T10:00:00.000Z", payload: {} },
-    ]);
+    // The boundary query returns run 2's extraction_started; the run query
+    // (gte that timestamp) returns only run 2's events — run 1 is excluded.
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: "2026-05-16T14:00:00.000Z" },
+      runEvents: [
+        { event_type: "extraction_started", occurred_at: "2026-05-16T14:00:00.000Z", payload: {} },
+      ],
+    });
     const result = await getExtractionStatus(client, MERCHANT_ID);
     expect(result.phase).toBe("analyzing");
-    // startedAt is run 2's extraction_started, not run 1's.
     expect(result.startedAt).toBe("2026-05-16T14:00:00.000Z");
     // No version id from the prior run leaks into the in-progress run.
     expect(result.voiceVersionId).toBeNull();
   });
 
-  it("filters the query by merchant_id", async () => {
-    const { client, eqCall } = makeExtractionStatusClient([]);
-    await getExtractionStatus(client, MERCHANT_ID);
-    expect(eqCall).toHaveBeenCalledWith("merchant_id", MERCHANT_ID);
+  it("maps an unknown event type to analyzing rather than crashing", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runEvents: [
+        { event_type: "some_future_event", occurred_at: "2026-05-16T10:00:05.000Z", payload: {} },
+        { event_type: "extraction_started", occurred_at: STARTED_T0, payload: {} },
+      ],
+    });
+    const result = await getExtractionStatus(client, MERCHANT_ID);
+    expect(result.phase).toBe("analyzing");
   });
 
-  it("throws when Supabase returns an error", async () => {
-    const { client } = makeExtractionStatusClient(null, { message: "voice_events query failed" });
+  it("filters both queries by merchant_id", async () => {
+    const { client, eqCalls } = makeExtractionStatusClient({ startedRow: null });
+    await getExtractionStatus(client, MERCHANT_ID);
+    expect(eqCalls.some((c) => c[0] === "merchant_id" && c[1] === MERCHANT_ID)).toBe(true);
+  });
+
+  it("throws when the boundary query returns an error", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedError: { message: "boundary query failed" },
+    });
     await expect(getExtractionStatus(client, MERCHANT_ID)).rejects.toMatchObject({
-      message: "voice_events query failed",
+      message: "boundary query failed",
+    });
+  });
+
+  it("throws when the current-run query returns an error", async () => {
+    const { client } = makeExtractionStatusClient({
+      startedRow: { occurred_at: STARTED_T0 },
+      runError: { message: "run query failed" },
+    });
+    await expect(getExtractionStatus(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "run query failed",
     });
   });
 });

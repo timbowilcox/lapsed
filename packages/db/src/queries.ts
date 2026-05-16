@@ -433,43 +433,52 @@ function payloadString(payload: Json, key: string): string | null {
  *
  * The "current run" is every event at or after the most recent
  * `extraction_started`, so a re-extraction never surfaces a stale version id
- * from a prior run. `startedAt` is that event's occurred_at; `completedAt` is
- * the terminal event's occurred_at (`voice_activated` for `ready`,
- * `extraction_failed` for `failed`).
+ * from a prior run. The run boundary is resolved with a dedicated query for
+ * the latest `extraction_started` rather than a fixed row limit — accumulated
+ * re-extraction + edit history can be arbitrarily long. `startedAt` is that
+ * event's occurred_at; `completedAt` is the terminal event's occurred_at
+ * (`voice_activated` for `ready`, `extraction_failed` for `failed`).
  */
 export async function getExtractionStatus(
   client: LapsedSupabaseClient,
   merchantId: string,
 ): Promise<ExtractionStatus> {
-  // A single run is ≤6 events; 20 generously covers the current run plus
-  // slack while bounding the query against a long re-extraction history.
+  const notStarted: ExtractionStatus = {
+    phase: "analyzing",
+    startedAt: null,
+    completedAt: null,
+    errorMessage: null,
+    voiceVersionId: null,
+  };
+
+  // Resolve the current run's boundary: the most recent extraction_started.
+  const { data: startedRow, error: startedErr } = await client
+    .from("voice_events")
+    .select("occurred_at")
+    .eq("merchant_id", merchantId)
+    .eq("event_type", "extraction_started")
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (startedErr) throw startedErr;
+  if (!startedRow) return notStarted;
+
+  const startedAt = startedRow.occurred_at;
+
+  // Fetch every event in the current run — at or after the boundary. The
+  // boundary event itself satisfies the filter, so the result is non-empty.
   const { data, error } = await client
     .from("voice_events")
     .select("event_type, occurred_at, payload")
     .eq("merchant_id", merchantId)
-    .order("occurred_at", { ascending: false })
-    .limit(20);
-
+    .gte("occurred_at", startedAt)
+    .order("occurred_at", { ascending: false });
   if (error) throw error;
 
   const events = (data ?? []) as VoiceEventRow[];
-  if (events.length === 0) {
-    return {
-      phase: "analyzing",
-      startedAt: null,
-      completedAt: null,
-      errorMessage: null,
-      voiceVersionId: null,
-    };
-  }
+  if (events.length === 0) return { ...notStarted, startedAt };
 
-  // Events are newest-first. The current run is every event at or after the
-  // most recent extraction_started.
-  const startedIdx = events.findIndex((e) => e.event_type === "extraction_started");
-  const currentRun = startedIdx === -1 ? events : events.slice(0, startedIdx + 1);
-  const startedAt = startedIdx === -1 ? null : events[startedIdx]!.occurred_at;
-
-  const latest = currentRun[0]!;
+  const latest = events[0]!;
   const phase = phaseForEvent(latest.event_type);
 
   const completedAt = phase === "ready" || phase === "failed" ? latest.occurred_at : null;
@@ -478,7 +487,7 @@ export async function getExtractionStatus(
   // version_id is carried by voice_activated / voice_edited / voice_extracted
   // payloads — take it from the most recent carrier in the current run.
   let voiceVersionId: string | null = null;
-  for (const event of currentRun) {
+  for (const event of events) {
     const versionId = payloadString(event.payload, "version_id");
     if (versionId) {
       voiceVersionId = versionId;
