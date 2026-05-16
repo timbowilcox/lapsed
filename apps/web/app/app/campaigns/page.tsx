@@ -20,7 +20,7 @@ export default async function CampaignsPage({ searchParams }: PageProps) {
   return (
     <MerchantShell pageTitle="Campaigns">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Campaign review</h2>
+        <h1 className="mb-4 text-h1 text-ink-900">Campaign review</h1>
         <p className="text-meta text-ink-500">
           The agent drafts a campaign for each scored customer group. Review the proposals below
           and approve, edit, or reject them. Nothing is sent until you approve.

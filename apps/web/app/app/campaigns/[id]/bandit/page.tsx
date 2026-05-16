@@ -25,9 +25,27 @@ interface PageProps {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Formats a 0–1 probability as a whole-number percentage, e.g. 0.5 → "50%". */
+// The stat columns rendered per arm (everything after the Variant column). The
+// "no posterior state" fallback cell spans exactly these.
+const STAT_COLUMN_COUNT = 6;
+
+// Prose form of a proposal status for the non-approved empty state — keeps the
+// raw enum out of merchant-facing copy.
+const STATUS_PROSE: Record<string, string> = {
+  proposed: "still pending review",
+  approved: "approved",
+  rejected: "rejected",
+  edited: "a superseded version",
+};
+
+/**
+ * Formats a 0–1 probability as a percentage with one decimal place, e.g.
+ * 0.5 → "50.0%". One decimal keeps low response rates (a few percent, typical
+ * for SMS) legible once Sprint 07 posteriors replace the Beta(1,1) priors —
+ * whole-number rounding would collapse them to "0%".
+ */
 function pct(value: number): string {
-  return `${Math.round(value * 100)}%`;
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 export default async function BanditInspectorPage({ params, searchParams }: PageProps) {
@@ -63,9 +81,9 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
         >
           ← All campaigns
         </Link>
-        <h2 className="mb-4 mt-8 text-h1 text-ink-900">
+        <h1 className="mb-4 mt-8 text-h1 text-ink-900">
           {groupLabel(proposal.groupSlug)} — bandit state
-        </h2>
+        </h1>
         <p className="text-meta text-ink-500">
           Version {proposal.versionNumber} · {proposal.variants.length} variants. Each variant
           is a Thompson-sampling arm with a Beta(α, β) posterior over its response rate. As the
@@ -80,8 +98,7 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
         <Panel>
           <p className="px-16 py-40 text-center text-meta text-ink-500">
             Bandit arms are initialized when the campaign is approved. This proposal is{" "}
-            {proposal.status === "proposed" ? "still pending review" : proposal.status} — no
-            posterior state exists yet.
+            {STATUS_PROSE[proposal.status] ?? proposal.status} — no posterior state exists yet.
           </p>
         </Panel>
       )}
@@ -131,7 +148,7 @@ function ArmTable({
                 {state ? (
                   <ArmStats state={state} />
                 ) : (
-                  <TableCell colSpan={6} className="text-meta text-ink-500">
+                  <TableCell colSpan={STAT_COLUMN_COUNT} className="text-meta text-ink-500">
                     No posterior state — arm not yet initialized.
                   </TableCell>
                 )}

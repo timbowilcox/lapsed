@@ -365,6 +365,9 @@ describe("getProposalById", () => {
     expect(detail!.banditState).toHaveLength(1);
     expect(detail!.banditState[0]!.alpha).toBe(1);
     expect(detail!.banditState[0]!.beta).toBe(1);
+    // The bandit-state inspector joins each variant to its posterior on
+    // variant.banditArmId === banditState.armId — assert that key lines up.
+    expect(detail!.banditState[0]!.armId).toBe(detail!.variants[0]!.banditArmId);
   });
 
   it("returns null for a proposal that does not exist", async () => {
