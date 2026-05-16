@@ -561,6 +561,55 @@ describe.skipIf(!SUPABASE_AVAILABLE)("CHECK constraints — Sprint 06 tables", (
     }
   });
 
+  it("campaign_proposals rejects a row that supersedes itself", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      const id = "00000000-0000-0000-0000-0000000007ce";
+      await expect(
+        pg.query(
+          `insert into public.campaign_proposals
+             (id, merchant_id, group_slug, model_version, supersedes_proposal_id)
+           values ($1, $2, 'lapsed_vips', 'm', $1)`,
+          [id, merchantIdA],
+        ),
+      ).rejects.toThrow(/campaign_proposals_no_self_supersede|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("campaign_events rejects a duplicate (merchant_id, proposal_id, event_type, occurred_at)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    const occurredAt = new Date("2026-05-16T00:00:00.000Z").toISOString();
+    try {
+      await pg.query(
+        `insert into public.campaign_events
+           (merchant_id, proposal_id, event_type, occurred_at)
+         values ($1, $2, 'proposal_started', $3)`,
+        [merchantIdA, proposalIdA, occurredAt],
+      );
+      await expect(
+        pg.query(
+          `insert into public.campaign_events
+             (merchant_id, proposal_id, event_type, occurred_at)
+           values ($1, $2, 'proposal_started', $3)`,
+          [merchantIdA, proposalIdA, occurredAt],
+        ),
+      ).rejects.toThrow(/campaign_events_dedup_unique|unique/i);
+    } finally {
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.campaign_events
+         where merchant_id = $1 and event_type = 'proposal_started'`,
+        [merchantIdA],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
+      await pg.end();
+    }
+  });
+
   it("campaign_proposals supersedes index keeps the version lineage linear", async () => {
     const pg = new PgClient({ connectionString: env.dbUrl });
     await pg.connect();
