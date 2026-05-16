@@ -7,7 +7,12 @@
 
 import { describe, expect, it } from "vitest";
 import type { LapsedSupabaseClient } from "../src/index";
-import { getCampaignStatus, getPendingProposals, getProposalById } from "../src/queries";
+import {
+  getCampaignStatus,
+  getPendingProposals,
+  getProposalById,
+  getProposalsByStatus,
+} from "../src/queries";
 
 const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440000";
 const OTHER_MERCHANT = "660e8400-e29b-41d4-a716-446655440000";
@@ -432,5 +437,91 @@ describe("getProposalById", () => {
     });
     const detail = await getProposalById(client, MERCHANT_ID, "p1");
     expect(detail!.status).toBe("approved");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getProposalsByStatus
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getProposalsByStatus", () => {
+  function seed() {
+    return {
+      campaign_events: [
+        // p1 — pending (proposed)
+        ev("p1", "campaign_proposed", "2026-05-16T10:00:01.000Z"),
+        ev("p1", "arms_initialized", "2026-05-16T10:00:02.000Z"),
+        // p2 — approved
+        ev("p2", "campaign_proposed", "2026-05-15T10:00:01.000Z"),
+        ev("p2", "campaign_approved", "2026-05-15T12:00:00.000Z", MERCHANT_ID, { user_id: "u" }),
+        // p3 — rejected
+        ev("p3", "campaign_proposed", "2026-05-14T10:00:01.000Z"),
+        ev("p3", "campaign_rejected", "2026-05-14T13:00:00.000Z", MERCHANT_ID, {
+          user_id: "u",
+          reason: "offer too aggressive",
+        }),
+        // p4 — cap-failed zombie: no campaign_proposed event
+        ev("p4", "proposal_started", "2026-05-13T10:00:00.000Z"),
+        ev("p4", "proposal_failed", "2026-05-13T10:00:01.000Z"),
+      ],
+      campaign_proposals: [
+        proposal("p1", { generated_at: "2026-05-16T10:00:00.000Z" }),
+        proposal("p2", { generated_at: "2026-05-15T10:00:00.000Z", status: "approved" }),
+        proposal("p3", { generated_at: "2026-05-14T10:00:00.000Z", status: "rejected" }),
+        proposal("p4", { generated_at: "2026-05-13T10:00:00.000Z" }),
+      ],
+      campaign_arms: [
+        arm("p1", 0),
+        arm("p1", 1),
+        arm("p1", 2),
+        arm("p2", 0),
+        arm("p3", 0),
+      ],
+    };
+  }
+
+  it("returns only pending proposals for the pending filter", async () => {
+    const items = await getProposalsByStatus(makeClient(seed()), MERCHANT_ID, "pending");
+    expect(items.map((i) => i.proposalId)).toEqual(["p1"]);
+    expect(items[0]!.status).toBe("proposed");
+    expect(items[0]!.variantCount).toBe(3);
+  });
+
+  it("returns only approved proposals for the approved filter, with the approval date", async () => {
+    const items = await getProposalsByStatus(makeClient(seed()), MERCHANT_ID, "approved");
+    expect(items.map((i) => i.proposalId)).toEqual(["p2"]);
+    expect(items[0]!.approvedAt).toBe("2026-05-15T12:00:00.000Z");
+  });
+
+  it("returns only rejected proposals for the rejected filter, with the reason", async () => {
+    const items = await getProposalsByStatus(makeClient(seed()), MERCHANT_ID, "rejected");
+    expect(items.map((i) => i.proposalId)).toEqual(["p3"]);
+    expect(items[0]!.rejectionReason).toBe("offer too aggressive");
+  });
+
+  it("returns every generated proposal for the all filter, newest-first", async () => {
+    const items = await getProposalsByStatus(makeClient(seed()), MERCHANT_ID, "all");
+    expect(items.map((i) => i.proposalId)).toEqual(["p1", "p2", "p3"]);
+  });
+
+  it("excludes a cap-failed zombie with no campaign_proposed event", async () => {
+    const items = await getProposalsByStatus(makeClient(seed()), MERCHANT_ID, "all");
+    expect(items.map((i) => i.proposalId)).not.toContain("p4");
+  });
+
+  it("returns an empty array when the merchant has no proposals", async () => {
+    expect(await getProposalsByStatus(makeClient({ campaign_events: [] }), MERCHANT_ID, "all")).toEqual(
+      [],
+    );
+  });
+
+  it("excludes another merchant's proposals", async () => {
+    const client = makeClient({
+      campaign_events: [
+        ev("p9", "campaign_proposed", "2026-05-16T10:00:01.000Z", OTHER_MERCHANT),
+      ],
+      campaign_proposals: [proposal("p9", { merchant_id: OTHER_MERCHANT })],
+    });
+    expect(await getProposalsByStatus(client, MERCHANT_ID, "all")).toEqual([]);
   });
 });

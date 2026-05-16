@@ -954,3 +954,135 @@ async function fetchSnapshotCounts(
   }
   return counts;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getProposalsByStatus — the campaign-list surface (Sprint 06, chunk 10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CampaignListFilter = "pending" | "approved" | "rejected" | "all";
+
+export interface CampaignListItem {
+  proposalId: string;
+  groupSlug: string;
+  versionNumber: number;
+  status: CampaignProposalStatus;
+  generatedAt: string;
+  /** occurred_at of the campaign_approved event; null unless approved. */
+  approvedAt: string | null;
+  /** occurred_at of the campaign_rejected event; null unless rejected. */
+  rejectedAt: string | null;
+  /** reason from the campaign_rejected event; null unless rejected. */
+  rejectionReason: string | null;
+  variantCount: number;
+}
+
+interface DerivedListState {
+  status: CampaignProposalStatus;
+  hasProposed: boolean;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+}
+
+/** True when a derived status belongs in the requested list tab. */
+function matchesFilter(status: CampaignProposalStatus, filter: CampaignListFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "pending") return status === "proposed";
+  return status === filter;
+}
+
+/**
+ * Returns the merchant's campaign proposals for the campaign-list surface,
+ * filtered by tab: `pending` (status proposed), `approved`, `rejected`, or
+ * `all`. Status and the approval/rejection metadata are derived from the
+ * campaign_events log — the whole projection from one source, consistent with
+ * getProposalById. Only proposals that completed generation (have a
+ * `campaign_proposed` event) are included; a cap-exhausted zombie is excluded.
+ * Results are newest-first by generated_at.
+ */
+export async function getProposalsByStatus(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  filter: CampaignListFilter,
+): Promise<CampaignListItem[]> {
+  const { data: eventData, error: eventErr } = await client
+    .from("campaign_events")
+    .select("proposal_id, event_type, occurred_at, ingested_at, id, payload")
+    .eq("merchant_id", merchantId);
+  if (eventErr) throw eventErr;
+
+  const events = (eventData ?? []) as Array<CampaignEventLite & { payload: Json }>;
+
+  // Group events by proposal.
+  const byProposal = new Map<string, Array<CampaignEventLite & { payload: Json }>>();
+  for (const e of events) {
+    const list = byProposal.get(e.proposal_id) ?? [];
+    list.push(e);
+    byProposal.set(e.proposal_id, list);
+  }
+
+  // Derive each proposal's status + approval/rejection metadata.
+  const derived = new Map<string, DerivedListState>();
+  for (const [proposalId, evs] of byProposal) {
+    const sorted = [...evs].sort((a, b) => {
+      if (a.occurred_at !== b.occurred_at) return a.occurred_at < b.occurred_at ? 1 : -1;
+      if (a.ingested_at !== b.ingested_at) return a.ingested_at < b.ingested_at ? 1 : -1;
+      return a.id < b.id ? 1 : -1;
+    });
+    const latest = sorted[0]!;
+    let status: CampaignProposalStatus = "proposed";
+    if (latest.event_type === "campaign_approved") status = "approved";
+    else if (latest.event_type === "campaign_rejected") status = "rejected";
+    else if (latest.event_type === "proposal_edited") status = "edited";
+
+    const approvedEvent = sorted.find((e) => e.event_type === "campaign_approved");
+    const rejectedEvent = sorted.find((e) => e.event_type === "campaign_rejected");
+    derived.set(proposalId, {
+      status,
+      hasProposed: sorted.some((e) => e.event_type === "campaign_proposed"),
+      approvedAt: approvedEvent?.occurred_at ?? null,
+      rejectedAt: rejectedEvent?.occurred_at ?? null,
+      rejectionReason: rejectedEvent ? payloadString(rejectedEvent.payload, "reason") : null,
+    });
+  }
+
+  const wantedIds = [...derived.entries()]
+    .filter(([, d]) => d.hasProposed && matchesFilter(d.status, filter))
+    .map(([proposalId]) => proposalId);
+  if (wantedIds.length === 0) return [];
+
+  const { data: proposalRows, error: propErr } = await client
+    .from("campaign_proposals")
+    .select("id, group_slug, version_number, generated_at")
+    .eq("merchant_id", merchantId)
+    .in("id", wantedIds)
+    .order("generated_at", { ascending: false });
+  if (propErr) throw propErr;
+
+  // Variant counts per proposal.
+  const { data: armRows, error: armErr } = await client
+    .from("campaign_arms")
+    .select("proposal_id")
+    .eq("merchant_id", merchantId)
+    .in("proposal_id", wantedIds);
+  if (armErr) throw armErr;
+  const variantCounts = new Map<string, number>();
+  for (const row of armRows ?? []) {
+    variantCounts.set(row.proposal_id, (variantCounts.get(row.proposal_id) ?? 0) + 1);
+  }
+
+  return (proposalRows ?? []).map((p) => {
+    const d = derived.get(p.id)!;
+    return {
+      proposalId: p.id,
+      groupSlug: p.group_slug,
+      versionNumber: p.version_number,
+      status: d.status,
+      generatedAt: p.generated_at,
+      approvedAt: d.approvedAt,
+      rejectedAt: d.rejectedAt,
+      rejectionReason: d.rejectionReason,
+      variantCount: variantCounts.get(p.id) ?? 0,
+    };
+  });
+}
