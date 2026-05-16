@@ -18,7 +18,7 @@ export const DialogOverlay = forwardRef<
     <DialogPrimitive.Overlay
       ref={ref}
       className={cn(
-        "fixed inset-0 z-50 bg-ink-900/40 data-[state=open]:animate-reveal",
+        "fixed inset-0 z-50 bg-ink-900/40 data-[state=open]:motion-safe:animate-reveal",
         className,
       )}
       {...props}
@@ -36,7 +36,7 @@ export const DialogContent = forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-cream-50 p-32 data-[state=open]:animate-reveal",
+          "fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-cream-50 p-32 data-[state=open]:motion-safe:animate-reveal",
           className,
         )}
         {...props}

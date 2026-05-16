@@ -20,6 +20,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  formatDate,
 } from "@lapsed/ui";
 import type { VoiceProfile } from "@lapsed/core";
 import type { VoiceProfileResponse } from "@/app/api/voice/profile/route";
@@ -30,27 +31,21 @@ const POLL_INTERVAL_MS = 2000;
 // ~2 minute ceiling on waiting for a re-extraction to complete.
 const MAX_REEXTRACT_POLLS = 60;
 
+type ExtractionPhase = "analyzing" | "extracting" | "generating" | "ready" | "failed";
+
 interface ExtractionStatusLite {
-  phase: "analyzing" | "extracting" | "generating" | "ready" | "failed";
+  phase: ExtractionPhase;
   startedAt: string | null;
   errorMessage: string | null;
 }
 
-const PHASE_LABEL: Record<ExtractionStatusLite["phase"], string> = {
+const PHASE_LABEL: Record<ExtractionPhase, string> = {
   analyzing: "Analyzing storefront…",
   extracting: "Extracting brand voice…",
   generating: "Generating agent identity…",
   ready: "Done",
   failed: "Failed",
 };
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function BrandVoiceSettings() {
   const [loading, setLoading] = useState(true);
@@ -60,7 +55,7 @@ export function BrandVoiceSettings() {
   const [versions, setVersions] = useState<VoiceVersionView[]>([]);
 
   const [reExtracting, setReExtracting] = useState(false);
-  const [reExtractPhase, setReExtractPhase] = useState<ExtractionStatusLite["phase"] | null>(null);
+  const [reExtractPhase, setReExtractPhase] = useState<ExtractionPhase | null>(null);
   const [reExtractError, setReExtractError] = useState<string | null>(null);
 
   const [activatingId, setActivatingId] = useState<string | null>(null);
@@ -69,6 +64,9 @@ export function BrandVoiceSettings() {
   const [viewVersion, setViewVersion] = useState<VoiceVersionView | null>(null);
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards against state updates after unmount (in-flight fetches resolving
+  // once the component is gone).
+  const mountedRef = useRef(true);
 
   const loadData = useCallback(async () => {
     try {
@@ -76,26 +74,30 @@ export function BrandVoiceSettings() {
         fetch("/api/voice/profile", { cache: "no-store" }),
         fetch("/api/voice/versions", { cache: "no-store" }),
       ]);
+      if (!mountedRef.current) return;
       if (!profileRes.ok || !versionsRes.ok) {
         setLoadError(true);
         return;
       }
       const profileData = (await profileRes.json()) as VoiceProfileResponse | null;
       const versionsData = (await versionsRes.json()) as VoiceVersionView[];
+      if (!mountedRef.current) return;
       setActiveProfile(profileData?.profile ?? null);
       setActiveVersionId(profileData?.versionId ?? null);
       setVersions(versionsData);
       setLoadError(false);
     } catch {
-      setLoadError(true);
+      if (mountedRef.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadData();
     return () => {
+      mountedRef.current = false;
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
   }, [loadData]);
@@ -104,25 +106,34 @@ export function BrandVoiceSettings() {
     setReExtractError(null);
     setActionError(null);
 
-    // Capture the current run boundary so the poller can tell when the new
-    // run has begun (rather than reading the prior run's terminal status).
-    let priorStartedAt: string | null = null;
+    // Capture the current run boundary BEFORE triggering. The poller uses it
+    // to tell the new run from the prior run's terminal status. If this fails
+    // we cannot detect the new run reliably — abort rather than risk reading
+    // a stale `ready`/`failed`.
+    let priorStartedAt: string | null;
     try {
       const statusRes = await fetch("/api/voice/status", { cache: "no-store" });
-      if (statusRes.ok) {
-        priorStartedAt = ((await statusRes.json()) as ExtractionStatusLite).startedAt;
+      if (!statusRes.ok) {
+        setReExtractError("We couldn't start a re-extraction. Please try again.");
+        return;
       }
+      priorStartedAt = ((await statusRes.json()) as ExtractionStatusLite).startedAt;
     } catch {
-      /* no baseline — the poller still terminates via the poll ceiling */
+      setReExtractError("We couldn't start a re-extraction. Please try again.");
+      return;
     }
+    if (!mountedRef.current) return;
 
     let res: Response;
     try {
       res = await fetch("/api/voice/reextract", { method: "POST" });
     } catch {
-      setReExtractError("We couldn't start a re-extraction. Please try again.");
+      if (mountedRef.current) {
+        setReExtractError("We couldn't start a re-extraction. Please try again.");
+      }
       return;
     }
+    if (!mountedRef.current) return;
     if (res.status === 429) {
       setReExtractError(
         "You've reached today's brand-voice extraction limit. Please try again tomorrow.",
@@ -139,12 +150,17 @@ export function BrandVoiceSettings() {
 
     let polls = 0;
     const poll = async (): Promise<void> => {
+      if (!mountedRef.current) return;
       polls += 1;
       try {
         const statusRes = await fetch("/api/voice/status", { cache: "no-store" });
+        if (!mountedRef.current) return;
         if (statusRes.ok) {
           const status = (await statusRes.json()) as ExtractionStatusLite;
-          const isNewRun = status.startedAt !== null && status.startedAt !== priorStartedAt;
+          if (!mountedRef.current) return;
+          // The new run has begun once startedAt differs from the captured
+          // boundary — comparing server-generated values is clock-skew-safe.
+          const isNewRun = status.startedAt !== priorStartedAt;
           if (isNewRun) {
             setReExtractPhase(status.phase);
             if (status.phase === "ready") {
@@ -164,6 +180,7 @@ export function BrandVoiceSettings() {
       } catch {
         /* transient — keep polling */
       }
+      if (!mountedRef.current) return;
       if (polls >= MAX_REEXTRACT_POLLS) {
         setReExtracting(false);
         setReExtractPhase(null);
@@ -185,15 +202,18 @@ export function BrandVoiceSettings() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ versionId }),
         });
+        if (!mountedRef.current) return;
         if (!res.ok) {
           setActionError("We couldn't activate that version. Please try again.");
           return;
         }
         await loadData();
       } catch {
-        setActionError("We couldn't activate that version. Please try again.");
+        if (mountedRef.current) {
+          setActionError("We couldn't activate that version. Please try again.");
+        }
       } finally {
-        setActivatingId(null);
+        if (mountedRef.current) setActivatingId(null);
       }
     },
     [loadData],
@@ -203,7 +223,7 @@ export function BrandVoiceSettings() {
     return (
       <div className="p-24">
         <div
-          className="h-160 w-full animate-pulse rounded-lg bg-cream-200"
+          className="h-160 w-full rounded-lg bg-cream-200 motion-safe:animate-pulse"
           aria-label="Loading brand voice"
         />
       </div>
@@ -220,6 +240,10 @@ export function BrandVoiceSettings() {
     );
   }
 
+  // Always-present polite live region so the first re-extract phase is
+  // announced as a content change rather than an initial render.
+  const phaseAnnouncement = reExtracting && reExtractPhase ? PHASE_LABEL[reExtractPhase] : "";
+
   return (
     <div className="p-24">
       <Tabs defaultValue="active">
@@ -229,49 +253,37 @@ export function BrandVoiceSettings() {
         </TabsList>
 
         <TabsContent value="active">
-          {activeProfile ? (
-            <div className="flex flex-col gap-12">
+          <div className="flex flex-col gap-12">
+            {activeProfile ? (
               <VoicePreview
                 profile={activeProfile}
                 context="settings"
                 onReExtract={() => void handleReExtract()}
                 reExtracting={reExtracting}
               />
-              {reExtracting && reExtractPhase && (
-                <p className="text-meta text-ink-500" aria-live="polite">
-                  {PHASE_LABEL[reExtractPhase]}
+            ) : (
+              <div className="flex flex-col items-start gap-12">
+                <p className="text-body text-ink-700">
+                  No brand voice has been extracted yet.
                 </p>
-              )}
-              {reExtractError && (
-                <p className="text-meta text-danger-500" role="alert">
-                  {reExtractError}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-start gap-12">
-              <p className="text-body text-ink-700">
-                No brand voice has been extracted yet.
+                <Button
+                  variant="secondary"
+                  disabled={reExtracting}
+                  onClick={() => void handleReExtract()}
+                >
+                  {reExtracting ? "Extracting…" : "Extract brand voice"}
+                </Button>
+              </div>
+            )}
+            <p className="text-meta text-ink-500" aria-live="polite">
+              {phaseAnnouncement}
+            </p>
+            {reExtractError && (
+              <p className="text-meta text-danger-500" role="alert">
+                {reExtractError}
               </p>
-              <Button
-                variant="secondary"
-                disabled={reExtracting}
-                onClick={() => void handleReExtract()}
-              >
-                {reExtracting ? "Extracting…" : "Extract brand voice"}
-              </Button>
-              {reExtracting && reExtractPhase && (
-                <p className="text-meta text-ink-500" aria-live="polite">
-                  {PHASE_LABEL[reExtractPhase]}
-                </p>
-              )}
-              {reExtractError && (
-                <p className="text-meta text-danger-500" role="alert">
-                  {reExtractError}
-                </p>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="history">
@@ -298,7 +310,8 @@ export function BrandVoiceSettings() {
                             {isActive && <Tag tone="converted">Active</Tag>}
                           </div>
                           <span className="text-mini text-ink-500">
-                            Extracted {formatDate(version.extractedAt)} · {version.modelVersion}
+                            Extracted {formatDate(version.extractedAt, "short")} ·{" "}
+                            {version.modelVersion}
                           </span>
                         </div>
                         <div className="flex items-center gap-8">
@@ -342,7 +355,7 @@ export function BrandVoiceSettings() {
             <DialogTitle>Version {viewVersion?.versionNumber}</DialogTitle>
             <DialogDescription>
               {viewVersion
-                ? `Extracted ${formatDate(viewVersion.extractedAt)} · ${viewVersion.modelVersion}`
+                ? `Extracted ${formatDate(viewVersion.extractedAt, "short")} · ${viewVersion.modelVersion}`
                 : ""}
             </DialogDescription>
           </DialogHeader>
