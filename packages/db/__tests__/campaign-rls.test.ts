@@ -87,9 +87,13 @@ beforeAll(async () => {
            'campaign_group_snapshots','campaign_events'
          )`,
     );
-    if ((rows[0]?.count ?? 0) < 5) {
+    const { rows: viewRows } = await pg.query<{ count: number }>(
+      `select count(*)::int as count from information_schema.views
+       where table_schema = 'public' and table_name = 'campaign_holdouts'`,
+    );
+    if ((rows[0]?.count ?? 0) < 5 || (viewRows[0]?.count ?? 0) < 1) {
       schemaReady = false;
-      console.warn("[campaign-rls.test] Sprint 06 tables missing — skipping all tests");
+      console.warn("[campaign-rls.test] Sprint 06 schema missing — skipping all tests");
       return;
     }
 
@@ -174,6 +178,13 @@ afterAll(async () => {
       [ids],
     );
     await pg.query(`delete from public.campaign_events where merchant_id = any($1::uuid[])`, [ids]);
+    // Delete superseding proposal versions before their roots — the
+    // supersedes_proposal_id self-FK is ON DELETE RESTRICT.
+    await pg.query(
+      `delete from public.campaign_proposals
+       where merchant_id = any($1::uuid[]) and supersedes_proposal_id is not null`,
+      [ids],
+    );
     await pg.query(`delete from public.campaign_proposals where merchant_id = any($1::uuid[])`, [
       ids,
     ]);
@@ -387,6 +398,188 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS + append-only — campaign_events (Spr
     await pg.connect();
     try {
       await expect(pg.query(`truncate public.campaign_events`)).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS write-rejection — Sprint 06 tables", () => {
+  it("merchant A JWT cannot insert into campaign_arms", async () => {
+    const { error } = await (await clientFor(SHOP_A)).from("campaign_arms").insert({
+      proposal_id: proposalIdA,
+      merchant_id: merchantIdA,
+      variant_index: 1,
+      offer_type: "percent_discount",
+      offer_value: "5%",
+      message_draft: "x",
+      send_time_window: "morning",
+      tone: "warm",
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot insert into bandit_state", async () => {
+    const { error } = await (await clientFor(SHOP_A)).from("bandit_state").insert({
+      arm_id: banditArmIdA,
+      merchant_id: merchantIdA,
+      proposal_id: proposalIdA,
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot insert into campaign_group_snapshots", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("campaign_group_snapshots")
+      .insert({ proposal_id: proposalIdA, merchant_id: merchantIdA, customer_id: "gid://x" });
+    expect(error).not.toBeNull();
+  });
+
+  it("merchant A JWT cannot UPDATE an existing campaign_arms row (decision 14)", async () => {
+    const client = await clientFor(SHOP_A);
+    const update = await client
+      .from("campaign_arms")
+      .update({ message_draft: "tampered" })
+      .eq("merchant_id", merchantIdA)
+      .select();
+    expect(update.error !== null || (update.data ?? []).length === 0).toBe(true);
+    const after = await client.from("campaign_arms").select("message_draft").eq("merchant_id", merchantIdA);
+    expect(after.data?.every((r) => r.message_draft !== "tampered")).toBe(true);
+  });
+});
+
+describe.skipIf(!SUPABASE_AVAILABLE)("CHECK constraints — Sprint 06 tables", () => {
+  it("campaign_arms rejects a message_draft longer than 160 chars", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.campaign_arms
+             (proposal_id, merchant_id, variant_index, offer_type, offer_value,
+              message_draft, send_time_window, tone)
+           values ($1, $2, 1, 'percent_discount', '5%', $3, 'morning', 'warm')`,
+          [proposalIdA, merchantIdA, "x".repeat(161)],
+        ),
+      ).rejects.toThrow(/campaign_arms_message_sms_length|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("campaign_arms rejects a variant_index outside 0..2", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.campaign_arms
+             (proposal_id, merchant_id, variant_index, offer_type, offer_value,
+              message_draft, send_time_window, tone)
+           values ($1, $2, 3, 'percent_discount', '5%', 'ok', 'morning', 'warm')`,
+          [proposalIdA, merchantIdA],
+        ),
+      ).rejects.toThrow(/campaign_arms_variant_range|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("bandit_state rejects a non-positive alpha", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // A fresh arm so the PK is free; the CHECK should fire before any PK concern.
+      const arm = await pg.query<{ bandit_arm_id: string }>(
+        `insert into public.campaign_arms
+           (proposal_id, merchant_id, variant_index, offer_type, offer_value,
+            message_draft, send_time_window, tone)
+         values ($1, $2, 2, 'bundle', 'x', 'ok', 'evening', 'warm')
+         returning bandit_arm_id`,
+        [proposalIdA, merchantIdA],
+      );
+      await expect(
+        pg.query(
+          `insert into public.bandit_state (arm_id, merchant_id, proposal_id, alpha)
+           values ($1, $2, $3, 0)`,
+          [arm.rows[0]!.bandit_arm_id, merchantIdA, proposalIdA],
+        ),
+      ).rejects.toThrow(/bandit_state_alpha_positive|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("bandit_state rejects a negative observation_count", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.bandit_state (arm_id, merchant_id, proposal_id, observation_count)
+           values ($1, $2, $3, -1)`,
+          [banditArmIdA, merchantIdA, proposalIdA],
+        ),
+      ).rejects.toThrow(/bandit_state_observations_nonneg|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("campaign_proposals rejects version_number below 1", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `insert into public.campaign_proposals
+             (merchant_id, group_slug, model_version, version_number)
+           values ($1, 'lapsed_vips', 'm', 0)`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/campaign_proposals_version_positive|check/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("campaign_group_snapshots composite PK rejects a duplicate (proposal_id, customer_id)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // (proposalIdA, CUSTOMER_A) was seeded in beforeAll; re-inserting must fail.
+      await expect(
+        pg.query(
+          `insert into public.campaign_group_snapshots
+             (proposal_id, merchant_id, customer_id, included_in_holdout)
+           values ($1, $2, $3, false)`,
+          [proposalIdA, merchantIdA, CUSTOMER_A],
+        ),
+      ).rejects.toThrow(/campaign_group_snapshots_pk|duplicate|unique/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("campaign_proposals supersedes index keeps the version lineage linear", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // Two new proposals both claiming to supersede proposalIdA must collide.
+      await pg.query(
+        `insert into public.campaign_proposals
+           (merchant_id, group_slug, model_version, version_number, supersedes_proposal_id)
+         values ($1, 'lapsed_vips', 'm', 2, $2)`,
+        [merchantIdA, proposalIdA],
+      );
+      await expect(
+        pg.query(
+          `insert into public.campaign_proposals
+             (merchant_id, group_slug, model_version, version_number, supersedes_proposal_id)
+           values ($1, 'lapsed_vips', 'm', 2, $2)`,
+          [merchantIdA, proposalIdA],
+        ),
+      ).rejects.toThrow(/campaign_proposals_supersedes_unique_idx|unique|duplicate/i);
     } finally {
       await pg.end();
     }

@@ -81,7 +81,10 @@ create table if not exists public.campaign_proposals (
   rejected_at             timestamptz,
   rejection_reason        text,
   created_at              timestamptz   not null default now(),
-  constraint campaign_proposals_version_positive check (version_number >= 1)
+  constraint campaign_proposals_version_positive check (version_number >= 1),
+  -- A proposal cannot supersede itself.
+  constraint campaign_proposals_no_self_supersede
+    check (supersedes_proposal_id is null or supersedes_proposal_id <> id)
 );
 
 comment on table public.campaign_proposals is
@@ -103,12 +106,18 @@ create index campaign_proposals_merchant_idx
 create index campaign_proposals_merchant_status_idx
   on public.campaign_proposals (merchant_id, status, generated_at desc);
 
-create index campaign_proposals_supersedes_idx
+-- Partial UNIQUE index: a proposal may be superseded by at most one newer
+-- version, so the version lineage stays strictly linear (decision 14). NULLs
+-- are excluded, so unlimited first-version roots are permitted.
+create unique index campaign_proposals_supersedes_unique_idx
   on public.campaign_proposals (supersedes_proposal_id)
   where supersedes_proposal_id is not null;
 
 alter table public.campaign_proposals enable row level security;
 
+-- Authenticated merchant reads their own proposals. Writes are service-role
+-- only (via the @lapsed/core orchestrator + approval helpers); no INSERT/
+-- UPDATE/DELETE policy is granted to the authenticated role.
 create policy campaign_proposals_merchant_read
   on public.campaign_proposals for select
   using (
@@ -155,14 +164,16 @@ comment on column public.campaign_arms.message_draft is
   'SMS-length message draft (<= 160 chars, CHECK-enforced). Written in the '
   'merchant''s active voice profile by the AI Campaign Designer (Sonnet 4.6).';
 
-create index campaign_arms_proposal_idx
-  on public.campaign_arms (proposal_id, variant_index);
-
+-- (proposal_id, variant_index) lookups are served by the
+-- campaign_arms_proposal_variant_unique constraint's backing index.
 create index campaign_arms_merchant_idx
   on public.campaign_arms (merchant_id);
 
 alter table public.campaign_arms enable row level security;
 
+-- Authenticated merchant reads their own arms. Arms are write-once
+-- (decision 14) and written by the service role only — no INSERT/UPDATE/
+-- DELETE policy is granted, so the authenticated role cannot mutate them.
 create policy campaign_arms_merchant_read
   on public.campaign_arms for select
   using (
@@ -207,6 +218,8 @@ create index bandit_state_merchant_idx
 
 alter table public.bandit_state enable row level security;
 
+-- Authenticated merchant reads their own bandit posteriors. Writes (Beta(1,1)
+-- init at approval, posterior updates in Sprint 07) are service-role only.
 create policy bandit_state_merchant_read
   on public.bandit_state for select
   using (
@@ -247,6 +260,8 @@ create index campaign_group_snapshots_holdout_idx
 
 alter table public.campaign_group_snapshots enable row level security;
 
+-- Authenticated merchant reads their own snapshot rows. Snapshots are written
+-- once at proposal time by the service role; no write policy is granted.
 create policy campaign_group_snapshots_merchant_read
   on public.campaign_group_snapshots for select
   using (
