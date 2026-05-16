@@ -12,6 +12,16 @@ export function isUuid(value: string): boolean {
 }
 
 /**
+ * Strips the leading `functionName: ` prefix off an internal error message
+ * before it is echoed to the client, so the API surface never leaks
+ * @lapsed/core function names. The remaining text (a plain description and a
+ * proposal UUID) is safe — a proposal id is the merchant's own resource.
+ */
+function clientDetail(message: string): string {
+  return message.replace(/^[A-Za-z]+:\s*/, "");
+}
+
+/**
  * Maps an error thrown by a campaign-approval function (or a query helper) to
  * an HTTP response. A "not found for merchant" error becomes 404 — never 403 —
  * so the API never reveals whether a proposal exists for another merchant.
@@ -30,14 +40,17 @@ export function campaignErrorResponse(err: unknown): NextResponse {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   if (
-    /cannot be approved|cannot be rejected|only a pending proposal can be edited|concurrently edited|does not exist on proposal/.test(
+    /cannot be approved|cannot be rejected|only a pending proposal can be edited|concurrently edited|does not exist on proposal|has no arms/.test(
       message,
     )
   ) {
-    return NextResponse.json({ error: "conflict", detail: message }, { status: 409 });
+    return NextResponse.json({ error: "conflict", detail: clientDetail(message) }, { status: 409 });
   }
   if (/must be a UUID|is required|at least one variant edit/.test(message)) {
-    return NextResponse.json({ error: "invalid_request", detail: message }, { status: 400 });
+    return NextResponse.json(
+      { error: "invalid_request", detail: clientDetail(message) },
+      { status: 400 },
+    );
   }
 
   console.error(JSON.stringify({ event: "campaign_route_error", message }));

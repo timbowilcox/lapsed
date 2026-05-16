@@ -26,6 +26,7 @@ vi.mock("@lapsed/core", () => ({
 import { getMerchantFromSession } from "@/app/lib/session";
 import { getPendingProposals, getProposalById } from "@lapsed/db";
 import { approveProposal, rejectProposal, editProposal } from "@lapsed/core";
+import { campaignErrorResponse, isUuid } from "../app/api/campaigns/_shared";
 import { GET as getPending } from "../app/api/campaigns/pending/route";
 import { GET as getById } from "../app/api/campaigns/[id]/route";
 import { POST as postApprove } from "../app/api/campaigns/[id]/approve/route";
@@ -204,6 +205,26 @@ describe("POST /api/campaigns/[id]/reject", () => {
     expect(rejectProposal).not.toHaveBeenCalled();
   });
 
+  it("returns 400 on an unparseable body", async () => {
+    const bad = new Request("http://x", { method: "POST", body: "{not json" });
+    const res = await postReject(bad, paramsFor(PROPOSAL_ID));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for a malformed id", async () => {
+    const res = await postReject(postRequest({ userId: "u1", reason: "x" }), paramsFor("nope"));
+    expect(res.status).toBe(404);
+  });
+
+  it("maps a cross-merchant not-found error to 404, never 403", async () => {
+    vi.mocked(rejectProposal).mockRejectedValue(
+      new Error(`materializeCampaign: proposal ${PROPOSAL_ID} not found for merchant x`),
+    );
+    const res = await postReject(postRequest({ userId: "u1", reason: "x" }), paramsFor(PROPOSAL_ID));
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(403);
+  });
+
   it("returns 400 when the reason is blank whitespace", async () => {
     const res = await postReject(postRequest({ userId: "u1", reason: "   " }), paramsFor(PROPOSAL_ID));
     expect(res.status).toBe(400);
@@ -299,5 +320,87 @@ describe("POST /api/campaigns/[id]/edit", () => {
       paramsFor(PROPOSAL_ID),
     );
     expect(res.status).toBe(409);
+  });
+
+  it("returns 400 on an unparseable body", async () => {
+    const bad = new Request("http://x", { method: "POST", body: "{not json" });
+    const res = await postEdit(bad, paramsFor(PROPOSAL_ID));
+    expect(res.status).toBe(400);
+  });
+
+  it("maps a cross-merchant not-found error to 404, never 403", async () => {
+    vi.mocked(editProposal).mockRejectedValue(
+      new Error(`materializeCampaign: proposal ${PROPOSAL_ID} not found for merchant x`),
+    );
+    const res = await postEdit(
+      postRequest({ userId: "u1", edits: [{ variantIndex: 0, messageDraft: "x" }] }),
+      paramsFor(PROPOSAL_ID),
+    );
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(403);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _shared.ts — isUuid + campaignErrorResponse (direct unit tests)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("isUuid", () => {
+  it("accepts a canonical lowercase UUID", () => {
+    expect(isUuid(PROPOSAL_ID)).toBe(true);
+  });
+  it("accepts an uppercase UUID", () => {
+    expect(isUuid(PROPOSAL_ID.toUpperCase())).toBe(true);
+  });
+  it("rejects an empty string, a plain word, and a near-miss", () => {
+    expect(isUuid("")).toBe(false);
+    expect(isUuid("not-a-uuid")).toBe(false);
+    expect(isUuid("11111111-1111-4111-8111-11111111")).toBe(false); // last segment too short
+  });
+  it("rejects a UUID with surrounding whitespace", () => {
+    expect(isUuid(` ${PROPOSAL_ID} `)).toBe(false);
+  });
+});
+
+describe("campaignErrorResponse", () => {
+  it("maps a not-found-for-merchant error to 404 — never 403", () => {
+    const res = campaignErrorResponse(new Error("materializeCampaign: proposal x not found for merchant y"));
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(403);
+  });
+
+  it("maps an invalid-state error to 409", () => {
+    const res = campaignErrorResponse(new Error("approveProposal: proposal x is rejected and cannot be approved"));
+    expect(res.status).toBe(409);
+  });
+
+  it("maps an editProposal has-no-arms error to 409 (not 500)", () => {
+    const res = campaignErrorResponse(new Error("editProposal: proposal x has no arms to edit"));
+    expect(res.status).toBe(409);
+  });
+
+  it("maps a validation message to 400", async () => {
+    const res = campaignErrorResponse(new Error("merchantId must be a UUID"));
+    expect(res.status).toBe(400);
+  });
+
+  it("maps a ZodError (detected by name) to 400", () => {
+    const zodErr = Object.assign(new Error("[{...}]"), { name: "ZodError" });
+    const res = campaignErrorResponse(zodErr);
+    expect(res.status).toBe(400);
+  });
+
+  it("maps an unrecognized error to 500", () => {
+    const res = campaignErrorResponse(new Error("some unexpected database failure"));
+    expect(res.status).toBe(500);
+  });
+
+  it("strips the internal function-name prefix from the client-facing detail", async () => {
+    const res = campaignErrorResponse(
+      new Error("editProposal: proposal x is approved; only a pending proposal can be edited"),
+    );
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail).toBe("proposal x is approved; only a pending proposal can be edited");
+    expect(body.detail).not.toContain("editProposal:");
   });
 });
