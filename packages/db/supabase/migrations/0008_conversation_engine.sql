@@ -197,6 +197,20 @@ create index messages_no_reply_sweep_idx
   on public.messages (merchant_id, sent_at)
   where direction = 'outbound' and posterior_updated_at is null;
 
+-- Inbound idempotency (decision 19 integrity): Twilio retries a webhook when
+-- it does not receive a timely 2xx. A retry carries the same MessageSid.
+-- handleInboundMessage has an application-level fast-path check that avoids
+-- the unique-violation error in the common case, but this partial unique
+-- index is the DB-enforced safety net that closes the check-then-insert
+-- TOCTOU window — a duplicate inbound twilio_sid can never be inserted twice,
+-- so the bandit posterior cannot be double-updated by a webhook retry. Partial
+-- on direction='inbound' (outbound twilio_sids are Twilio send SIDs, distinct
+-- per send; only inbound carries the retried MessageSid) and on
+-- twilio_sid is not null (a SID-less inbound is rejected upstream).
+create unique index messages_inbound_twilio_sid_unique
+  on public.messages (twilio_sid)
+  where direction = 'inbound' and twilio_sid is not null;
+
 -- Partial ivfflat index — only rows with embeddings populated (decision 2).
 create index messages_embedding_idx
   on public.messages using ivfflat (embedding vector_cosine_ops)
