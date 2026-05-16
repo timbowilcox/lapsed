@@ -118,6 +118,12 @@ These decisions are expensive to retrofit. Any code that touches them is reviewe
 
 12. **Voice events are event-sourced (Sprint 05).** Every extraction writes a `voice_extracted` event via `appendVoiceEvent`. Current state in `agent_profiles` is materialized cache, regeneratable from events. Consistent with decisions 1 and 2.
 
+13. **Campaign proposals merchant-approved before any send (Sprint 06).** No auto-launch path exists. Every campaign requires a recorded `campaign_approved` event from the merchant before downstream sending becomes possible. Sprint 07's conversation engine reads from `getReadyCampaigns(merchantId)`, which filters to proposals where the latest event is `campaign_approved`. Timer-based auto-approval or "approve after N hours" escalation is explicitly excluded — adding either would violate this decision.
+
+14. **Bandit arms are versioned and immutable (Sprint 06).** Once a proposal is approved and arms are initialized in `bandit_state`, those arms cannot be edited in-place. Editing a campaign creates a new proposal version with new arms; old arms are retained for performance analysis and audit. Mirrors decision 7 (voice profiles versioned). Posterior updates (Sprint 07+) write to the existing arm's row — that's a separate mutation pattern that updates statistics, not the arm's identity or contract.
+
+15. **Group snapshots frozen at proposal creation (Sprint 06).** When a campaign proposal references a customer group, the customer set is snapshotted to `campaign_group_snapshots` at proposal time. Subsequent changes to the underlying group definition (re-scoring, lifecycle drift, customer add/remove) do NOT change which customers receive the campaign. This is essential for attribution math in Sprint 08: incremental revenue is computed against the snapshotted holdout, not a live recompute. A campaign's customer set is determined exactly once, at proposal time.
+
 ## Conventions
 
 - **Sprint branches**: `sprint-NN/<short-name>` or `fix/<short-name>` for hotfixes
