@@ -144,6 +144,19 @@ export {
 } from "./incremental-revenue";
 
 export {
+  recordOrderArrival,
+  recordNoOrderOutcome,
+  selectArm,
+  ORDER_POSTERIOR_MIN_OBSERVATIONS,
+  type RecordOrderArrivalInput,
+  type RecordNoOrderInput,
+  type RecordOutcomeResult,
+  type PosteriorSource,
+  type ArmPosteriorChoice,
+  type ArmSelection,
+} from "./bandit-order";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
