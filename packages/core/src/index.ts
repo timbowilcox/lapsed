@@ -162,6 +162,12 @@ export {
 } from "./ltv-restoration";
 
 export {
+  runAttributionBatch,
+  type RunAttributionBatchOptions,
+  type AttributionBatchResult,
+} from "./attribution-batch";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
