@@ -24,6 +24,18 @@ interface ServerEnv {
   campaignProposalDailyCapDefault: number;
   /** Sprint 06: fraction of each group held out per campaign (decision 5). */
   holdoutRate: number;
+  /** Sprint 07: Twilio account SID for the SMS client wrapper. */
+  twilioAccountSid: string;
+  /** Sprint 07: Twilio auth token — also the inbound webhook signature key. */
+  twilioAuthToken: string;
+  /** Sprint 07: the merchant outbound Twilio number (E.164). */
+  twilioPhoneNumber: string;
+  /** Sprint 07: max outbound SMS per merchant per UTC day (cost discipline). */
+  outboundDailyCapDefault: number;
+  /** Sprint 07: total budget (ms) for the synchronous inbound reply (decision 17). */
+  inboundReplyLatencyBudgetMs: number;
+  /** Sprint 07: days after an outbound with no inbound before posterior=false. */
+  noReplySweepDays: number;
 }
 
 function required(name: string): string {
@@ -68,6 +80,12 @@ export function serverEnv(): ServerEnv {
       5,
     ),
     holdoutRate: parseFloat(process.env.HOLDOUT_RATE ?? "0.1"),
+    twilioAccountSid: required("TWILIO_ACCOUNT_SID"),
+    twilioAuthToken: required("TWILIO_AUTH_TOKEN"),
+    twilioPhoneNumber: required("TWILIO_PHONE_NUMBER"),
+    outboundDailyCapDefault: parseIntOr(process.env.OUTBOUND_DAILY_CAP_DEFAULT, 200),
+    inboundReplyLatencyBudgetMs: parseIntOr(process.env.INBOUND_REPLY_LATENCY_BUDGET_MS, 5000),
+    noReplySweepDays: parseIntOr(process.env.NO_REPLY_SWEEP_DAYS, 7),
   };
   return cached;
 }

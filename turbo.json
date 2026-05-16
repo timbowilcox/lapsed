@@ -33,7 +33,13 @@
         "VOICE_EXTRACTION_DAILY_CAP_DEFAULT",
         "SONNET_MODEL",
         "CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT",
-        "HOLDOUT_RATE"
+        "HOLDOUT_RATE",
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_PHONE_NUMBER",
+        "OUTBOUND_DAILY_CAP_DEFAULT",
+        "INBOUND_REPLY_LATENCY_BUDGET_MS",
+        "NO_REPLY_SWEEP_DAYS"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },

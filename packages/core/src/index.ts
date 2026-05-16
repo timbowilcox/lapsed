@@ -196,6 +196,17 @@ export {
 } from "./message-events";
 
 export {
+  handleInboundMessage,
+  LATENCY_RESERVE_MS,
+  OPT_OUT_ACK,
+  DEGRADED_FALLBACK_REPLY,
+  type HandleInboundDeps,
+  type HandleInboundInput,
+  type HandleInboundResult,
+  type HandleInboundOutcome,
+} from "./handle-inbound";
+
+export {
   sendMessage,
   type SendMessageInput,
   type SendMessageResult,
