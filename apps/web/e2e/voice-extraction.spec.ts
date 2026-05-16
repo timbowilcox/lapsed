@@ -8,7 +8,7 @@
 //
 // Flow: seeded merchant install → onboarding 4-phase progress → 5-sentence
 // preview → Settings active voice → version history → re-extract → new
-// version appears.
+// version appears; plus the onboarding failure state.
 
 import { test, expect, seedTestMerchant, removeTestMerchant } from "./fixtures";
 
@@ -56,10 +56,11 @@ function versionView(id: string, versionNumber: number, extractedAt: string) {
 // Onboarding: 4-phase progress → 5-sentence preview
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("onboarding shows 4-phase progress then previews 5 sample sentences", async ({
+test("onboarding progresses through all four phases then previews 5 sentences", async ({
   merchantPage: page,
 }) => {
-  // Status advances analyzing → extracting → generating → ready across polls.
+  // Each phase is held for three polls (~6s) so the progression is
+  // observable by Playwright's auto-retrying assertions.
   let statusCalls = 0;
   await page.route("**/api/voice/status", async (route) => {
     if (route.request().method() !== "GET") {
@@ -68,11 +69,11 @@ test("onboarding shows 4-phase progress then previews 5 sample sentences", async
     }
     statusCalls += 1;
     const phase =
-      statusCalls <= 1
+      statusCalls <= 3
         ? "analyzing"
-        : statusCalls === 2
+        : statusCalls <= 6
           ? "extracting"
-          : statusCalls === 3
+          : statusCalls <= 9
             ? "generating"
             : "ready";
     await route.fulfill({
@@ -91,17 +92,56 @@ test("onboarding shows 4-phase progress then previews 5 sample sentences", async
 
   await page.goto("/app/onboarding", { waitUntil: "domcontentloaded" });
 
-  // The four-phase indicator renders all four steps.
+  // All four phase labels render — the indicator is genuinely four-phase.
   await expect(page.getByText("Analyzing storefront")).toBeVisible();
   await expect(page.getByText("Extracting brand voice")).toBeVisible();
   await expect(page.getByText("Generating agent identity")).toBeVisible();
   await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+
+  // The active step advances as the status polls progress — proving the
+  // indicator reacts to the run rather than rendering statically.
+  const activeStep = page.locator('li[aria-current="step"]');
+  await expect(activeStep).toContainText("Analyzing storefront", { timeout: 15_000 });
+  await expect(activeStep).toContainText("Extracting brand voice", { timeout: 25_000 });
+  await expect(activeStep).toContainText("Generating agent identity", { timeout: 25_000 });
 
   // Once the run reaches `ready`, the preview renders all five sample
   // sentences in the synthesized voice.
   for (const sentence of SAMPLE_SENTENCES) {
     await expect(page.getByText(sentence)).toBeVisible({ timeout: 25_000 });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarding: failure state
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("onboarding surfaces an error state when extraction fails", async ({
+  merchantPage: page,
+}) => {
+  await page.route("**/api/voice/status", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        phase: "failed",
+        startedAt: "2026-05-16T10:00:00.000Z",
+        completedAt: "2026-05-16T10:00:30.000Z",
+        errorMessage: "exhausted_retries",
+        voiceVersionId: null,
+      },
+    });
+  });
+
+  await page.goto("/app/onboarding", { waitUntil: "domcontentloaded" });
+
+  // The failure surfaces a calm error message and a retry affordance.
+  await expect(
+    page.getByText("Something went wrong while building your brand voice. You can try again."),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +207,8 @@ test("re-extracting from settings adds a new version to the history", async ({
     await route.fulfill({ status: 202, json: { ok: true } });
   });
 
-  // Before re-extract the prior run boundary is "run-1"; after, "run-2".
+  // The run boundary (startedAt) changes once the re-extraction is
+  // triggered — the poller uses that to detect the new run.
   await page.route("**/api/voice/status", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -193,14 +234,16 @@ test("re-extracting from settings adds a new version to the history", async ({
 
   // Trigger a re-extraction from the active voice tab.
   await page.getByRole("tab", { name: "Active voice" }).click();
-  await page.getByRole("button", { name: /Re-extract/ }).click();
+  await page.getByRole("button", { name: "Re-extract", exact: true }).click();
 
-  // Once the re-extraction completes the button returns to its idle label.
-  await expect(page.getByRole("button", { name: "Re-extract" })).toBeEnabled({
+  // Once the re-extraction completes the button returns to its idle label
+  // (exact match excludes the in-progress "Re-extracting…" label).
+  await expect(page.getByRole("button", { name: "Re-extract", exact: true })).toBeEnabled({
     timeout: 25_000,
   });
 
-  // The new version now appears in the history.
+  // The new version now appears in the history — the real proof the
+  // re-extraction round-tripped.
   await page.getByRole("tab", { name: "Version history" }).click();
   await expect(page.getByText("Version 2", { exact: false })).toBeVisible({ timeout: 10_000 });
 });
