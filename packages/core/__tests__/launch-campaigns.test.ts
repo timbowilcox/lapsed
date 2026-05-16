@@ -93,8 +93,8 @@ function seedWorld(opts: SeedOpts = {}) {
       arm_id: armId,
       merchant_id: MERCHANT,
       proposal_id: PROPOSAL,
-      alpha: 1,
-      beta: 1,
+      sentiment_alpha: 1,
+      sentiment_beta: 1,
       observation_count: 0,
     }));
   }
@@ -307,7 +307,7 @@ describe("launchMerchantCampaigns — edge cases", () => {
         { bandit_arm_id: ARM_W, proposal_id: PROPOSAL, merchant_id: MERCHANT, variant_index: 0, message_draft: "x" },
       ],
       bandit_state: [
-        { arm_id: ARM_Z, merchant_id: MERCHANT, proposal_id: PROPOSAL, alpha: 1, beta: 1, observation_count: 0 },
+        { arm_id: ARM_Z, merchant_id: MERCHANT, proposal_id: PROPOSAL, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0 },
       ],
       campaign_group_snapshots: [
         { proposal_id: PROPOSAL, merchant_id: MERCHANT, customer_id: "gid://shopify/Customer/1", included_in_holdout: false },
@@ -338,8 +338,8 @@ describe("launchMerchantCampaigns — edge cases", () => {
         { bandit_arm_id: ARM_2, proposal_id: PROPOSAL_2, merchant_id: MERCHANT, variant_index: 0, message_draft: "p2" },
       ],
       bandit_state: [
-        { arm_id: ARMS[0], merchant_id: MERCHANT, proposal_id: PROPOSAL, alpha: 1, beta: 1, observation_count: 0 },
-        { arm_id: ARM_2, merchant_id: MERCHANT, proposal_id: PROPOSAL_2, alpha: 1, beta: 1, observation_count: 0 },
+        { arm_id: ARMS[0], merchant_id: MERCHANT, proposal_id: PROPOSAL, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0 },
+        { arm_id: ARM_2, merchant_id: MERCHANT, proposal_id: PROPOSAL_2, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0 },
       ],
       campaign_group_snapshots: [
         { proposal_id: PROPOSAL, merchant_id: MERCHANT, customer_id: "gid://shopify/Customer/1", included_in_holdout: false },

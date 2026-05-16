@@ -110,8 +110,8 @@ describe("approveProposal", () => {
     expect(result.initializedArmIds).toHaveLength(3);
     expect(tables.bandit_state).toHaveLength(3);
     for (const row of tables.bandit_state!) {
-      expect(row.alpha).toBe(1);
-      expect(row.beta).toBe(1);
+      expect(row.sentiment_alpha).toBe(1);
+      expect(row.sentiment_beta).toBe(1);
       expect(row.observation_count).toBe(0);
       expect(row.proposal_id).toBe(pid);
     }

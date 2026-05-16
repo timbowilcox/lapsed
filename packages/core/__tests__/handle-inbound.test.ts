@@ -121,7 +121,7 @@ function seededWorld(over: { withArm?: boolean; conversation?: boolean; voice?: 
   }
   if (withArm) {
     seed.bandit_state = [
-      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, alpha: 1, beta: 1, observation_count: 0 },
+      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0, order_alpha: 1, order_beta: 1, order_observation_count: 0, order_last_updated_at: null },
     ];
   }
   return makeFakeSupabase(seed);
@@ -221,8 +221,8 @@ describe("handleInboundMessage — bandit posterior (decision 19)", () => {
     const fake = seededWorld();
     await handleInboundMessage(deps(fake, POSITIVE, REPLY), inbound());
     const arm = (fake.tables.bandit_state ?? [])[0] as FakeRow;
-    expect(arm.alpha).toBe(2); // success → alpha + 1
-    expect(arm.beta).toBe(1);
+    expect(arm.sentiment_alpha).toBe(2); // success → sentiment_alpha + 1
+    expect(arm.sentiment_beta).toBe(1);
   });
 
   it("a positive purchase-intent reply also counts as success", async () => {
@@ -231,7 +231,7 @@ describe("handleInboundMessage — bandit posterior (decision 19)", () => {
       deps(fake, { sentiment: "positive", intent: "purchase", confidence: 0.9 }, REPLY),
       inbound(),
     );
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(2);
   });
 
   it("a negative reply increments beta (failure)", async () => {
@@ -241,8 +241,8 @@ describe("handleInboundMessage — bandit posterior (decision 19)", () => {
       inbound(),
     );
     const arm = (fake.tables.bandit_state ?? [])[0] as FakeRow;
-    expect(arm.alpha).toBe(1);
-    expect(arm.beta).toBe(2);
+    expect(arm.sentiment_alpha).toBe(1);
+    expect(arm.sentiment_beta).toBe(2);
   });
 
   it("a neutral reply counts as failure (not positive+engagement/purchase)", async () => {
@@ -251,7 +251,7 @@ describe("handleInboundMessage — bandit posterior (decision 19)", () => {
       deps(fake, { sentiment: "neutral", intent: "question", confidence: 0.8 }, REPLY),
       inbound(),
     );
-    expect((fake.tables.bandit_state ?? [])[0]!.beta).toBe(2);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_beta).toBe(2);
   });
 
   it("a positive-but-question reply counts as failure (intent not engagement/purchase)", async () => {
@@ -260,7 +260,7 @@ describe("handleInboundMessage — bandit posterior (decision 19)", () => {
       deps(fake, { sentiment: "positive", intent: "question", confidence: 0.8 }, REPLY),
       inbound(),
     );
-    expect((fake.tables.bandit_state ?? [])[0]!.beta).toBe(2);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_beta).toBe(2);
   });
 
   it("stamps posterior_updated_at on the outbound the posterior was routed to", async () => {
@@ -371,7 +371,7 @@ describe("handleInboundMessage — degraded mode (decision 17)", () => {
       inbound(),
     );
     // classification succeeded → posterior was updated even though generation degraded
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(2);
   });
 });
 

@@ -861,7 +861,7 @@ export async function getProposalById(
 
   const { data: banditRows, error: banditErr } = await client
     .from("bandit_state")
-    .select("arm_id, alpha, beta, observation_count, last_updated_at")
+    .select("arm_id, sentiment_alpha, sentiment_beta, observation_count, last_updated_at")
     .eq("merchant_id", merchantId)
     .eq("proposal_id", proposalId);
   if (banditErr) throw banditErr;
@@ -884,8 +884,8 @@ export async function getProposalById(
     variants: variantsByProposal.get(proposalId) ?? [],
     banditState: (banditRows ?? []).map((b) => ({
       armId: b.arm_id,
-      alpha: b.alpha,
-      beta: b.beta,
+      alpha: b.sentiment_alpha,
+      beta: b.sentiment_beta,
       observationCount: b.observation_count,
       lastUpdatedAt: b.last_updated_at,
     })),

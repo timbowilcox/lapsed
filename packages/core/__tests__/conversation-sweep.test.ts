@@ -23,7 +23,7 @@ const RECENT = new Date().toISOString();
 function seedSweep(over: { sentAt?: string; posteriorUpdatedAt?: string | null; armId?: string | null } = {}) {
   return makeFakeSupabase({
     bandit_state: [
-      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, alpha: 1, beta: 1, observation_count: 0 },
+      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0, order_alpha: 1, order_beta: 1, order_observation_count: 0, order_last_updated_at: null },
     ],
     messages: [
       {
@@ -49,8 +49,8 @@ describe("sweepNoReplyPosteriors", () => {
     });
     expect(result.sweptCount).toBe(1);
     const arm = (fake.tables.bandit_state ?? [])[0] as FakeRow;
-    expect(arm.beta).toBe(2); // failure → beta + 1
-    expect(arm.alpha).toBe(1);
+    expect(arm.sentiment_beta).toBe(2); // failure → sentiment_beta + 1
+    expect(arm.sentiment_alpha).toBe(1);
   });
 
   it("stamps posterior_updated_at and writes a posterior_updated event", async () => {
@@ -197,7 +197,7 @@ function seedDegraded(
   }
   if (over.hasArm !== false) {
     seed.bandit_state = [
-      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, alpha: 1, beta: 1, observation_count: 0 },
+      { arm_id: ARM, merchant_id: MERCHANT, proposal_id: PROPOSAL, sentiment_alpha: 1, sentiment_beta: 1, observation_count: 0, order_alpha: 1, order_beta: 1, order_observation_count: 0, order_last_updated_at: null },
     ];
   }
   return makeFakeSupabase(seed);
@@ -240,16 +240,16 @@ describe("retryDegradedReplies", () => {
   it("fires the bandit posterior for a classify-phase degrade", async () => {
     const fake = seedDegraded({ phase: "classify" });
     await retryDegradedReplies(deps(fake, POSITIVE, REPLY), retryOpts);
-    // positive + engagement → success → alpha + 1
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+    // positive + engagement → success → sentiment_alpha + 1
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(2);
   });
 
   it("does NOT fire the posterior for a generate-phase degrade (already fired)", async () => {
     const fake = seedDegraded({ phase: "generate" });
     await retryDegradedReplies(deps(fake, POSITIVE, REPLY), retryOpts);
-    // posterior untouched — alpha/beta still at the prior
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(1);
-    expect((fake.tables.bandit_state ?? [])[0]!.beta).toBe(1);
+    // posterior untouched — sentiment_alpha/sentiment_beta still at the prior
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(1);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_beta).toBe(1);
   });
 
   it("records a Sonnet-classified opt-out instead of replying", async () => {
@@ -282,24 +282,25 @@ describe("retryDegradedReplies", () => {
   });
 
   it("does NOT re-fire the posterior when a classify-phase retry fails at generate twice", async () => {
-    // First retry: classify succeeds → posterior fires (alpha 1→2); generate
-    // throws → stillDegraded, no reply. Second retry: classify succeeds again,
-    // but routeBanditPosterior finds the outbound already stamped → skips.
+    // First retry: classify succeeds → posterior fires (sentiment_alpha 1→2);
+    // generate throws → stillDegraded, no reply. Second retry: classify
+    // succeeds again, but routeBanditPosterior finds the outbound already
+    // stamped → skips.
     const fake = seedDegraded({ phase: "classify" });
     const first = await retryDegradedReplies(
       deps(fake, POSITIVE, { throws: new Error("anthropic 500") }),
       retryOpts,
     );
     expect(first.stillDegraded).toBe(1);
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(2);
 
     const second = await retryDegradedReplies(
       deps(fake, POSITIVE, { throws: new Error("anthropic 500") }),
       retryOpts,
     );
     expect(second.stillDegraded).toBe(1);
-    // alpha must still be 2 — the posterior was NOT double-fired.
-    expect((fake.tables.bandit_state ?? [])[0]!.alpha).toBe(2);
+    // sentiment_alpha must still be 2 — the posterior was NOT double-fired.
+    expect((fake.tables.bandit_state ?? [])[0]!.sentiment_alpha).toBe(2);
   });
 
   it("counts a capped send as stillDegraded (sendMessage ok:false)", async () => {

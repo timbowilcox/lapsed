@@ -91,9 +91,22 @@ beforeAll(async () => {
       `select count(*)::int as count from information_schema.views
        where table_schema = 'public' and table_name = 'campaign_holdouts'`,
     );
-    if ((rows[0]?.count ?? 0) < 5 || (viewRows[0]?.count ?? 0) < 1) {
+    // Sprint 08: migration 0009 renamed bandit_state.alpha/beta to
+    // sentiment_alpha/sentiment_beta. The CHECK-constraint assertions below
+    // reference the post-0009 column names, so skip cleanly on a dev DB that
+    // has not yet applied 0009 (the migration is the documented pre-merge gate).
+    const { rows: colRows } = await pg.query<{ count: number }>(
+      `select count(*)::int as count from information_schema.columns
+       where table_schema = 'public' and table_name = 'bandit_state'
+         and column_name = 'sentiment_alpha'`,
+    );
+    if (
+      (rows[0]?.count ?? 0) < 5 ||
+      (viewRows[0]?.count ?? 0) < 1 ||
+      (colRows[0]?.count ?? 0) < 1
+    ) {
       schemaReady = false;
-      console.warn("[campaign-rls.test] Sprint 06 schema missing — skipping all tests");
+      console.warn("[campaign-rls.test] Sprint 06/08 schema missing — skipping all tests");
       return;
     }
 
@@ -485,7 +498,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("CHECK constraints — Sprint 06 tables", (
     }
   });
 
-  it("bandit_state rejects a non-positive alpha", async () => {
+  it("bandit_state rejects a non-positive sentiment_alpha", async () => {
     const pg = new PgClient({ connectionString: env.dbUrl });
     await pg.connect();
     try {
@@ -500,11 +513,11 @@ describe.skipIf(!SUPABASE_AVAILABLE)("CHECK constraints — Sprint 06 tables", (
       );
       await expect(
         pg.query(
-          `insert into public.bandit_state (arm_id, merchant_id, proposal_id, alpha)
+          `insert into public.bandit_state (arm_id, merchant_id, proposal_id, sentiment_alpha)
            values ($1, $2, $3, 0)`,
           [arm.rows[0]!.bandit_arm_id, merchantIdA, proposalIdA],
         ),
-      ).rejects.toThrow(/bandit_state_alpha_positive|check/i);
+      ).rejects.toThrow(/bandit_state_sentiment_alpha_positive|check/i);
     } finally {
       await pg.end();
     }

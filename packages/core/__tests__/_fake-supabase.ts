@@ -45,10 +45,14 @@ function applyDefaults(table: string, input: FakeRow): FakeRow {
     r.payload ??= {};
   }
   if (table === "bandit_state") {
-    r.alpha ??= 1;
-    r.beta ??= 1;
+    r.sentiment_alpha ??= 1;
+    r.sentiment_beta ??= 1;
     r.observation_count ??= 0;
     r.last_updated_at ??= nowIso;
+    r.order_alpha ??= 1;
+    r.order_beta ??= 1;
+    r.order_observation_count ??= 0;
+    r.order_last_updated_at ??= null;
     r.created_at ??= nowIso;
   }
   if (table === "campaign_group_snapshots") {
