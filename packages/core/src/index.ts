@@ -167,6 +167,23 @@ export {
 } from "./bandit";
 
 export {
+  createTwilioClient,
+  validateWebhookSignature,
+  maskPhone,
+  computeBackoffMs as twilioBackoffMs,
+  TWILIO_MAX_SEND_RETRIES,
+  TWILIO_SEND_TIMEOUT_MS_DEFAULT,
+  type TwilioClient,
+  type TwilioClientOptions,
+  type TwilioSdk,
+  type TwilioMessageInstance,
+  type SendSmsInput,
+  type SendSmsResult,
+  type SendSmsMetadata,
+  type ValidateWebhookSignatureInput,
+} from "./twilio-client";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
