@@ -184,6 +184,26 @@ export {
 } from "./twilio-client";
 
 export {
+  appendMessageEvent,
+  ensureConversation,
+  recordConversationActivity,
+  MessageEventType,
+  DegradedModePhase,
+  type MessageEventInput,
+  type AppendMessageEventInput,
+  type EnsureConversationInput,
+  type RecordConversationActivityInput,
+} from "./message-events";
+
+export {
+  sendMessage,
+  type SendMessageInput,
+  type SendMessageResult,
+  type SendMessageSkipReason,
+  type SendMessageOptions,
+} from "./send-message";
+
+export {
   detectOptOutKeyword,
   isOptedOut,
   assertNotOptedOut,
