@@ -214,6 +214,27 @@ export {
 } from "./classify-reply";
 
 export {
+  generateReply,
+  createGenerateClient,
+  parseGeneratedReply,
+  buildSystemPrompt as buildReplySystemPrompt,
+  buildUserPrompt as buildReplyUserPrompt,
+  GenerateReplyError,
+  MAX_GENERATE_ATTEMPTS,
+  REPLY_HISTORY_LIMIT,
+  REPLY_BODY_MAX_CHARS,
+  NEXT_ACTIONS,
+  type NextAction,
+  type GeneratedReply,
+  type GenerateReplyInput,
+  type GenerateReplyResult,
+  type GenerateReplyReason,
+  type GenerateClientOptions,
+  type ReplyHistoryMessage,
+  type CustomerReplyContext,
+} from "./generate-reply";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
