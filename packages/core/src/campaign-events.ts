@@ -177,6 +177,8 @@ export type CampaignStatus = "proposed" | "approved" | "rejected" | "edited";
 export interface CampaignMaterializedState {
   proposalId: string;
   status: CampaignStatus;
+  /** version_number of the proposal row (the proposal's lineage version). */
+  versionNumber: number;
   /** occurred_at of the `campaign_approved` event; null unless approved. */
   approvedAt: string | null;
   /** user_id from the `campaign_approved` event; null unless approved. */
@@ -190,6 +192,7 @@ export interface CampaignMaterializedState {
 }
 
 interface CampaignEventRow {
+  id: string;
   event_type: string;
   occurred_at: string;
   ingested_at: string;
@@ -203,6 +206,11 @@ function payloadString(payload: Json, key: string): string | null {
     if (typeof value === "string") return value;
   }
   return null;
+}
+
+/** Single-line JSON structured log. Never includes PII or message text. */
+function logStructured(event: string, fields: Record<string, unknown>): void {
+  console.warn(JSON.stringify({ event, ...fields }));
 }
 
 /**
@@ -219,20 +227,33 @@ function payloadString(payload: Json, key: string): string | null {
  * generation-lifecycle events, not review decisions. There is no event that
  * derives `approved` other than a recorded `campaign_approved` (decision 13).
  *
+ * Tenancy: both the event read and the cache write are scoped to `merchantId`
+ * (defense-in-depth on a service-role client, which bypasses RLS). A
+ * proposalId that does not belong to `merchantId` updates zero rows and
+ * throws — it cannot mutate another merchant's proposal.
+ *
+ * Latest-event resolution orders by (occurred_at, ingested_at, id) descending,
+ * so two events sharing a timestamp are tie-broken deterministically by row
+ * id rather than left to undefined order.
+ *
  * Idempotent: running twice with no new events leaves the cache identical.
  */
 export async function materializeCampaign(
   serviceClient: LapsedSupabaseClient,
+  merchantId: string,
   proposalId: string,
 ): Promise<CampaignMaterializedState> {
+  z.string().uuid("merchantId must be a UUID").parse(merchantId);
   z.string().uuid("proposalId must be a UUID").parse(proposalId);
 
   const { data, error } = await serviceClient
     .from("campaign_events")
-    .select("event_type, occurred_at, ingested_at, payload")
+    .select("id, event_type, occurred_at, ingested_at, payload")
+    .eq("merchant_id", merchantId)
     .eq("proposal_id", proposalId)
     .order("occurred_at", { ascending: false })
-    .order("ingested_at", { ascending: false });
+    .order("ingested_at", { ascending: false })
+    .order("id", { ascending: false });
   if (error) throw error;
 
   const events = (data ?? []) as CampaignEventRow[];
@@ -264,8 +285,10 @@ export async function materializeCampaign(
 
   // Write the derived state back to the materialized cache. Always writes the
   // full projection so a transition out of approved/rejected clears stale
-  // companion columns.
-  const { error: upErr } = await serviceClient
+  // companion columns. The merchant_id filter is defense-in-depth; `.select()`
+  // returns the updated row so a cross-merchant or missing proposalId surfaces
+  // as a thrown error rather than a silent no-op.
+  const { data: updated, error: upErr } = await serviceClient
     .from("campaign_proposals")
     .update({
       status,
@@ -274,12 +297,21 @@ export async function materializeCampaign(
       rejected_at: rejectedAt,
       rejection_reason: rejectionReason,
     })
-    .eq("id", proposalId);
+    .eq("id", proposalId)
+    .eq("merchant_id", merchantId)
+    .select("version_number")
+    .maybeSingle();
   if (upErr) throw upErr;
+  if (!updated) {
+    throw new Error(
+      `materializeCampaign: proposal ${proposalId} not found for merchant ${merchantId}`,
+    );
+  }
 
   return {
     proposalId,
     status,
+    versionNumber: updated.version_number,
     approvedAt,
     approvedByUserId,
     rejectedAt,
@@ -297,14 +329,16 @@ export interface ReadyCampaign {
   groupSlug: string;
   versionNumber: number;
   modelVersion: string;
-  approvedAt: string | null;
+  /** occurred_at of the `campaign_approved` event — sourced from the event log. */
+  approvedAt: string;
+  /** user_id from the `campaign_approved` event — sourced from the event log. */
   approvedByUserId: string | null;
 }
 
 interface LatestEvent {
   eventType: string;
   occurredAt: string;
-  ingestedAt: string;
+  payload: Json;
 }
 
 /**
@@ -314,9 +348,11 @@ interface LatestEvent {
  * `campaign_approved` event; there is no timer, escalation, or auto-approval
  * path that can produce a ready campaign.
  *
- * The latest event per proposal is computed directly from the event log
- * (not read from the materialized `status` column) so this query is correct
- * even if the cache were ever stale.
+ * The latest event per proposal is computed directly from the event log (not
+ * from the materialized `status` column), and `approvedAt` / `approvedByUserId`
+ * are read from that `campaign_approved` event — so the entire result is
+ * event-sourced and correct even if the `campaign_proposals` cache were stale.
+ * The event ordering tie-breaks on (occurred_at, ingested_at, id) descending.
  */
 export async function getReadyCampaigns(
   serviceClient: LapsedSupabaseClient,
@@ -326,45 +362,67 @@ export async function getReadyCampaigns(
 
   const { data: eventData, error: eventErr } = await serviceClient
     .from("campaign_events")
-    .select("proposal_id, event_type, occurred_at, ingested_at")
+    .select("id, proposal_id, event_type, occurred_at, ingested_at, payload")
     .eq("merchant_id", merchantId)
     .order("occurred_at", { ascending: false })
-    .order("ingested_at", { ascending: false });
+    .order("ingested_at", { ascending: false })
+    .order("id", { ascending: false });
   if (eventErr) throw eventErr;
 
-  // Reduce to the single latest event per proposal. Rows arrive newest-first,
-  // so the first row seen for a proposal_id is its latest event.
+  // Reduce to the single latest event per proposal. Rows arrive newest-first
+  // (deterministic tie-break by id), so the first row seen for a proposal_id
+  // is its latest event.
   const latestByProposal = new Map<string, LatestEvent>();
   for (const row of eventData ?? []) {
     if (!latestByProposal.has(row.proposal_id)) {
       latestByProposal.set(row.proposal_id, {
         eventType: row.event_type,
         occurredAt: row.occurred_at,
-        ingestedAt: row.ingested_at,
+        payload: row.payload,
       });
     }
   }
 
-  const readyIds = [...latestByProposal.entries()]
-    .filter(([, ev]) => ev.eventType === "campaign_approved")
-    .map(([proposalId]) => proposalId);
+  const readyEvents = [...latestByProposal.entries()].filter(
+    ([, ev]) => ev.eventType === "campaign_approved",
+  );
+  if (readyEvents.length === 0) return [];
 
-  if (readyIds.length === 0) return [];
+  const readyIds = readyEvents.map(([proposalId]) => proposalId);
 
   const { data: proposals, error: propErr } = await serviceClient
     .from("campaign_proposals")
-    .select("id, group_slug, version_number, model_version, approved_at, approved_by_user_id")
+    .select("id, group_slug, version_number, model_version")
     .eq("merchant_id", merchantId)
-    .in("id", readyIds)
-    .order("approved_at", { ascending: false });
+    .in("id", readyIds);
   if (propErr) throw propErr;
 
-  return (proposals ?? []).map((p) => ({
-    proposalId: p.id,
-    groupSlug: p.group_slug,
-    versionNumber: p.version_number,
-    modelVersion: p.model_version,
-    approvedAt: p.approved_at,
-    approvedByUserId: p.approved_by_user_id,
-  }));
+  const proposalById = new Map((proposals ?? []).map((p) => [p.id, p]));
+
+  // Every event-log proposal_id must have a campaign_proposals row (the FK
+  // guarantees it). A missing row means the merchant scope excluded it — a
+  // real bug worth surfacing rather than silently dropping a ready campaign.
+  if ((proposals ?? []).length !== readyIds.length) {
+    const missing = readyIds.filter((id) => !proposalById.has(id));
+    logStructured("get_ready_campaigns_missing_proposal_rows", {
+      merchant_id: merchantId,
+      missing_count: missing.length,
+      missing_proposal_ids: missing,
+    });
+  }
+
+  return readyEvents
+    .filter(([proposalId]) => proposalById.has(proposalId))
+    .map(([proposalId, ev]) => {
+      const p = proposalById.get(proposalId)!;
+      return {
+        proposalId,
+        groupSlug: p.group_slug,
+        versionNumber: p.version_number,
+        modelVersion: p.model_version,
+        approvedAt: ev.occurredAt,
+        approvedByUserId: payloadString(ev.payload, "user_id"),
+      };
+    })
+    .sort((a, b) => b.approvedAt.localeCompare(a.approvedAt));
 }
