@@ -40,6 +40,8 @@ const EXPECTED_ALL = [
   "SCORING_TOKEN_CAP_DEFAULT",
   "VOICE_EXTRACTION_DAILY_CAP_DEFAULT",
   "SONNET_MODEL",
+  "CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT",
+  "HOLDOUT_RATE",
 ];
 
 const missingFromTurbo = EXPECTED_ALL.filter((k) => !turboEnv.has(k));

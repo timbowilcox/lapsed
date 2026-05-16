@@ -86,6 +86,87 @@ export {
 } from "./voice-events";
 
 export {
+  snapshotGroup,
+  HOLDOUT_RATE_DEFAULT,
+  type SnapshotGroupInput,
+  type SnapshotGroupResult,
+} from "./snapshot-group";
+
+export {
+  appendCampaignEvent,
+  materializeCampaign,
+  getReadyCampaigns,
+  CampaignEventType,
+  CampaignFailurePhase,
+  type CampaignEventInput,
+  type CampaignStatus,
+  type CampaignMaterializedState,
+  type ReadyCampaign,
+} from "./campaign-events";
+
+export {
+  designCampaign,
+  createCampaignClient,
+  parseCampaignProposal,
+  CampaignDesignError,
+  CampaignProposalSchema,
+  OFFER_TYPE_TAXONOMY,
+  SEND_TIME_WINDOWS,
+  computeBackoffMs as campaignBackoffMs,
+  PROMPT_VERSION as CAMPAIGN_PROMPT_VERSION,
+  SYSTEM_PROMPT_TEMPLATE as CAMPAIGN_SYSTEM_PROMPT_TEMPLATE,
+  MAX_RETRIES as CAMPAIGN_MAX_RETRIES,
+  MAX_OUTPUT_TOKENS as CAMPAIGN_MAX_OUTPUT_TOKENS,
+  type OfferType,
+  type SendTimeWindow,
+  type CampaignTone,
+  type CampaignVariant,
+  type ExpectedImpact,
+  type CampaignProposalDraft,
+  type GroupSummary,
+  type DesignCampaignInput,
+  type DesignCampaignResult,
+  type CampaignClientOptions,
+  type CampaignDesignReason,
+} from "./campaign-designer";
+
+export {
+  proposeCampaign,
+  median as campaignGroupMedian,
+  type ProposeCampaignInput,
+  type ProposeCampaignResult,
+} from "./propose-campaign";
+
+export {
+  approveProposal,
+  rejectProposal,
+  editProposal,
+  type ApproveProposalResult,
+  type RejectProposalResult,
+  type EditProposalResult,
+  type VariantEdit,
+} from "./campaign-approval";
+
+export {
+  initializeBanditArm,
+  updatePosterior,
+  thompsonSample,
+  sampleBeta,
+  mulberry32,
+  betaMean,
+  betaVariance,
+  regularizedIncompleteBeta,
+  betaQuantile,
+  posteriorStats,
+  NEUTRAL_PRIOR,
+  type BanditState,
+  type InitializeBanditArmInput,
+  type ThompsonSampleOptions,
+  type PosteriorStats,
+  type Rng,
+} from "./bandit";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,

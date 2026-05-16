@@ -20,6 +20,10 @@ interface ServerEnv {
   voiceExtractionDailyCapDefault: number;
   /** Sprint 05: pinned Sonnet model for voice synthesis (decision 9). */
   sonnetModel: string;
+  /** Sprint 06: max successful campaign proposals per merchant per UTC day. */
+  campaignProposalDailyCapDefault: number;
+  /** Sprint 06: fraction of each group held out per campaign (decision 5). */
+  holdoutRate: number;
 }
 
 function required(name: string): string {
@@ -59,6 +63,11 @@ export function serverEnv(): ServerEnv {
     anthropicApiKey: required("ANTHROPIC_API_KEY"),
     voiceExtractionDailyCapDefault: parseIntOr(process.env.VOICE_EXTRACTION_DAILY_CAP_DEFAULT, 10),
     sonnetModel: process.env.SONNET_MODEL ?? "claude-sonnet-4-6-latest",
+    campaignProposalDailyCapDefault: parseIntOr(
+      process.env.CAMPAIGN_PROPOSAL_DAILY_CAP_DEFAULT,
+      5,
+    ),
+    holdoutRate: parseFloat(process.env.HOLDOUT_RATE ?? "0.1"),
   };
   return cached;
 }

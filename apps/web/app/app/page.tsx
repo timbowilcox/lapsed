@@ -97,7 +97,7 @@ export default async function DashboardPage({
           />
           <PanelBody>
             {visibleCampaigns.map((c) => (
-              <Link key={c.id} href={`/app/campaigns/${c.id}`} className="block">
+              <Link key={c.id} href="/app/campaigns" className="block">
                 <CampaignRow
                   name={c.name}
                   meta={c.meta}
