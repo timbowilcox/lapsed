@@ -40,6 +40,8 @@ All 13 chunks from SPRINT.md completed.
 
 ## Quality rubric — evidence-required self-scores
 
+**Self-assessed summary:** 8 criteria at 3/3, 2 criteria at 2/3 (criteria 2 and 10 — conservatively scored against the literal SPRINT.md rubric wording; see their Notes). Every criterion carries primary implementation file:line, test file:line, a test-case count, and a named key assertion. The final evaluator re-scores independently.
+
 ### Criterion 1: Voice profile versioning purity
 
 **Self-score:** 3/3
@@ -49,13 +51,13 @@ All 13 chunks from SPRINT.md completed.
 - Supporting files: `packages/db/supabase/migrations/0006_agent_identity.sql:174-191` (`voice_versions` table; `voice_versions_merchant_version_unique` constraint at :190; SELECT-only RLS, no UPDATE policy), `packages/core/src/voice-events.ts:210-273` (`materializeVoice` — atomic `agent_profiles` active-pointer upsert, preserves merchant-edited fields)
 
 **Test evidence:**
-- Test file: `packages/core/__tests__/voice-events.test.ts:491-643` (`insertVoiceVersion`) and `:304-418` (`materializeVoice`)
-- Number of test cases: 8 (`insertVoiceVersion`) + 7 (`materializeVoice` incl. error propagation)
-- Key assertion(s): "computes version_number = max + 1 when prior versions exist" (:485); "retries on 23505 unique-violation and succeeds on the next attempt" (:555); idempotency — "running twice with the same events produces the same upsert payload" (:390-412).
+- Test file: `packages/core/__tests__/voice-events.test.ts:491-655` (`insertVoiceVersion`) and `:304-490` (`materializeVoice`)
+- Number of test cases: 6 (`insertVoiceVersion`) + 7 (`materializeVoice`)
+- Key assertion(s): "computes version_number = max + 1 when prior versions exist" (:492); "retries on 23505 unique-violation and succeeds on the next attempt" (:562); idempotency — "running twice with the same events produces the same upsert payload" (:390-412).
 
 ### Criterion 2: Snapshot reproducibility
 
-**Self-score:** 3/3
+**Self-score:** 2/3
 
 **Implementation evidence:**
 - Primary file: `packages/core/src/run-voice-extraction.ts:184-222` (Step 3+4 — `computeSourceHash` + `upsertSnapshotRow` persist the raw + redacted corpus to `storefront_snapshots` **before** the synthesizer call at :214)
@@ -66,7 +68,7 @@ All 13 chunks from SPRINT.md completed.
 - Number of test cases: 11 (happy path incl. snapshot persistence) + 2 (`PROMPT_VERSION`)
 - Key assertion(s): "inserts snapshot row with both raw and redacted content (decision 8)" (:324); "deduplicates re-fetch: returns existing snapshot id without re-inserting" (:409); `PROMPT_VERSION` is a stable hash of the template.
 
-**Notes:** True LLM determinism is not asserted by a test — the Anthropic client is mocked, so a "same output" test would only exercise the mock. Reproducibility is guaranteed *structurally*: the full input corpus (`storefront_snapshots.raw_content` + `redacted_content`), the `prompt_version` hash, and the `model_version` are all persisted per `voice_versions` row, so any extraction can be replayed exactly.
+**Notes:** Self-scored **2/3** conservatively. The SPRINT.md rubric names a "snapshot test" for 3/3 — a test asserting the *same snapshot + same model = same voice profile*. No such test exists: the Anthropic client is mocked in unit tests, so a same-output test would only exercise the mock, and an LLM is not bit-deterministic in production regardless. What *is* implemented and tested is the reproducibility *mechanism* — the full input corpus, `source_hash`, `prompt_version` hash, and `model_version` are all persisted per `voice_versions` row (snapshot persisted before the LLM call; `source_hash` dedup tested at `run-voice-extraction.test.ts:409`), so any extraction's exact inputs are replayable. The evaluator may judge this structural guarantee sufficient for 3/3; it is self-scored 2/3 because the literal rubric artifact is absent.
 
 ### Criterion 3: PII redaction completeness
 
@@ -131,7 +133,7 @@ All 13 chunks from SPRINT.md completed.
 
 **Test evidence:**
 - Test file: `packages/db/__tests__/rls.test.ts:989-1185` (Sprint 05 RLS blocks for all four tables)
-- Number of test cases: ~16 Sprint-05 cases (cross-merchant read/insert denial for each table; append-only trigger rejection of UPDATE/DELETE/TRUNCATE on `voice_events`; wrong-JWT-secret returns zero rows)
+- Number of test cases: 16 Sprint-05 cases (cross-merchant read/insert denial for each table; append-only trigger rejection of UPDATE/DELETE/TRUNCATE on `voice_events`; wrong-JWT-secret returns zero rows)
 - Key assertion(s): "merchant A JWT cannot read storefront_snapshots" (:992); "UPDATE on voice_events raises append-only exception" (:1063); cross-merchant SELECT on `voice_versions` / `agent_profiles` returns zero rows.
 
 **Notes:** Per SPRINT.md Definition of Done — "`pnpm test` exits 0 (RLS tests skip cleanly if `SUPABASE_AVAILABLE=false`)" — the RLS suite is gated behind a live Supabase connection and skips in environments without one (70 skipped in standard `pnpm test`). The skip is the SPRINT-sanctioned behavior, not a deduction. Run `pnpm --filter @lapsed/db test` against the dev Supabase project to execute them.
@@ -166,7 +168,7 @@ All 13 chunks from SPRINT.md completed.
 
 ### Criterion 10: Observability + evidence-required HANDOFF
 
-**Self-score:** 3/3
+**Self-score:** 2/3
 
 **Implementation evidence:**
 - Primary file: `packages/core/src/run-voice-extraction.ts:504-...` (`logStructured` — single-line JSON; `voice_extraction_complete` at :288, `voice_extraction_failed` at every failure phase, `extraction_started`/`storefront_fetched`/`pii_redacted`/`voice_extracted`/`voice_activated` events written at each phase transition)
@@ -177,7 +179,7 @@ All 13 chunks from SPRINT.md completed.
 - Number of test cases: 37 (orchestrator — covers the full 5-event lifecycle sequence and every failure phase)
 - Key assertion(s): "writes the full 5-event lifecycle in order" (`extraction_started → storefront_fetched → pii_redacted → voice_extracted → voice_activated`); each failure path writes an `extraction_failed` event with the correct phase.
 
-**Notes:** The mid-sprint checkpoint evaluator (after chunk 7) returned **ADJUST** with one structural fix — the orchestrator emitted no event backing the `analyzing` phase nor a terminal event after step 8. The fix landed in `e01c675` + `395286e` (`extraction_started` + `voice_activated` events). Per the checkpoint protocol, a re-run was not required for a non-critical structural fix, so the build proceeded to chunk 8. The `spec-adherence-auditor` was dispatched for every chunk 8–12.
+**Notes:** Self-scored **2/3** conservatively. Three of the four sub-conditions in the SPRINT.md rubric's 3/3 description are fully met — structured logs at every phase transition, evidence-required self-scores in this HANDOFF, and `spec-adherence-auditor` dispatched for every chunk 8–12. The fourth — "mid-sprint checkpoint evaluator **APPROVED** at chunk 7" — is not literally met: the checkpoint returned **ADJUST** with one structural fix (the orchestrator emitted no event backing the `analyzing` phase nor a terminal event after step 8). The fix landed in `e01c675` + `395286e` (`extraction_started` + `voice_activated` events); per the checkpoint protocol a re-run was not required for a non-critical structural fix, and this session's directive explicitly forbade re-running the checkpoint. The literal "APPROVED" condition therefore cannot be satisfied, so the criterion is self-scored 2/3. The evaluator may judge ADJUST-then-remediated equivalent to a pass.
 
 ---
 
