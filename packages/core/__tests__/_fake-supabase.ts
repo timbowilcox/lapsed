@@ -125,6 +125,8 @@ export function makeFakeSupabase(
     const filters: Filter[] = [];
     const orders: Array<{ col: string; asc: boolean }> = [];
     let limitN: number | null = null;
+    let rangeFrom: number | null = null;
+    let rangeTo: number | null = null;
     let wantSingle = false;
     let wantMaybeSingle = false;
     let countHead = false;
@@ -179,6 +181,10 @@ export function makeFakeSupabase(
         });
       }
       if (limitN !== null) rows = rows.slice(0, limitN);
+      // .range(from, to) — Supabase semantics: inclusive both ends.
+      if (rangeFrom !== null) {
+        rows = rows.slice(rangeFrom, (rangeTo ?? rows.length) + 1);
+      }
       if (countHead) return { data: null, error: null, count: rows.length };
       if (wantSingle || wantMaybeSingle) return { data: rows[0] ?? null, error: null };
       return { data: rows.map((r) => ({ ...r })), error: null };
@@ -228,6 +234,11 @@ export function makeFakeSupabase(
     };
     builder.limit = (n: number) => {
       limitN = n;
+      return builder;
+    };
+    builder.range = (from: number, to: number) => {
+      rangeFrom = from;
+      rangeTo = to;
       return builder;
     };
     builder.select = (_cols?: string, opts?: { count?: string; head?: boolean }) => {

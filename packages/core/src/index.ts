@@ -112,6 +112,15 @@ export {
 } from "./attribution-config";
 
 export {
+  getTreatmentCohort,
+  getTreatmentOrders,
+  type CampaignOutbound,
+  type AttributedOrder,
+  type TreatmentCohortResult,
+  type TreatmentOrdersResult,
+} from "./attribution-treatment";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
