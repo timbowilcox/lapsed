@@ -10,7 +10,7 @@
 // getMerchantFromSession. The merchant id is resolved from the verified
 // session — never taken from the request body.
 
-import { NextResponse, after, type NextRequest } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createServiceClient, getExtractionStatus } from "@lapsed/db";
 import { getMerchantFromSession } from "@/app/lib/session";
 import { serverEnv } from "@/app/lib/env";
@@ -34,7 +34,7 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json(status);
 }
 
-export async function POST(_request: NextRequest): Promise<NextResponse> {
+export async function POST(): Promise<NextResponse> {
   const merchant = await getMerchantFromSession();
   if (!merchant) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
@@ -54,7 +54,14 @@ export async function POST(_request: NextRequest): Promise<NextResponse> {
       },
       body: JSON.stringify({ merchantId: merchant.id, source: "install_orchestrator" }),
     })
-      .then(() => undefined)
+      .then((res) => {
+        // A non-2xx resolves (not rejects) — log it so a stranded retry is
+        // observable. The orchestrator writes its own extraction_failed
+        // event on failure, which the poller surfaces.
+        if (!res.ok) {
+          console.warn(`voice_retry_trigger_non_ok status=${res.status}`);
+        }
+      })
       .catch((err: unknown) => {
         console.warn(`voice_retry_trigger_failed err=${(err as Error).message}`);
       }),

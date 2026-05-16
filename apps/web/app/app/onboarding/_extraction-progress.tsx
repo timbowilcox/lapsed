@@ -42,6 +42,10 @@ const STEPS: { phase: Exclude<ExtractionPhase, "failed">; label: string; help: s
 ];
 
 const POLL_INTERVAL_MS = 2000;
+// Upper bound on polls spent waiting for a retried run to begin (~30s). If the
+// new extraction_started never lands within this window the prior failure is
+// surfaced again rather than spinning forever.
+const MAX_RETRY_POLLS = 15;
 
 type StepState = "done" | "active" | "future" | "error";
 
@@ -84,12 +88,18 @@ export interface ExtractionProgressProps {
 export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
   const [status, setStatus] = useState<ExtractionStatus | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [retryError, setRetryError] = useState(false);
   const [runToken, setRunToken] = useState(0);
 
   // Last non-terminal step seen — marks which step shows the error icon when
   // the run fails (the failed event itself doesn't carry the in-progress step).
   const lastActiveStepRef = useRef(0);
   const completedFiredRef = useRef(false);
+  // When a retry is pending this holds the failed run's startedAt. Polls keep
+  // running (ignoring the stale terminal status) until startedAt changes,
+  // proving the retried run's extraction_started has landed.
+  const pendingRetryStartedAtRef = useRef<string | null>(null);
+  const retryPollCountRef = useRef(0);
 
   const phase: ExtractionPhase = status?.phase ?? "analyzing";
 
@@ -98,31 +108,52 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const tick = async (): Promise<void> => {
-      let result: ExtractionPhase | null = null;
+      let terminal = false;
       try {
         const res = await fetch("/api/voice/status", { cache: "no-store" });
         if (!res.ok) throw new Error(`status ${res.status}`);
         const next = (await res.json()) as ExtractionStatus;
         if (cancelled) return;
         setReconnecting(false);
+
+        // While a retry is pending, the prior run's terminal status is stale.
+        // Keep polling — without applying it — until startedAt changes (the
+        // retried run has begun) or the wait budget is exhausted.
+        if (pendingRetryStartedAtRef.current !== null) {
+          const newRunStarted =
+            next.startedAt !== null && next.startedAt !== pendingRetryStartedAtRef.current;
+          if (newRunStarted) {
+            pendingRetryStartedAtRef.current = null;
+            retryPollCountRef.current = 0;
+          } else {
+            retryPollCountRef.current += 1;
+            if (retryPollCountRef.current < MAX_RETRY_POLLS) {
+              timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+              return;
+            }
+            // Waited too long — surface whatever the current status is.
+            pendingRetryStartedAtRef.current = null;
+          }
+        }
+
         setStatus(next);
-        result = next.phase;
         if (next.phase !== "failed" && next.phase !== "ready") {
           lastActiveStepRef.current = Math.max(0, phaseIndex(next.phase));
         }
+        terminal = next.phase === "ready" || next.phase === "failed";
       } catch {
         // Transient network error — keep polling, surface a soft notice.
         if (cancelled) return;
         setReconnecting(true);
       }
       if (cancelled) return;
-      if (result === "ready" || result === "failed") return;
+      if (terminal) return;
       timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
     };
 
     // On retry (runToken > 0) the orchestrator needs a moment to write the
-    // new extraction_started event — delay the first poll so it isn't read
-    // as the stale `failed` state of the previous run.
+    // new extraction_started event — delay the first poll slightly. The
+    // startedAt-change guard above is the real correctness mechanism.
     if (runToken === 0) {
       void tick();
     } else {
@@ -144,8 +175,26 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
   }, [phase, status?.voiceVersionId, onComplete]);
 
   const handleRetry = useCallback(async () => {
+    setRetryError(false);
+
+    // Trigger the new run first. If the trigger itself fails, do NOT start
+    // polling — there is no new run to poll for.
+    let triggered = false;
+    try {
+      const res = await fetch("/api/voice/status", { method: "POST" });
+      triggered = res.ok;
+    } catch {
+      triggered = false;
+    }
+    if (!triggered) {
+      setRetryError(true);
+      return;
+    }
+
     completedFiredRef.current = false;
     lastActiveStepRef.current = 0;
+    retryPollCountRef.current = 0;
+    pendingRetryStartedAtRef.current = status?.startedAt ?? null;
     // Optimistically show the first step so the failed state doesn't flash.
     setStatus({
       phase: "analyzing",
@@ -155,13 +204,8 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
       voiceVersionId: null,
     });
     setReconnecting(false);
-    try {
-      await fetch("/api/voice/status", { method: "POST" });
-    } catch {
-      setReconnecting(true);
-    }
     setRunToken((token) => token + 1);
-  }, []);
+  }, [status?.startedAt]);
 
   const failedStep = lastActiveStepRef.current;
   const activeLabel =
@@ -173,9 +217,10 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
 
   return (
     <div className="w-full">
-      {/* Screen-reader announcement of the current phase. */}
+      {/* Screen-reader announcement of the current phase. Empty until the
+          first status arrives so the change is announced, not the initial. */}
       <p className="sr-only" aria-live="polite">
-        {activeLabel}
+        {status !== null ? activeLabel : ""}
       </p>
 
       <ol className="flex flex-col gap-4">
@@ -195,7 +240,7 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
                       ? "bg-lavender-100 text-lavender-700"
                       : state === "error"
                         ? "bg-danger-100 text-danger-500"
-                        : "bg-cream-200 text-ink-300"
+                        : "bg-cream-200 text-ink-500"
                 }`}
               >
                 {state === "done" && <Check strokeWidth={2.25} size={16} aria-hidden="true" />}
@@ -203,9 +248,8 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
                   <Loader2
                     strokeWidth={2}
                     size={16}
-                    className="animate-spin"
-                    role="status"
-                    aria-label="In progress"
+                    className="motion-safe:animate-spin"
+                    aria-hidden="true"
                   />
                 )}
                 {state === "error" && (
@@ -220,7 +264,7 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
               <span className="flex flex-col gap-2">
                 <span
                   className={`text-body-strong ${
-                    state === "future" ? "text-ink-300" : "text-ink-900"
+                    state === "future" ? "text-ink-500" : "text-ink-900"
                   }`}
                 >
                   {step.label}
@@ -253,10 +297,17 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
             <p className="text-body text-ink-900">{describeError(status?.errorMessage ?? null)}</p>
           </div>
           {status?.errorMessage !== "daily_cap_exhausted" && (
-            <div>
-              <Button variant="secondary" onClick={() => void handleRetry()}>
-                Try again
-              </Button>
+            <div className="flex flex-col gap-8">
+              <div>
+                <Button variant="secondary" onClick={() => void handleRetry()}>
+                  Try again
+                </Button>
+              </div>
+              {retryError && (
+                <p className="text-meta text-danger-500">
+                  We couldn&apos;t start a new attempt. Please try again.
+                </p>
+              )}
             </div>
           )}
         </div>
