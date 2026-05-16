@@ -16,6 +16,12 @@ Read CLAUDE.md, section "Architectural load-bearing decisions". Internalize the 
 4. **Bandit state as first-class data structure in Sprint 06.** Thompson sampling state per group across hypothesis dimensions. Not a future enhancement.
 5. **Holdout control groups baked into every group engagement from Sprint 08.** 10% randomised holdout per group, per campaign. Never optional.
 6. **Performance pricing on incremental revenue, not gross.** Billing math reads `(attributed revenue × incrementality factor)`. Not "we'll fix it later."
+7. **Brand voice profiles are versioned and immutable (Sprint 05).** `voice_versions` rows are never UPDATE'd. Activation = appending a new `voice_activated` event, never mutation. `agent_profiles.active_voice_version_id` is the materialized active pointer; the underlying versions are immutable history.
+8. **Storefront snapshots persisted before synthesis (Sprint 05).** Raw + redacted content written to `storefront_snapshots` before any Sonnet call. `source_hash` enables deterministic dedup. Snapshot is the input contract for reproducibility.
+9. **Voice synthesis uses Sonnet 4.6 with structured output (Sprint 05).** `tool_choice` with strict JSON schema; up to 3 retry attempts; token usage accumulated via `+=` across retries; SDK retries disabled so the loop owns retry policy.
+10. **PII redaction mandatory before any LLM call (Sprint 05).** Two gates: orchestrator pre-flight (`assertNoPii` on redacted snapshot) and synthesizer entry boundary. Cannot be bypassed by any caller. Throws `PiiLeakError` rather than silently passing PII through.
+11. **Functional agent identity, no personal names (Sprint 05).** Role descriptors drawn from a closed `ROLE_TAXONOMY` const union enforced at type level. DB `agent_profiles_role_descriptor_shape` CHECK is the backstop. No freeform persona text input anywhere.
+12. **Voice events are event-sourced (Sprint 05).** All voice state changes write to `voice_events` via `appendVoiceEvent` (Zod-validated, `.strict()` payloads). `voice_events` has UPDATE/DELETE/TRUNCATE-blocking triggers. `agent_profiles` and `voice_versions` are materialized caches regeneratable from events.
 
 # What to audit
 
@@ -95,3 +101,4 @@ Recommendation: BLOCK MERGE / APPROVE
 - One thing to be paranoid about: any "MVP" or "v1 simplification" comment near load-bearing code. That's usually where the architecture is being compromised "temporarily."
 
 Block merges with zero hesitation. Architecture is what the build sessions trust this auditor to defend.
+.claude/
