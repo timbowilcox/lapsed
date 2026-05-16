@@ -86,6 +86,15 @@ export {
 } from "./voice-events";
 
 export {
+  snapshotGroup,
+  computeGroupSnapshot,
+  isHeldOut,
+  HOLDOUT_RATE_DEFAULT,
+  type SnapshotGroupInput,
+  type SnapshotGroupResult,
+} from "./snapshot-group";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
