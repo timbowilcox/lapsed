@@ -101,7 +101,7 @@ All 13 chunks from SPRINT.md completed.
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/run-voice-extraction.ts:91-106` (daily-cap check via `countTodayExtractions`; on exhaustion writes an `extraction_failed` event with `reason: "daily_cap_exhausted"` + a structured `voice_extraction_failed` log) and `:288-296` (`voice_extraction_complete` per-extraction log)
+- Primary file: `packages/core/src/run-voice-extraction.ts:91-106` (daily-cap check via `countTodayExtractions`; on exhaustion writes an `extraction_failed` event with `reason: "daily_cap_exhausted"` + a structured `voice_extraction_failed` log) and `:335-342` (`voice_extraction_complete` per-extraction log)
 - Supporting files: `apps/web/app/lib/env.ts:20,60` + `turbo.json:33` + `scripts/vercel-env-check.mjs:41` (`VOICE_EXTRACTION_DAILY_CAP_DEFAULT` wired end-to-end), `apps/web/app/api/voice/reextract/route.ts` (pre-flight cap 429 for Settings re-extract)
 
 **Test evidence:**
@@ -171,7 +171,7 @@ All 13 chunks from SPRINT.md completed.
 **Self-score:** 2/3
 
 **Implementation evidence:**
-- Primary file: `packages/core/src/run-voice-extraction.ts:504-...` (`logStructured` — single-line JSON; `voice_extraction_complete` at :288, `voice_extraction_failed` at every failure phase, `extraction_started`/`storefront_fetched`/`pii_redacted`/`voice_extracted`/`voice_activated` events written at each phase transition)
+- Primary file: `packages/core/src/run-voice-extraction.ts:504-...` (`logStructured` — single-line JSON; `voice_extraction_complete` at :335, `voice_extraction_failed` at every failure phase, `extraction_started`/`storefront_fetched`/`pii_redacted`/`voice_extracted`/`voice_activated` events written at each phase transition)
 - Supporting files: this `HANDOFF.md` (evidence-required format)
 
 **Test evidence:**
