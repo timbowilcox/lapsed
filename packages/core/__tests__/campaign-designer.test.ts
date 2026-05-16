@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import {
   designCampaign,
   parseCampaignProposal,
+  computeBackoffMs,
   CampaignDesignError,
   CampaignProposalSchema,
   OFFER_TYPE_TAXONOMY,
@@ -54,8 +55,11 @@ function validVariants(): CampaignVariant[] {
   ];
 }
 
+const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440000";
+
 function designInput(overrides: Partial<DesignCampaignInput> = {}): DesignCampaignInput {
   return {
+    merchantId: MERCHANT_ID,
     groupSlug: "lapsed_vips",
     voiceProfile: VOICE_PROFILE,
     groupSummary: GROUP_SUMMARY,
@@ -142,10 +146,10 @@ describe("CampaignProposalSchema", () => {
     ).toThrow();
   });
 
-  it("rejects three variants identical on (offer_type, send_time_window, tone)", () => {
+  it("rejects three fully identical variants", () => {
     expect(() =>
       parseCampaignProposal({ variants: [variant(), variant(), variant()] }),
-    ).toThrow(/mutually distinct/);
+    ).toThrow(/distinct/);
   });
 
   it("rejects a message_draft longer than 160 characters", () => {
@@ -189,14 +193,38 @@ describe("CampaignProposalSchema", () => {
     ).toThrow();
   });
 
-  it("variants distinct on offer_type alone satisfy the refine", () => {
-    // Same send window + tone, different offer types → distinct triples.
+  it("rejects variants that vary offer_type but share one window and one tone", () => {
+    // Per-axis diversity: send_time_window and tone each have only 1 value.
     const v = [
       variant({ offer_type: "percent_discount" }),
       variant({ offer_type: "free_shipping" }),
       variant({ offer_type: "bundle" }),
     ];
+    expect(() => CampaignProposalSchema.parse({ variants: v })).toThrow(/distinct/);
+  });
+
+  it("accepts variants that span two distinct values on every axis", () => {
+    const v = [
+      variant({ offer_type: "percent_discount", send_time_window: "morning", tone: "warm" }),
+      variant({ offer_type: "free_shipping", send_time_window: "evening", tone: "direct" }),
+      // Third variant reuses values but no axis collapses to a single value.
+      variant({ offer_type: "percent_discount", send_time_window: "morning", tone: "direct" }),
+    ];
     expect(() => CampaignProposalSchema.parse({ variants: v })).not.toThrow();
+  });
+});
+
+describe("computeBackoffMs", () => {
+  it("grows with the attempt number", () => {
+    expect(computeBackoffMs(2)).toBeGreaterThan(computeBackoffMs(1));
+  });
+
+  it("caps at 4000ms even for a large attempt number", () => {
+    expect(computeBackoffMs(20)).toBeLessThanOrEqual(4000);
+  });
+
+  it("never returns a negative delay", () => {
+    for (let a = 1; a <= 10; a++) expect(computeBackoffMs(a)).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -295,6 +323,30 @@ describe("designCampaign — retries", () => {
     await expect(designCampaign(client, designInput())).rejects.toThrow();
     expect((client.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(3);
   });
+
+  it("exhausts retries on persistent transient API errors with reason transient_api", async () => {
+    const client = mockClient([{ kind: "throw", error: apiError(503, "service unavailable") }]);
+    await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+      reason: "transient_api",
+    });
+  });
+
+  it("exhausts retries on persistent no-tool responses with reason no_tool_use_block", async () => {
+    const client = mockClient([{ kind: "no_tool" }]);
+    await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+      reason: "no_tool_use_block",
+    });
+  });
+
+  it("carries accumulated tokens into the terminal CampaignDesignError", async () => {
+    const client = mockClient([
+      { kind: "tool", input: { variants: [] }, inputTokens: 80, outputTokens: 30 },
+    ]);
+    await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+      tokensInput: 240,
+      tokensOutput: 90,
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -316,6 +368,39 @@ describe("designCampaign — permanent errors", () => {
       reason: "permanent_api",
     });
   });
+
+  it("short-circuits on a 403 and a 404", async () => {
+    for (const status of [403, 404]) {
+      const client = mockClient([{ kind: "throw", error: apiError(status) }]);
+      await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+        reason: "permanent_api",
+      });
+    }
+  });
+
+  it("short-circuits on a name-classified error with no status field", async () => {
+    const named = new Error("auth failed");
+    named.name = "AuthenticationError";
+    const client = mockClient([{ kind: "throw", error: named }]);
+    await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+      reason: "permanent_api",
+    });
+    expect((client.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+
+  it("carries tokens accumulated before a permanent error into the thrown error", async () => {
+    // Attempt 1 returns a schema-invalid response (tokens counted), attempt 2
+    // hits a 401 — the accumulated tokens must survive on the thrown error.
+    const client = mockClient([
+      { kind: "tool", input: { variants: [] }, inputTokens: 70, outputTokens: 25 },
+      { kind: "throw", error: apiError(401) },
+    ]);
+    await expect(designCampaign(client, designInput())).rejects.toMatchObject({
+      reason: "permanent_api",
+      tokensInput: 70,
+      tokensOutput: 25,
+    });
+  });
 });
 
 describe("designCampaign — PII pre-flight (decision 10)", () => {
@@ -333,16 +418,25 @@ describe("designCampaign — PII pre-flight (decision 10)", () => {
     expect((client.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
   });
 
-  it("rejects a malformed group summary (non-numeric count) before the call", async () => {
+  it("rejects a malformed group summary with reason invalid_group_summary before the call", async () => {
     const client = mockClient([{ kind: "tool", input: { variants: validVariants() } }]);
     await expect(
       designCampaign(client, {
+        merchantId: MERCHANT_ID,
         groupSlug: "lapsed_vips",
         voiceProfile: VOICE_PROFILE,
         // @ts-expect-error — customerCount must be a number
         groupSummary: { ...GROUP_SUMMARY, customerCount: "lots" },
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ reason: "invalid_group_summary" });
+    expect((client.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("rejects a non-UUID merchantId before the call", async () => {
+    const client = mockClient([{ kind: "tool", input: { variants: validVariants() } }]);
+    await expect(
+      designCampaign(client, designInput({ merchantId: "not-a-uuid" })),
+    ).rejects.toThrow(/merchantId/);
     expect((client.messages.create as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
   });
 

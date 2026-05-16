@@ -22,6 +22,10 @@ import { assertNoPii } from "./pii-redactor";
 import { TONE_TAXONOMY, SONNET_MODEL_DEFAULT, type VoiceProfile } from "./voice-synthesizer";
 
 export const MAX_RETRIES = 3;
+// 2048 comfortably fits a 3-variant tool call: 3 × (~160-char message_draft +
+// short offer/enum fields + a small expected_impact object) as JSON is well
+// under 1k tokens. Headroom is ~2× worst case; a truncated tool_use block
+// would simply trigger a retry rather than corrupt output.
 export const MAX_OUTPUT_TOKENS = 2048;
 const BACKOFF_BASE_MS = 250;
 const BACKOFF_MAX_MS = 4000;
@@ -97,10 +101,12 @@ const CampaignVariantSchema = z
   .strict();
 
 /**
- * A proposal is exactly three variants, mutually distinct across the
- * (offer_type, send_time_window, tone) triple — the acceptance criterion's
- * "offers/timing/tone diversity". A model response with three near-identical
- * variants fails this and triggers a retry.
+ * A proposal is exactly three variants that span at least two distinct values
+ * on EACH of offer type, send-time window, and tone — the acceptance
+ * criterion's "offers/timing/tone diversity", enforced per-axis so a proposal
+ * always explores every bandit hypothesis dimension (decision 4) rather than
+ * varying one axis while holding the other two fixed. A model response with
+ * three near-identical variants fails this and triggers a retry.
  */
 export const CampaignProposalSchema = z
   .object({
@@ -109,14 +115,14 @@ export const CampaignProposalSchema = z
   .strict()
   .refine(
     (p) => {
-      const keys = p.variants.map(
-        (v) => `${v.offer_type}|${v.send_time_window}|${v.tone}`,
-      );
-      return new Set(keys).size === 3;
+      const offers = new Set(p.variants.map((v) => v.offer_type));
+      const windows = new Set(p.variants.map((v) => v.send_time_window));
+      const tones = new Set(p.variants.map((v) => v.tone));
+      return offers.size >= 2 && windows.size >= 2 && tones.size >= 2;
     },
     {
       message:
-        "the three variants must be mutually distinct across offer type, send time, and tone",
+        "the three variants must span at least two distinct offer types, send windows, and tones",
     },
   );
 
@@ -169,6 +175,7 @@ const DESIGNER_TOOL = {
   input_schema: {
     type: "object" as const,
     required: ["variants"],
+    additionalProperties: false,
     properties: {
       variants: {
         type: "array",
@@ -176,6 +183,7 @@ const DESIGNER_TOOL = {
         maxItems: 3,
         items: {
           type: "object",
+          additionalProperties: false,
           required: [
             "offer_type",
             "offer_value",
@@ -186,12 +194,13 @@ const DESIGNER_TOOL = {
           ],
           properties: {
             offer_type: { type: "string", enum: [...OFFER_TYPE_TAXONOMY] },
-            offer_value: { type: "string", maxLength: 64 },
-            message_draft: { type: "string", maxLength: 160 },
+            offer_value: { type: "string", minLength: 1, maxLength: 64 },
+            message_draft: { type: "string", minLength: 1, maxLength: 160 },
             send_time_window: { type: "string", enum: [...SEND_TIME_WINDOWS] },
             tone: { type: "string", enum: [...TONE_TAXONOMY] },
             expected_impact: {
               type: "object",
+              additionalProperties: false,
               required: ["estimated_response_rate", "estimated_recovered_revenue"],
               properties: {
                 estimated_response_rate: { type: "number", minimum: 0, maximum: 1 },
@@ -248,6 +257,9 @@ export function createCampaignClient(opts: CampaignClientOptions): Anthropic {
 }
 
 export interface DesignCampaignInput {
+  /** Owning merchant — carried for traceability; never sent to the LLM. */
+  merchantId: string;
+  /** The system group identifier (a GroupSlug); doubles as the LLM-visible group id. */
   groupSlug: string;
   /** The merchant's active brand voice profile (from voice_versions). */
   voiceProfile: VoiceProfile;
@@ -272,7 +284,8 @@ export type CampaignDesignReason =
   | "exhausted_retries"
   | "transient_api"
   | "permanent_api"
-  | "pii_leak";
+  | "pii_leak"
+  | "invalid_group_summary";
 
 export class CampaignDesignError extends Error {
   readonly reason: CampaignDesignReason;
@@ -310,9 +323,24 @@ export async function designCampaign(
   client: Anthropic,
   input: DesignCampaignInput,
 ): Promise<DesignCampaignResult> {
-  // Validate the group summary shape, then run the decision-10 PII pre-flight
-  // on its serialized form.
-  const groupSummary = GroupSummarySchema.parse(input.groupSummary);
+  z.string().uuid("merchantId must be a UUID").parse(input.merchantId);
+
+  // Validate the group summary shape. A malformed summary throws a typed
+  // CampaignDesignError (not a raw ZodError) so the chunk-6 orchestrator can
+  // record a structured proposal_failed event from a uniform error contract.
+  let groupSummary: GroupSummary;
+  try {
+    groupSummary = GroupSummarySchema.parse(input.groupSummary);
+  } catch (err) {
+    throw new CampaignDesignError(
+      "invalid_group_summary",
+      "group summary failed schema validation",
+      { cause: err },
+    );
+  }
+
+  // Decision-10 PII pre-flight on the serialized group summary. The summary is
+  // the only customer-derived input; SPRINT.md scopes the pre-flight to it.
   try {
     assertNoPii(JSON.stringify(groupSummary));
   } catch (err) {
@@ -414,7 +442,8 @@ function isPermanentAnthropicError(err: Error): boolean {
   );
 }
 
-function computeBackoffMs(attempt: number): number {
+/** Exponential backoff with jitter, capped at BACKOFF_MAX_MS. Exported for tests. */
+export function computeBackoffMs(attempt: number): number {
   const raw = BACKOFF_BASE_MS * 2 ** (attempt - 1);
   const jitter = Math.floor(Math.random() * BACKOFF_BASE_MS);
   return Math.min(raw + jitter, BACKOFF_MAX_MS);
