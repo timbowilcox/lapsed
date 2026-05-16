@@ -300,7 +300,7 @@ export async function handleInboundMessage(
   const success =
     classification.sentiment === "positive" &&
     (classification.intent === "engagement" || classification.intent === "purchase");
-  await updateBanditForReply(deps, { merchantId, conversationId, success });
+  await routeBanditPosterior(deps, { merchantId, conversationId, success });
   mark("posterior_updated");
 
   // ── Reply generation (timed against the remaining soft budget) ─────────────
@@ -658,7 +658,7 @@ async function appendDegradedEvent(
  * outbound message is stamped `posterior_updated_at` so the chunk-9 no-reply
  * sweep does not also fire a (false) posterior for it.
  */
-async function updateBanditForReply(
+export async function routeBanditPosterior(
   deps: HandleInboundDeps,
   input: { merchantId: string; conversationId: string; success: boolean },
 ): Promise<void> {
@@ -704,7 +704,7 @@ async function updateBanditForReply(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Loads the last REPLY_HISTORY_LIMIT messages of the thread, oldest-first. */
-async function loadConversationHistory(
+export async function loadConversationHistory(
   serviceClient: LapsedSupabaseClient,
   conversationId: string,
 ): Promise<ReplyHistoryMessage[]> {
@@ -723,7 +723,7 @@ async function loadConversationHistory(
 }
 
 /** Loads + parses the merchant's active voice profile, or a safe default. */
-async function loadVoiceProfile(
+export async function loadVoiceProfile(
   serviceClient: LapsedSupabaseClient,
   merchantId: string,
 ): Promise<VoiceProfile> {
@@ -739,7 +739,7 @@ async function loadVoiceProfile(
 }
 
 /** Loads lightweight, PII-free customer context for reply tailoring. */
-async function loadCustomerContext(
+export async function loadCustomerContext(
   serviceClient: LapsedSupabaseClient,
   merchantId: string,
   customerId: string,

@@ -196,6 +196,15 @@ export {
 } from "./message-events";
 
 export {
+  sweepNoReplyPosteriors,
+  retryDegradedReplies,
+  type SweepNoReplyOpts,
+  type SweepNoReplyResult,
+  type RetryDegradedOpts,
+  type RetryDegradedResult,
+} from "./conversation-sweep";
+
+export {
   launchMerchantCampaigns,
   type LaunchMerchantCampaignsOpts,
   type LaunchMerchantCampaignsResult,

@@ -13,7 +13,7 @@ import type { LapsedSupabaseClient } from "@lapsed/db";
 export type FakeRow = Record<string, unknown>;
 
 interface Filter {
-  kind: "eq" | "in" | "contains" | "gte";
+  kind: "eq" | "in" | "contains" | "gte" | "lt" | "lte" | "is";
   col: string;
   value: unknown;
 }
@@ -64,6 +64,9 @@ function matches(row: FakeRow, filters: Filter[]): boolean {
     if (f.kind === "eq") return v === f.value;
     if (f.kind === "in") return (f.value as unknown[]).includes(v);
     if (f.kind === "gte") return (v as string) >= (f.value as string);
+    if (f.kind === "lt") return (v as string) < (f.value as string);
+    if (f.kind === "lte") return (v as string) <= (f.value as string);
+    if (f.kind === "is") return f.value === null ? v === null || v === undefined : v === f.value;
     if (f.kind === "contains") {
       return Array.isArray(v) && (f.value as unknown[]).every((x) => v.includes(x));
     }
@@ -188,6 +191,18 @@ export function makeFakeSupabase(
     };
     builder.gte = (col: string, value: unknown) => {
       filters.push({ kind: "gte", col, value });
+      return builder;
+    };
+    builder.lt = (col: string, value: unknown) => {
+      filters.push({ kind: "lt", col, value });
+      return builder;
+    };
+    builder.lte = (col: string, value: unknown) => {
+      filters.push({ kind: "lte", col, value });
+      return builder;
+    };
+    builder.is = (col: string, value: unknown) => {
+      filters.push({ kind: "is", col, value });
       return builder;
     };
     builder.order = (col: string, opts?: { ascending?: boolean }) => {
