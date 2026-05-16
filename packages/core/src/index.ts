@@ -121,6 +121,15 @@ export {
 } from "./attribution-treatment";
 
 export {
+  getHoldoutCohort,
+  getHoldoutOrders,
+  type CalendarWindow,
+  type HoldoutCohortResult,
+  type HoldoutOrder,
+  type HoldoutOrdersResult,
+} from "./attribution-holdout";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,

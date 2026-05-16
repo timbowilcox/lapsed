@@ -297,6 +297,18 @@ describe("getTreatmentOrders — boundary + robustness cases", () => {
     ).rejects.toThrow(/valid timestamp/);
   });
 
+  it("throws on a non-integer total_price_cents", async () => {
+    const { client } = makeFakeSupabase({
+      campaign_proposals: [proposal(CAMPAIGN_A, 14)],
+      conversations: [conversation("c1")],
+      messages: [outbound("m1", "c1", CAMPAIGN_A, day(0))],
+      orders: [order("o1", "c1", 100.5, day(3))],
+    });
+    await expect(
+      getTreatmentOrders(client, await getTreatmentCohort(client, CAMPAIGN_A)),
+    ).rejects.toThrow(/not an integer/);
+  });
+
   it("propagates a query error from the orders fetch", async () => {
     const { client } = makeFakeSupabase(
       {

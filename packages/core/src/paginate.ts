@@ -34,3 +34,18 @@ export async function fetchAllRows<T>(
   }
   return all;
 }
+
+/** Splits an array into chunks of at most `size` elements. */
+export function chunk<T>(arr: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Default cap on the number of ids in a single `.in(...)` filter. PostgREST
+ * encodes `.in()` values in the request URL; a few thousand UUIDs would
+ * overflow practical URL limits. Callers chunk their id list by this size and
+ * page each chunk with `fetchAllRows`.
+ */
+export const IN_CLAUSE_CHUNK = 200;

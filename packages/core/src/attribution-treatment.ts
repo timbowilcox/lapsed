@@ -20,7 +20,7 @@
 import { z } from "zod";
 import type { LapsedSupabaseClient } from "@lapsed/db";
 import { ATTRIBUTION_WINDOW_DAYS_DEFAULT } from "./attribution-config";
-import { fetchAllRows } from "./paginate";
+import { fetchAllRows, chunk, IN_CLAUSE_CHUNK } from "./paginate";
 
 const DAY_MS = 86_400_000;
 
@@ -278,22 +278,28 @@ export async function getTreatmentOrders(
     }
   }
 
-  // Orders placed by cohort customers (paged).
-  const orderRows = await fetchAllRows<OrderRow>((from, to) =>
-    client
-      .from("orders")
-      .select("id, shopify_customer_gid, total_price_cents, shopify_created_at")
-      .eq("merchant_id", merchantId)
-      .in("shopify_customer_gid", customerIds)
-      .range(from, to),
-  );
+  // Orders placed by cohort customers (paged, and the id list chunked so a
+  // large cohort does not overflow the PostgREST `.in(...)` URL).
+  const orderRows: OrderRow[] = [];
+  for (const idChunk of chunk(customerIds, IN_CLAUSE_CHUNK)) {
+    const rows = await fetchAllRows<OrderRow>((from, to) =>
+      client
+        .from("orders")
+        .select("id, shopify_customer_gid, total_price_cents, shopify_created_at")
+        .eq("merchant_id", merchantId)
+        .in("shopify_customer_gid", idChunk)
+        .range(from, to),
+    );
+    orderRows.push(...rows);
+  }
 
   const attributed: AttributedOrder[] = [];
   for (const o of orderRows) {
     const placedMs = epochMs(o.shopify_created_at, "shopify_created_at", o.id);
-    if (!Number.isFinite(o.total_price_cents)) {
+    // Currency is integer cents end-to-end — reject a non-integer (or NaN).
+    if (!Number.isInteger(o.total_price_cents)) {
       throw new Error(
-        `attribution-treatment: order ${o.id} has a non-numeric total_price_cents`,
+        `attribution-treatment: order ${o.id} total_price_cents is not an integer: ${o.total_price_cents}`,
       );
     }
     const candidates = outboundsByCustomer.get(o.shopify_customer_gid) ?? [];
