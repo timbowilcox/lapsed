@@ -93,6 +93,18 @@ export {
 } from "./snapshot-group";
 
 export {
+  appendCampaignEvent,
+  materializeCampaign,
+  getReadyCampaigns,
+  CampaignEventType,
+  CampaignFailurePhase,
+  type CampaignEventInput,
+  type CampaignStatus,
+  type CampaignMaterializedState,
+  type ReadyCampaign,
+} from "./campaign-events";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
