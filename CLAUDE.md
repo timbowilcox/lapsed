@@ -95,34 +95,32 @@ Each sprint that touches a relevant area scores against these. Anything below 3 
 These decisions are expensive to retrofit. Any code that touches them is reviewed by the `architecture-guardian` subagent (see `.claude/agents/architecture-guardian.md`). "We'll fix it later" is not an acceptable deferral for any of these.
 
 1. **Event-sourced customer memory graph (Sprint 03).** Append-only event log with timestamp + source. Materialised customer profile regenerated nightly. No snapshot mutations — every customer state change is an appended event, never an `UPDATE` to the profile row.
-
 2. **pgvector for conversation memory (Sprint 03, not later).** Semantic search over conversation transcripts requires an embedding column on the conversations table from the start. Adding vector search to an existing schema is a migration burden; getting it right on first build is not. Schema decisions ripple through the conversation engine.
-
 3. **Channel-agnostic conversation engine (Sprint 07).** Channel is a parameter (`"sms" | "voice" | "email"`), not a hardcoded assumption. v1 ships SMS only, but every function signature, prompt template, and event record accepts channel cleanly. No `if channel === 'sms'` branching without an abstraction. No `sendSms(...)` functions — `sendMessage(..., channel)`.
-
 4. **Bandit state as first-class data structure (Sprint 06).** Thompson sampling state per group across hypothesis dimensions (offer type, message timing, tone). Not a future enhancement — campaign generation reads from and writes to bandit state on every run. A/B test logic that bypasses the bandit state is a violation.
-
 5. **Holdout control groups baked into every group engagement (Sprint 08).** 10% randomised holdout per group, per campaign, deterministically seeded by `(campaign_id, customer_id)`. Never optional. If a cohort is "too small" for a holdout, it is too small to run a campaign on — the answer is not to skip the holdout.
-
 6. **Performance pricing on incremental revenue, not gross.** Billing math is `(attributed revenue × incrementality factor)`. The incrementality factor is derived from holdout group comparison. No invoice line item uses gross attributed revenue without the adjustment. "We'll fix it later" means the billing math is wrong from day one.
-
 7. **Brand voice profiles are versioned and immutable (Sprint 05).** Re-extraction creates a new `voice_versions` row. Active version tracked via `agent_profiles.active_voice_version_id`. Prior versions retained for audit. Editing = new version with edits applied; old version remains.
-
 8. **Storefront snapshots persisted before synthesis (Sprint 05).** Full input corpus written to `storefront_snapshots` before any LLM call. Same snapshot + same model + same prompt = same output. Enables replay if the voice algorithm changes.
-
 9. **Voice synthesis uses Sonnet 4.6 with structured output (Sprint 05).** Not Haiku. One-shot, high-leverage. `tool_choice` with strict JSON schema; retry up to 3 attempts; token usage accumulated.
-
 10. **PII redaction mandatory before any LLM call (Sprint 05).** Pre-flight test fails the call if PII patterns remain after redaction. No storefront content reaches Sonnet unredacted.
-
 11. **Agent identity uses functional language only — no personal names (Sprint 05).** Role descriptors drawn from a taxonomy enum. Type-level rejection of freeform persona names.
-
 12. **Voice events are event-sourced (Sprint 05).** Every extraction writes a `voice_extracted` event via `appendVoiceEvent`. Current state in `agent_profiles` is materialized cache, regeneratable from events. Consistent with decisions 1 and 2.
-
 13. **Campaign proposals merchant-approved before any send (Sprint 06).** No auto-launch path exists. Every campaign requires a recorded `campaign_approved` event from the merchant before downstream sending becomes possible. Sprint 07's conversation engine reads from `getReadyCampaigns(merchantId)`, which filters to proposals where the latest event is `campaign_approved`. Timer-based auto-approval or "approve after N hours" escalation is explicitly excluded — adding either would violate this decision.
-
 14. **Bandit arms are versioned and immutable (Sprint 06).** Once a proposal is approved and arms are initialized in `bandit_state`, those arms cannot be edited in-place. Editing a campaign creates a new proposal version with new arms; old arms are retained for performance analysis and audit. Mirrors decision 7 (voice profiles versioned). Posterior updates (Sprint 07+) write to the existing arm's row — that's a separate mutation pattern that updates statistics, not the arm's identity or contract.
-
 15. **Group snapshots frozen at proposal creation (Sprint 06).** When a campaign proposal references a customer group, the customer set is snapshotted to `campaign_group_snapshots` at proposal time. Subsequent changes to the underlying group definition (re-scoring, lifecycle drift, customer add/remove) do NOT change which customers receive the campaign. This is essential for attribution math in Sprint 08: incremental revenue is computed against the snapshotted holdout, not a live recompute. A campaign's customer set is determined exactly once, at proposal time.
+
+## Pre-sprint preflight (run BEFORE starting Sprint N)
+
+Before launching the build session, run:
+
+    pnpm db:diagnose
+
+Exits 0 if production Supabase has every migration's expected tables/views/functions/extensions applied; exits 1 with a per-migration breakdown if anything is missing. Apply the missing migration(s) via Supabase SQL editor before proceeding.
+
+The script is self-maintaining — it parses `packages/db/supabase/migrations/*.sql` to derive expectations, so new migrations are automatically covered without updating the diagnostic.
+
+**Companion gate — apply N's migration before merging**. When a sprint introduces a new migration, that migration MUST be applied to production Supabase BEFORE the sprint PR merges. Document this as a manual action in HANDOFF.md and verify before opening the PR.
 
 ## Conventions
 
