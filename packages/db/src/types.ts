@@ -901,8 +901,287 @@ export type Database = {
           },
         ]
       }
+      campaign_proposals: {
+        Row: {
+          approved_at: string | null
+          approved_by_user_id: string | null
+          created_at: string
+          generated_at: string
+          group_slug: string
+          id: string
+          merchant_id: string
+          model_version: string
+          rejected_at: string | null
+          rejection_reason: string | null
+          status: Database["public"]["Enums"]["campaign_proposal_status"]
+          supersedes_proposal_id: string | null
+          version_number: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by_user_id?: string | null
+          created_at?: string
+          generated_at?: string
+          group_slug: string
+          id?: string
+          merchant_id: string
+          model_version: string
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          status?: Database["public"]["Enums"]["campaign_proposal_status"]
+          supersedes_proposal_id?: string | null
+          version_number?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by_user_id?: string | null
+          created_at?: string
+          generated_at?: string
+          group_slug?: string
+          id?: string
+          merchant_id?: string
+          model_version?: string
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          status?: Database["public"]["Enums"]["campaign_proposal_status"]
+          supersedes_proposal_id?: string | null
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_proposals_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_proposals_supersedes_proposal_id_fkey"
+            columns: ["supersedes_proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_arms: {
+        Row: {
+          bandit_arm_id: string
+          created_at: string
+          expected_impact: Json
+          id: string
+          merchant_id: string
+          message_draft: string
+          offer_type: string
+          offer_value: string
+          proposal_id: string
+          send_time_window: string
+          tone: string
+          variant_index: number
+        }
+        Insert: {
+          bandit_arm_id?: string
+          created_at?: string
+          expected_impact?: Json
+          id?: string
+          merchant_id: string
+          message_draft: string
+          offer_type: string
+          offer_value: string
+          proposal_id: string
+          send_time_window: string
+          tone: string
+          variant_index: number
+        }
+        Update: {
+          bandit_arm_id?: string
+          created_at?: string
+          expected_impact?: Json
+          id?: string
+          merchant_id?: string
+          message_draft?: string
+          offer_type?: string
+          offer_value?: string
+          proposal_id?: string
+          send_time_window?: string
+          tone?: string
+          variant_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_arms_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_arms_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bandit_state: {
+        Row: {
+          alpha: number
+          arm_id: string
+          beta: number
+          created_at: string
+          last_updated_at: string
+          merchant_id: string
+          observation_count: number
+          proposal_id: string
+        }
+        Insert: {
+          alpha?: number
+          arm_id: string
+          beta?: number
+          created_at?: string
+          last_updated_at?: string
+          merchant_id: string
+          observation_count?: number
+          proposal_id: string
+        }
+        Update: {
+          alpha?: number
+          arm_id?: string
+          beta?: number
+          created_at?: string
+          last_updated_at?: string
+          merchant_id?: string
+          observation_count?: number
+          proposal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bandit_state_arm_id_fkey"
+            columns: ["arm_id"]
+            isOneToOne: true
+            referencedRelation: "campaign_arms"
+            referencedColumns: ["bandit_arm_id"]
+          },
+          {
+            foreignKeyName: "bandit_state_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bandit_state_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_group_snapshots: {
+        Row: {
+          created_at: string
+          customer_id: string
+          included_in_holdout: boolean
+          merchant_id: string
+          proposal_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          included_in_holdout?: boolean
+          merchant_id: string
+          proposal_id: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          included_in_holdout?: boolean
+          merchant_id?: string
+          proposal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_group_snapshots_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_group_snapshots_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_events: {
+        Row: {
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          occurred_at: string
+          payload: Json
+          proposal_id: string
+        }
+        Insert: {
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          occurred_at: string
+          payload?: Json
+          proposal_id: string
+        }
+        Update: {
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          occurred_at?: string
+          payload?: Json
+          proposal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_events_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
+      campaign_holdouts: {
+        Row: {
+          created_at: string | null
+          customer_id: string | null
+          merchant_id: string | null
+          proposal_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_group_snapshots_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       merchant_aggregates: {
         Row: {
           ltv_p75_cents: string | null
@@ -934,6 +1213,7 @@ export type Database = {
     }
     Enums: {
       lifecycle_stage: "new" | "engaged" | "at_risk" | "lapsed" | "won_back" | "churned"
+      campaign_proposal_status: "proposed" | "approved" | "rejected" | "edited"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1062,6 +1342,7 @@ export const Constants = {
   public: {
     Enums: {
       lifecycle_stage: ["new", "engaged", "at_risk", "lapsed", "won_back", "churned"],
+      campaign_proposal_status: ["proposed", "approved", "rejected", "edited"],
     },
   },
 } as const
