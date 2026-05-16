@@ -105,6 +105,25 @@ export {
 } from "./campaign-events";
 
 export {
+  initializeBanditArm,
+  updatePosterior,
+  thompsonSample,
+  sampleBeta,
+  mulberry32,
+  betaMean,
+  betaVariance,
+  regularizedIncompleteBeta,
+  betaQuantile,
+  posteriorStats,
+  NEUTRAL_PRIOR,
+  type BanditState,
+  type InitializeBanditArmInput,
+  type ThompsonSampleOptions,
+  type PosteriorStats,
+  type Rng,
+} from "./bandit";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,
