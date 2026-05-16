@@ -132,9 +132,9 @@ All 13 chunks from SPRINT.md completed.
 - Primary file: `packages/db/supabase/migrations/0006_agent_identity.sql` — `storefront_snapshots` deny-all for authenticated/anon + REVOKE (:84-97); `voice_events` merchant-scoped SELECT (:154-164) + append-only UPDATE/DELETE/TRUNCATE triggers (:142-151); `voice_versions` merchant-scoped SELECT (:213-221); `agent_profiles` merchant-scoped SELECT (:262-270)
 
 **Test evidence:**
-- Test file: `packages/db/__tests__/rls.test.ts:989-1185` (Sprint 05 RLS blocks for all four tables)
-- Number of test cases: 16 Sprint-05 cases (cross-merchant read/insert denial for each table; append-only trigger rejection of UPDATE/DELETE/TRUNCATE on `voice_events`; wrong-JWT-secret returns zero rows)
-- Key assertion(s): "merchant A JWT cannot read storefront_snapshots" (:992); "UPDATE on voice_events raises append-only exception" (:1063); cross-merchant SELECT on `voice_versions` / `agent_profiles` returns zero rows.
+- Test file: `packages/db/__tests__/rls.test.ts:989-1381` (Sprint 05 RLS blocks for all four tables)
+- Number of test cases: 24 Sprint-05 cases (cross-merchant read/insert denial per table; append-only UPDATE/DELETE/TRUNCATE rejection on `voice_events`; wrong-JWT-secret returns zero rows; `role_descriptor` CHECK rejects persona names; unique-constraint enforcement)
+- Key assertion(s): "merchant A JWT cannot read storefront_snapshots" (:992); "UPDATE on voice_events raises append-only exception" (:1063); "a capitalized persona name like 'Sarah' is rejected by the CHECK" (:1187); cross-merchant SELECT on `voice_versions` / `agent_profiles` returns zero rows.
 
 **Notes:** Per SPRINT.md Definition of Done — "`pnpm test` exits 0 (RLS tests skip cleanly if `SUPABASE_AVAILABLE=false`)" — the RLS suite is gated behind a live Supabase connection and skips in environments without one (70 skipped in standard `pnpm test`). The skip is the SPRINT-sanctioned behavior, not a deduction. Run `pnpm --filter @lapsed/db test` against the dev Supabase project to execute them.
 
