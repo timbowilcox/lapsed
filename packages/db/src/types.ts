@@ -14,47 +14,49 @@ export type Database = {
   }
   public: {
     Tables: {
-      conversation_messages: {
+      conversations: {
         Row: {
-          body: string
           channel: string
-          conversation_id: string
+          created_at: string
+          customer_id: string
           embedding: string | null
           id: string
+          last_inbound_at: string | null
+          last_message_at: string | null
           merchant_id: string
-          role: string
-          sent_at: string
+          message_count: number
+          opened_at: string
+          updated_at: string
         }
         Insert: {
-          body: string
           channel?: string
-          conversation_id: string
+          created_at?: string
+          customer_id: string
           embedding?: string | null
           id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
           merchant_id: string
-          role: string
-          sent_at?: string
+          message_count?: number
+          opened_at?: string
+          updated_at?: string
         }
         Update: {
-          body?: string
           channel?: string
-          conversation_id?: string
+          created_at?: string
+          customer_id?: string
           embedding?: string | null
           id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
           merchant_id?: string
-          role?: string
-          sent_at?: string
+          message_count?: number
+          opened_at?: string
+          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conversation_messages_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conversation_messages_merchant_id_fkey"
+            foreignKeyName: "conversations_merchant_id_fkey"
             columns: ["merchant_id"]
             isOneToOne: false
             referencedRelation: "merchants"
@@ -62,55 +64,194 @@ export type Database = {
           },
         ]
       }
-      conversations: {
+      customer_opt_outs: {
         Row: {
-          attributed_order_gid: string | null
-          attributed_revenue_cents: number | null
+          created_at: string
+          customer_id: string
+          id: string
+          inbound_message_id: string | null
+          merchant_id: string
+          opted_out_at: string
+          phone_number: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          inbound_message_id?: string | null
+          merchant_id: string
+          opted_out_at?: string
+          phone_number: string
+          source: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          inbound_message_id?: string | null
+          merchant_id?: string
+          opted_out_at?: string
+          phone_number?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_opt_outs_inbound_message_id_fkey"
+            columns: ["inbound_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_opt_outs_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_events: {
+        Row: {
+          conversation_id: string
+          event_type: string
+          id: string
+          ingested_at: string
+          merchant_id: string
+          message_id: string | null
+          occurred_at: string
+          payload: Json
+        }
+        Insert: {
+          conversation_id: string
+          event_type: string
+          id?: string
+          ingested_at?: string
+          merchant_id: string
+          message_id?: string | null
+          occurred_at: string
+          payload?: Json
+        }
+        Update: {
+          conversation_id?: string
+          event_type?: string
+          id?: string
+          ingested_at?: string
+          merchant_id?: string
+          message_id?: string | null
+          occurred_at?: string
+          payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_events_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          arm_id: string | null
+          body: string
           campaign_id: string | null
           channel: string
+          conversation_id: string
           created_at: string
+          direction: string
           embedding: string | null
           id: string
-          last_message_at: string | null
+          intent: string | null
           merchant_id: string
-          message_count: number
-          shopify_customer_gid: string
+          pii_redacted_body: string
+          posterior_updated_at: string | null
+          sent_at: string
+          sentiment: string | null
           status: string
+          twilio_sid: string | null
           updated_at: string
         }
         Insert: {
-          attributed_order_gid?: string | null
-          attributed_revenue_cents?: number | null
+          arm_id?: string | null
+          body: string
           campaign_id?: string | null
           channel?: string
+          conversation_id: string
           created_at?: string
+          direction: string
           embedding?: string | null
           id?: string
-          last_message_at?: string | null
+          intent?: string | null
           merchant_id: string
-          message_count?: number
-          shopify_customer_gid: string
+          pii_redacted_body: string
+          posterior_updated_at?: string | null
+          sent_at?: string
+          sentiment?: string | null
           status?: string
+          twilio_sid?: string | null
           updated_at?: string
         }
         Update: {
-          attributed_order_gid?: string | null
-          attributed_revenue_cents?: number | null
+          arm_id?: string | null
+          body?: string
           campaign_id?: string | null
           channel?: string
+          conversation_id?: string
           created_at?: string
+          direction?: string
           embedding?: string | null
           id?: string
-          last_message_at?: string | null
+          intent?: string | null
           merchant_id?: string
-          message_count?: number
-          shopify_customer_gid?: string
+          pii_redacted_body?: string
+          posterior_updated_at?: string | null
+          sent_at?: string
+          sentiment?: string | null
           status?: string
+          twilio_sid?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conversations_merchant_id_fkey"
+            foreignKeyName: "messages_arm_id_fkey"
+            columns: ["arm_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_arms"
+            referencedColumns: ["bandit_arm_id"]
+          },
+          {
+            foreignKeyName: "messages_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_merchant_id_fkey"
             columns: ["merchant_id"]
             isOneToOne: false
             referencedRelation: "merchants"

@@ -167,6 +167,120 @@ export {
 } from "./bandit";
 
 export {
+  createTwilioClient,
+  validateWebhookSignature,
+  maskPhone,
+  computeBackoffMs as twilioBackoffMs,
+  TWILIO_MAX_SEND_RETRIES,
+  TWILIO_SEND_TIMEOUT_MS_DEFAULT,
+  type TwilioClient,
+  type TwilioClientOptions,
+  type TwilioSdk,
+  type TwilioMessageInstance,
+  type SendSmsInput,
+  type SendSmsResult,
+  type SendSmsMetadata,
+  type ValidateWebhookSignatureInput,
+} from "./twilio-client";
+
+export {
+  appendMessageEvent,
+  ensureConversation,
+  recordConversationActivity,
+  MessageEventType,
+  DegradedModePhase,
+  type MessageEventInput,
+  type AppendMessageEventInput,
+  type EnsureConversationInput,
+  type RecordConversationActivityInput,
+} from "./message-events";
+
+export {
+  sweepNoReplyPosteriors,
+  retryDegradedReplies,
+  type SweepNoReplyOpts,
+  type SweepNoReplyResult,
+  type RetryDegradedOpts,
+  type RetryDegradedResult,
+} from "./conversation-sweep";
+
+export {
+  launchMerchantCampaigns,
+  type LaunchMerchantCampaignsOpts,
+  type LaunchMerchantCampaignsResult,
+} from "./launch-campaigns";
+
+export {
+  handleInboundMessage,
+  LATENCY_RESERVE_MS,
+  OPT_OUT_ACK,
+  DEGRADED_FALLBACK_REPLY,
+  type HandleInboundDeps,
+  type HandleInboundInput,
+  type HandleInboundResult,
+  type HandleInboundOutcome,
+} from "./handle-inbound";
+
+export {
+  sendMessage,
+  type SendMessageInput,
+  type SendMessageResult,
+  type SendMessageSkipReason,
+  type SendMessageOptions,
+} from "./send-message";
+
+export {
+  detectOptOutKeyword,
+  isOptedOut,
+  assertNotOptedOut,
+  recordOptOut,
+  OptOutError,
+  OptOutSource,
+  type RecordOptOutInput,
+  type RecordOptOutResult,
+} from "./opt-out-registry";
+
+export {
+  classifyReply,
+  createClassifyClient,
+  parseReplyClassification,
+  ClassifyReplyError,
+  CLASSIFY_SYSTEM_PROMPT,
+  MAX_CLASSIFY_ATTEMPTS,
+  OPT_OUT_CONFIDENCE_THRESHOLD,
+  REPLY_SENTIMENTS,
+  REPLY_INTENTS,
+  type ReplySentiment,
+  type ReplyIntent,
+  type ReplyClassification,
+  type ClassifyReplyInput,
+  type ClassifyReplyResult,
+  type ClassifyReplyReason,
+  type ClassifyClientOptions,
+} from "./classify-reply";
+
+export {
+  generateReply,
+  createGenerateClient,
+  parseGeneratedReply,
+  buildSystemPrompt as buildReplySystemPrompt,
+  buildUserPrompt as buildReplyUserPrompt,
+  GenerateReplyError,
+  MAX_GENERATE_ATTEMPTS,
+  REPLY_HISTORY_LIMIT,
+  REPLY_BODY_MAX_CHARS,
+  NEXT_ACTIONS,
+  type NextAction,
+  type GeneratedReply,
+  type GenerateReplyInput,
+  type GenerateReplyResult,
+  type GenerateReplyReason,
+  type GenerateClientOptions,
+  type ReplyHistoryMessage,
+  type CustomerReplyContext,
+} from "./generate-reply";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,

@@ -30,15 +30,45 @@ const PATTERNS = {
   extension: /create\s+extension\s+(?:if\s+not\s+exists\s+)?["']?(\w+)["']?/gi,
 };
 
+// `drop table` is parsed so a later migration that drops a table created by
+// an earlier one removes it from the expected set — otherwise the diagnostic
+// false-flags an intentionally-dropped table as "missing". Migrations are
+// processed in sorted (chronological) order; the LAST create/drop for a table
+// name wins, so a drop-then-recreate is correctly treated as "expected".
+const DROP_TABLE_PATTERN = /drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?(\w+)/gi;
+
 const expected = []; // { migration, kind, name }
+const tableLastAction = new Map(); // table name -> 'create' | 'drop' (last wins)
 for (const file of files) {
   const content = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+  // Collect every table create/drop in this file WITH its source offset, so a
+  // drop-then-recreate within a single migration (e.g. 0008 drops and
+  // recreates `conversations`) is resolved by statement order, not by which
+  // regex pass ran first. The action with the highest offset wins per file.
+  const tableActions = []; // { index, action, name }
   for (const [kind, pattern] of Object.entries(PATTERNS)) {
     for (const m of content.matchAll(pattern)) {
       expected.push({ migration: file, kind, name: m[1] });
+      if (kind === 'table') tableActions.push({ index: m.index, action: 'create', name: m[1] });
     }
   }
+  for (const m of content.matchAll(DROP_TABLE_PATTERN)) {
+    tableActions.push({ index: m.index, action: 'drop', name: m[1] });
+  }
+  // Files iterate in chronological order; within a file, sort by source
+  // offset. The last action seen for a table name (latest file, latest
+  // statement) is its final state.
+  tableActions.sort((a, b) => a.index - b.index);
+  for (const a of tableActions) tableLastAction.set(a.name, a.action);
 }
+
+// Drop expected table entries whose final action across all migrations is a
+// drop. Non-table kinds (views, functions, extensions) are unaffected.
+const expectedFiltered = expected.filter(
+  (o) => o.kind !== 'table' || tableLastAction.get(o.name) !== 'drop',
+);
+expected.length = 0;
+expected.push(...expectedFiltered);
 
 const sql = postgres(process.env.SUPABASE_DB_URL, { ssl: 'require' });
 

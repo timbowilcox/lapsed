@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/score",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/launch-campaigns",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/sweep-no-reply",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

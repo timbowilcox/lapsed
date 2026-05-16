@@ -91,12 +91,13 @@ beforeAll(async () => {
       `select count(*)::int as count from information_schema.tables
        where table_schema = 'public'
          and table_name in (
-           'customer_events','conversation_messages','order_events',
+           'customer_events','order_events',
            'customers','scoring_runs',
-           'storefront_snapshots','voice_events','voice_versions','agent_profiles'
+           'storefront_snapshots','voice_events','voice_versions','agent_profiles',
+           'conversations','messages','message_events','customer_opt_outs'
          )`,
     );
-    if ((rows[0]?.count ?? 0) < 9) {
+    if ((rows[0]?.count ?? 0) < 12) {
       schemaReady = false;
       console.warn("[rls.test] Required tables missing — skipping all RLS tests");
       return;
@@ -163,20 +164,36 @@ beforeAll(async () => {
       [merchantIdA, PRODUCT_GID_A, merchantIdB, PRODUCT_GID_B],
     );
 
-    // conversations (and conversation_messages seeded after)
+    // Sprint 07: conversations (per-customer — decision 16), one message,
+    // one message_event, and one opt-out per merchant.
     const convRes = await pg.query<{ id: string; merchant_id: string }>(
       `insert into public.conversations
-         (merchant_id, shopify_customer_gid)
+         (merchant_id, customer_id)
        values ($1, $2), ($3, $4)
        returning id, merchant_id`,
       [merchantIdA, GID_A, merchantIdB, GID_B],
     );
     for (const conv of convRes.rows) {
+      const customerId = conv.merchant_id === merchantIdA ? GID_A : GID_B;
+      const msgRes = await pg.query<{ id: string }>(
+        `insert into public.messages
+           (merchant_id, conversation_id, direction, body, pii_redacted_body, status)
+         values ($1, $2, 'outbound', 'hello', 'hello', 'sent')
+         returning id`,
+        [conv.merchant_id, conv.id],
+      );
+      const messageId = msgRes.rows[0]!.id;
       await pg.query(
-        `insert into public.conversation_messages
-           (conversation_id, merchant_id, role, body)
-         values ($1, $2, 'assistant', 'hello')`,
-        [conv.id, conv.merchant_id],
+        `insert into public.message_events
+           (merchant_id, conversation_id, message_id, event_type, payload, occurred_at)
+         values ($1, $2, $3, 'message_outbound_sent', '{}'::jsonb, now())`,
+        [conv.merchant_id, conv.id, messageId],
+      );
+      await pg.query(
+        `insert into public.customer_opt_outs
+           (merchant_id, customer_id, phone_number, source, inbound_message_id)
+         values ($1, $2, '+15550000000', 'merchant_manual', null)`,
+        [conv.merchant_id, customerId],
       );
     }
 
@@ -290,10 +307,19 @@ afterAll(async () => {
     await pg.query(`set session_replication_role = 'replica'`);
 
     // Delete in FK dependency order (leaf tables before parent tables).
-    // conversation_messages cascades from conversations, but explicit delete is safe.
+    // Sprint 07: customer_opt_outs + message_events FK messages; messages FK
+    // conversations. customer_opt_outs + message_events are append-only — the
+    // session_replication_role='replica' set above disables their triggers.
     await pg.query(
-      `delete from public.conversation_messages
-       where merchant_id = any($1::uuid[])`,
+      `delete from public.customer_opt_outs where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.message_events where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.messages where merchant_id = any($1::uuid[])`,
       [[merchantIdA, merchantIdB]],
     );
     await pg.query(
@@ -729,21 +755,21 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — products", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // RLS — conversations
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversations", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversations (Sprint 07)", () => {
   it("merchant A sees only their own conversation", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("conversations")
-      .select("shopify_customer_gid");
+      .select("customer_id");
     expect(error).toBeNull();
     expect(data?.length).toBeGreaterThan(0);
-    expect(data?.every((r) => r.shopify_customer_gid === GID_A)).toBe(true);
+    expect(data?.every((r) => r.customer_id === GID_A)).toBe(true);
   });
 
   it("merchant A cannot see merchant B's conversation", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
       .from("conversations")
-      .select("shopify_customer_gid")
-      .eq("shopify_customer_gid", GID_B);
+      .select("customer_id")
+      .eq("customer_id", GID_B);
     expect(error).toBeNull();
     expect(data).toEqual([]);
   });
@@ -765,12 +791,12 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversations", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RLS — conversation_messages
+// RLS — messages (Sprint 07)
 // ─────────────────────────────────────────────────────────────────────────────
-describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversation_messages", () => {
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — messages (Sprint 07)", () => {
   it("merchant A sees only their own messages", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
-      .from("conversation_messages")
+      .from("messages")
       .select("merchant_id");
     expect(error).toBeNull();
     expect(data?.length).toBeGreaterThan(0);
@@ -779,7 +805,7 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversation_messages", () => {
 
   it("merchant A cannot see merchant B's messages", async () => {
     const { data, error } = await (await clientFor(SHOP_A))
-      .from("conversation_messages")
+      .from("messages")
       .select("merchant_id")
       .eq("merchant_id", merchantIdB);
     expect(error).toBeNull();
@@ -796,9 +822,175 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — conversation_messages", () => {
       publishableKey: env.publishableKey,
       merchantJwt: wrongJwt,
     })
-      .from("conversation_messages")
+      .from("messages")
       .select("id");
     expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — message_events (Sprint 07)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — message_events (Sprint 07)", () => {
+  it("merchant A sees only their own message events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("message_events")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's message events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("message_events")
+      .select("merchant_id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("wrong JWT secret returns zero rows", async () => {
+    const wrongJwt = await mintMerchantJwt({
+      shopDomain: SHOP_A,
+      jwtSecret: "wrong-secret",
+    });
+    const { data } = await createMerchantClient({
+      url: env.url,
+      publishableKey: env.publishableKey,
+      merchantJwt: wrongJwt,
+    })
+      .from("message_events")
+      .select("id");
+    expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — customer_opt_outs (Sprint 07, decision 18 — must not leak which
+// customers of another merchant opted out)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_opt_outs (Sprint 07)", () => {
+  it("merchant A sees only their own opt-out rows", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("customer_opt_outs")
+      .select("merchant_id,customer_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+    expect(data?.every((r) => r.customer_id === GID_A)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's opt-out rows", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("customer_opt_outs")
+      .select("customer_id")
+      .eq("customer_id", GID_B);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("wrong JWT secret returns zero rows", async () => {
+    const wrongJwt = await mintMerchantJwt({
+      shopDomain: SHOP_A,
+      jwtSecret: "wrong-secret",
+    });
+    const { data } = await createMerchantClient({
+      url: env.url,
+      publishableKey: env.publishableKey,
+      merchantJwt: wrongJwt,
+    })
+      .from("customer_opt_outs")
+      .select("id");
+    expect(data ?? []).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 07 append-only triggers — message_events + customer_opt_outs
+// (decisions 12-mirror + 18 — events and opt-outs are immutable)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — message_events (Sprint 07)", () => {
+  it("UPDATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `update public.message_events set event_type = 'tampered'
+           where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("DELETE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(`delete from public.message_events where merchant_id = $1`, [merchantIdA]),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("TRUNCATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(pg.query(`truncate public.message_events`)).rejects.toThrow(
+        /append-only/i,
+      );
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — customer_opt_outs (Sprint 07)", () => {
+  it("UPDATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `update public.customer_opt_outs set source = 'tampered'
+           where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("DELETE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(`delete from public.customer_opt_outs where merchant_id = $1`, [merchantIdA]),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("TRUNCATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(pg.query(`truncate public.customer_opt_outs`)).rejects.toThrow(
+        /append-only/i,
+      );
+    } finally {
+      await pg.end();
+    }
   });
 });
 
@@ -1375,6 +1567,73 @@ describe.skipIf(!SUPABASE_AVAILABLE)("Idempotency constraints — Sprint 05 tabl
         ),
       ).rejects.toThrow(/storefront_snapshots_merchant_hash_unique|unique/i);
     } finally {
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 07 — uniqueness / idempotency constraints
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Idempotency constraints — Sprint 07 tables", () => {
+  it("conversations_pk rejects a second thread for the same (merchant_id, customer_id)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // (merchantIdA, GID_A) already has a seeded conversation — decision 16
+      // requires exactly one thread per customer per merchant.
+      await expect(
+        pg.query(
+          `insert into public.conversations (merchant_id, customer_id)
+           values ($1, $2)`,
+          [merchantIdA, GID_A],
+        ),
+      ).rejects.toThrow(/conversations_pk|duplicate key|unique/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("message_events_dedup_unique rejects a duplicate (merchant_id, conversation_id, message_id, event_type, occurred_at)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    const occurredAt = new Date("2026-05-16T09:15:00.000Z").toISOString();
+    try {
+      const conv = await pg.query<{ id: string }>(
+        `select id from public.conversations where merchant_id = $1 limit 1`,
+        [merchantIdA],
+      );
+      const msg = await pg.query<{ id: string }>(
+        `select id from public.messages where merchant_id = $1 limit 1`,
+        [merchantIdA],
+      );
+      const convId = conv.rows[0]!.id;
+      const msgId = msg.rows[0]!.id;
+      await pg.query(
+        `insert into public.message_events
+           (merchant_id, conversation_id, message_id, event_type, payload, occurred_at)
+         values ($1, $2, $3, 'reply_sent', '{}'::jsonb, $4)`,
+        [merchantIdA, convId, msgId, occurredAt],
+      );
+      // The identical tuple again must violate the dedup unique constraint —
+      // this is what makes appendMessageEvent idempotent (decision 12 mirror).
+      await expect(
+        pg.query(
+          `insert into public.message_events
+             (merchant_id, conversation_id, message_id, event_type, payload, occurred_at)
+           values ($1, $2, $3, 'reply_sent', '{}'::jsonb, $4)`,
+          [merchantIdA, convId, msgId, occurredAt],
+        ),
+      ).rejects.toThrow(/message_events_dedup_unique|unique/i);
+    } finally {
+      // Cleanup via session_replication_role to bypass the append-only trigger.
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.message_events
+         where merchant_id = $1 and event_type = 'reply_sent'`,
+        [merchantIdA],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
       await pg.end();
     }
   });
