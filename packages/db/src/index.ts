@@ -25,6 +25,8 @@ export {
   getProposalsByStatus,
   getConversationList,
   getConversationThread,
+  getCampaignAttribution,
+  getMerchantAttributionRollup,
   customerDisplayName,
   customerHandleOf,
   truncate,
@@ -48,6 +50,11 @@ export {
   type ExtractionStatus,
   type ActiveVoiceProfile,
   type VoiceVersionSummary,
+  type AttributionResultRow,
+  type AttributedOrderView,
+  type CampaignAttributionView,
+  type MerchantAttributionCampaign,
+  type MerchantAttributionRollup,
 } from "./queries";
 
 const ROLE = "authenticated";
