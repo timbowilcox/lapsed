@@ -437,9 +437,15 @@ export function median(values: number[]): number {
 }
 
 /**
- * Writes a proposal_failed event for `phase`, materializes the proposal so its
- * cache reflects the (still-`proposed`) status, logs structurally, and returns
+ * Writes a proposal_failed event for `phase`, logs structurally, and returns
  * the failure result.
+ *
+ * It does NOT materialize the campaign_proposals cache. A failed proposal's
+ * latest event is proposal_failed, and both getPendingProposals and
+ * getReadyCampaigns derive liveness from the event log — so the row's cached
+ * `status` (which stays at the insert-default `proposed`) is never read for a
+ * failed proposal. A secondary failure of the proposal_failed event append is
+ * swallowed (logged) so the caller still receives a structured failure result.
  */
 async function failProposal(
   input: ProposeCampaignInput,
