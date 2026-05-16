@@ -16,6 +16,7 @@ import {
   getMerchantSummary,
   getExtractionStatus,
   getActiveVoiceProfile,
+  listVoiceVersions,
 } from "../src/queries";
 
 const MERCHANT_ID = "550e8400-e29b-41d4-a716-446655440001";
@@ -993,6 +994,74 @@ describe("getActiveVoiceProfile", () => {
     });
     await expect(getActiveVoiceProfile(client, MERCHANT_ID)).rejects.toMatchObject({
       message: "voice_versions query failed",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listVoiceVersions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** voice_versions query: select.eq.order.order — resolved via a thenable chain. */
+function makeListVoiceVersionsClient(
+  rows: Record<string, unknown>[] | null,
+  error?: { message: string } | null,
+) {
+  const result = error ? { data: null, error } : { data: rows, error: null };
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq: () => chain,
+    order: () => chain,
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve),
+  };
+  return { from: vi.fn(() => chain) } as unknown as LapsedSupabaseClient;
+}
+
+describe("listVoiceVersions", () => {
+  const ROWS = [
+    {
+      id: "v2",
+      version_number: 2,
+      model_version: "claude-sonnet-4-6-latest",
+      extracted_at: "2026-05-16T11:00:00.000Z",
+      profile: { tone_descriptors: ["warm"] },
+    },
+    {
+      id: "v1",
+      version_number: 1,
+      model_version: "claude-sonnet-4-6-latest",
+      extracted_at: "2026-05-15T11:00:00.000Z",
+      profile: { tone_descriptors: ["direct"] },
+    },
+  ];
+
+  it("maps voice_versions rows to version summaries", async () => {
+    const client = makeListVoiceVersionsClient(ROWS);
+    const result = await listVoiceVersions(client, MERCHANT_ID);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({
+      id: "v2",
+      versionNumber: 2,
+      modelVersion: "claude-sonnet-4-6-latest",
+      extractedAt: "2026-05-16T11:00:00.000Z",
+      profile: { tone_descriptors: ["warm"] },
+    });
+  });
+
+  it("returns an empty array when the merchant has no versions", async () => {
+    const client = makeListVoiceVersionsClient([]);
+    expect(await listVoiceVersions(client, MERCHANT_ID)).toEqual([]);
+  });
+
+  it("returns an empty array when data is null", async () => {
+    const client = makeListVoiceVersionsClient(null);
+    expect(await listVoiceVersions(client, MERCHANT_ID)).toEqual([]);
+  });
+
+  it("throws when Supabase returns an error", async () => {
+    const client = makeListVoiceVersionsClient(null, { message: "voice_versions list failed" });
+    await expect(listVoiceVersions(client, MERCHANT_ID)).rejects.toMatchObject({
+      message: "voice_versions list failed",
     });
   });
 });

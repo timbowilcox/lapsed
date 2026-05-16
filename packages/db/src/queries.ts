@@ -548,3 +548,43 @@ export async function getActiveVoiceProfile(
     extractedAt: version.extracted_at,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listVoiceVersions — all voice profile versions for a merchant
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VoiceVersionSummary {
+  id: string;
+  versionNumber: number;
+  modelVersion: string;
+  extractedAt: string;
+  /** Structured VoiceProfile jsonb (validated at write time by @lapsed/core). */
+  profile: Json;
+}
+
+/**
+ * Returns every `voice_versions` row for a merchant, newest first. Powers
+ * the Settings brand-voice version-history list (chunk 11). Decision 7 —
+ * prior versions are retained and never mutated, so the full history is
+ * always available.
+ */
+export async function listVoiceVersions(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<VoiceVersionSummary[]> {
+  const { data, error } = await client
+    .from("voice_versions")
+    .select("id, version_number, model_version, extracted_at, profile")
+    .eq("merchant_id", merchantId)
+    .order("extracted_at", { ascending: false })
+    .order("version_number", { ascending: false });
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    versionNumber: row.version_number,
+    modelVersion: row.model_version,
+    extractedAt: row.extracted_at,
+    profile: row.profile,
+  }));
+}

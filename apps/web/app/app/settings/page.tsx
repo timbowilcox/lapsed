@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import {
-  Button,
   Input,
   Panel,
   PanelHeader,
@@ -12,6 +11,7 @@ import { merchant as fixtureMerchant } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
 import { SettingsSyncStatus, SettingsSyncStatusSkeleton } from "../_settings-sync-status";
+import { BrandVoiceSettings } from "./_brand-voice-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,13 @@ export default async function SettingsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
+      <Panel className="mb-16">
+        <PanelHeader title="Brand voice" />
+        <PanelBody>
+          <BrandVoiceSettings />
+        </PanelBody>
+      </Panel>
+
       <div className="grid grid-cols-2 gap-16">
         <Panel>
           <PanelHeader title="Shop" />
@@ -48,25 +55,6 @@ export default async function SettingsPage({ searchParams }: PageProps) {
               <Suspense fallback={<SettingsSyncStatusSkeleton />}>
                 <SettingsSyncStatus merchantId={merchant.id} />
               </Suspense>
-            </div>
-          </PanelBody>
-        </Panel>
-
-        <Panel>
-          <PanelHeader title="Brand voice" />
-          <PanelBody>
-            <div className="flex flex-col gap-12 p-24">
-              <p className="text-meta text-ink-500">
-                Used by the conversation engine to keep AI replies on-brand.
-              </p>
-              <textarea
-                defaultValue={fixtureMerchant.brandVoice}
-                rows={4}
-                className="rounded-sm border border-cream-300 bg-cream-50 p-12 text-body text-ink-900 focus-visible:outline-none focus-visible:shadow-focus"
-              />
-              <Button variant="secondary" className="self-start">
-                Save brand voice
-              </Button>
             </div>
           </PanelBody>
         </Panel>

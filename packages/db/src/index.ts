@@ -18,6 +18,7 @@ export {
   getMerchantSummary,
   getExtractionStatus,
   getActiveVoiceProfile,
+  listVoiceVersions,
   type LapsedCustomersPage,
   type LapsedCustomersWithSignalsPage,
   type MerchantSummaryRow,
@@ -27,6 +28,7 @@ export {
   type ExtractionPhase,
   type ExtractionStatus,
   type ActiveVoiceProfile,
+  type VoiceVersionSummary,
 } from "./queries";
 
 const ROLE = "authenticated";
