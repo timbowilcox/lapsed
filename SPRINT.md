@@ -1,325 +1,317 @@
-# Sprint 08: Attribution + Holdouts + LTV Restoration
+# Sprint 09: Cohort Symmetric-ITT Refactor + Flat Subscription Billing
 
 Date: 2026-05-17
 Repo: lapsed
-Branch: sprint-08/attribution
+Branch: sprint-09/subscription-billing
 
 ---
 
 ## Scope
 
-Sprint 08 closes the credibility loop. Sprint 07 makes lapsed.ai *do things* — it sends SMS, classifies replies, fires bandit posteriors on leading signals. Sprint 08 makes it *prove things* — when an order arrives within a campaign's attribution window from a customer who received the outbound, that order is incrementally attributed against a matched holdout cohort, the bandit's arm-level posterior is updated against ground-truth, and the merchant sees a per-campaign dollar number defensible to an external audit.
+Sprint 09 does two things, in order:
 
-This is the make-or-break sprint for monetisation. Sprint 09 (Stripe billing on incremental revenue) literally consumes Sprint 08's output as the meter. If the attribution math is wrong, the invoices are wrong. If the holdout-matching is wrong, the lift numbers are inflated and merchants who audit will leave. If the LTV restoration calculation is over-confident, the case studies become legally risky.
+**Part 1 (chunks 1-4) — Resolve the Sprint 08 cohort asymmetry.** The Sprint 08 final evaluator confirmed and flagged that Sprint 08's treatment cohort was as-attempted (customers who actually received an outbound) while the holdout was full ITT (frozen snapshot at proposal-creation). The asymmetry biases incremental revenue upward by excluding opt-outs and daily-cap-deferred customers from the treatment denominator while keeping them in the holdout denominator. This is a SPRINT.md-level methodology issue from Sprint 08, not a code bug, and the chosen resolution is symmetric ITT both sides — both cohorts source from `campaign_group_snapshots`, both use the campaign-calendar window. This MUST land before any billing UI ships, because Sprint 10 will charge a percentage of incremental revenue and the numbers must be defensible.
 
-**Not in scope this sprint:** Stripe billing (Sprint 09), multi-touch attribution (v2), customer-journey reconstruction (v2), LTV forecasting beyond restoration delta (v2), A/B-test orchestration UI (v2), email/web-channel attribution (v2), per-merchant attribution-model selection (v2), retroactive attribution-window changes on existing proposals (v2).
+**Part 2 (chunks 5-12) — Flat subscription tier billing.** Stripe-integrated recurring subscription at three tiers ($299/$799/$1499 monthly), with merchant Stripe customer creation at onboarding, Stripe Checkout for tier selection, webhook-driven subscription state mirroring, failed-payment grace period, Stripe customer portal for self-service, entitlements + feature gates per tier. NO usage-based metering this sprint — that's Sprint 10, which will consume the now-symmetric attribution numbers as the meter.
+
+**Not in scope this sprint:** Usage-based metering on incremental revenue (Sprint 10), refund workflow UI (v2), coupon codes / discounts (v2), free trials (v2 — can be added as Stripe config later), multi-currency invoicing beyond Stripe defaults (v2), custom tax logic (rely on Stripe Tax for AU GST, US sales tax, UK VAT — Stripe handles), admin dashboard for billing (Sprint 11 ops), per-merchant Twilio numbers (Sprint 11 ops), retroactive attribution-window changes (still v2 from Sprint 08).
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Shopify `orders/create` webhook ingests orders idempotently with HMAC signature validation; orders are append-only event-sourced.
-- [ ] Each campaign proposal at approval time is stamped with its merchant's current `attribution_window_days` (default 14, per-merchant configurable in `merchant_attribution_config`); the stamp is immutable for that proposal.
-- [ ] Treatment cohort attribution: for each campaign within its window, the set of customers who received at least one outbound is materialised and their attributed orders counted.
-- [ ] Holdout cohort attribution: for each campaign, the holdout snapshot from Sprint 06 is queried, and orders from those customers within the same time-window are counted.
-- [ ] Incremental revenue calculator returns: `treatment_revenue_per_customer - holdout_revenue_per_customer`, multiplied by treatment cohort size; with a 95% confidence interval (Welch's t-test on per-customer revenue distributions); with an explicit `insufficient_evidence` flag when either cohort has fewer than 30 customers.
-- [ ] LTV restoration calculator returns per-campaign delta: `(avg_30d_post_revenue_per_treatment_customer - avg_30d_post_revenue_per_holdout_customer) × treatment_cohort_size`, with cohort-relative scaling.
-- [ ] Bandit dual-signal posterior: each arm now maintains BOTH `sentiment_alpha`/`sentiment_beta` (Sprint 07) AND `order_alpha`/`order_beta` (this sprint). Selection at proposal-creation time uses the order posterior when `order_observation_count ≥ 30`, else falls back to the sentiment posterior. Posterior updates from orders are idempotent (per-order).
-- [ ] Single-attribution rule: a customer who received outbounds from N campaigns within their respective windows is attributed to the most recent outbound preceding the order — never to multiple campaigns simultaneously.
-- [ ] Daily attribution batch cron materialises `attribution_results` from `order_events` + `message_events` + `campaign_group_snapshots`. Idempotent: re-running produces identical output.
-- [ ] Per-campaign attribution UI shows treatment cohort size, holdout cohort size, incremental revenue with CI, LTV restored with CI, attribution window in effect; explicit "insufficient evidence — need 30+ orders per cohort" state when below threshold.
-- [ ] Merchant rollup UI aggregates across campaigns: total revenue restored (last 30/90/all-time), total LTV restored, top 5 campaigns by lift, holdout-rate effectiveness sanity check (should approximate the configured rate).
-- [ ] RLS tenancy on every new table: orders, order_events, attribution_decisions, attribution_results, ltv_snapshots, merchant_attribution_config.
-- [ ] No "cohort", "segment", "blast", "customer journey" in any new UI string (vocabulary compliance per existing rule).
-- [ ] HANDOFF.md uses the evidence-required format with file:line citations, test file:line citations, test count, named assertions per criterion. Constructed-scenario validation (chunk 12) is the criterion-5 + criterion-6 evidence.
+- [ ] `getTreatmentCohort` sources from `campaign_group_snapshots` where `is_holdout = false AND campaign_proposal_id = $1` — same pattern as `getHoldoutCohort` from Sprint 08.
+- [ ] `getTreatmentOrders` uses campaign-calendar window (anchored at `launched_at` + `attribution_window_days`), NOT per-customer windows. Symmetric with `getHoldoutOrders`.
+- [ ] `recordNoOrderOutcome` in `attribution-batch.ts` loops over the full ITT treatment snapshot (including opt-outs and daily-cap-deferred), not just sent-to customers. Bandit `order_beta + 1` fires for every cohort member with no order in window. Idempotent per (customer, campaign).
+- [ ] Backfill all existing `attribution_results` rows under the new methodology via `/api/cron/attribution-backfill`. Audit trail: each backfilled row writes a `attribution_methodology_migration` event capturing old vs new `treatment_revenue_cents`, `holdout_revenue_cents`, `incremental_revenue_cents`, `treatment_cohort_size`, `holdout_cohort_size`.
+- [ ] Constructed scenarios (Sprint 08 chunk 12) re-run under new methodology and pass with adjusted expectations (treatment cohort sizes now include opt-outs/deferred — verify the math direction matches: treatment_per_customer should DECREASE; incremental should DECREASE relative to Sprint 08's numbers).
+- [ ] Monte Carlo Welch CI coverage test still passes in [0.93, 0.97] bracket band.
+- [ ] Migration 0010 adds: `merchants.stripe_customer_id`, `merchants.subscription_tier`, `merchants.subscription_status`; new tables `merchant_subscriptions` (mirror of Stripe state) and `subscription_events` (append-only). RLS + append-only triggers.
+- [ ] Stripe customer creation on merchant onboarding is idempotent (re-running onboarding doesn't create duplicate customers).
+- [ ] Subscription checkout flow: three tier cards on `/app/billing/subscribe`; Stripe Checkout session created via API; redirect to Stripe-hosted checkout; success/cancel URL routing handled.
+- [ ] Stripe webhook handler at `/api/stripe/webhooks` validates Stripe signature BEFORE body parsing (signature mismatch = 400, no DB writes). Idempotent on Stripe event ID. Handles: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`.
+- [ ] Failed payments enter 7-day grace period (configurable via `BILLING_GRACE_PERIOD_DAYS`); after grace expiry, merchant transitions to `suspended` (entitlements drop to read-only). Daily cron at 07:00 UTC.
+- [ ] Stripe Customer Portal integration: merchant settings page → "Manage Billing" → Stripe portal session → redirect to Stripe-hosted portal for tier changes, payment method updates, cancellation.
+- [ ] Entitlements function `getMerchantEntitlements(merchantId)` returns tier-based feature set. Gates enforced at API layer. Cached ~5 min in-memory, invalidated on webhook receipt.
+- [ ] Three test-mode Stripe subscription products configured (Starter/Growth/Scale) with price IDs in env vars.
+- [ ] No credit card data stored anywhere in our database. Stripe tokenization only.
+- [ ] HANDOFF.md uses evidence-required format. Deliberate deviations include the cohort methodology change (with old-vs-new attribution_results comparison data from the backfill audit).
 
 ---
 
 ## Definition of Done
 
 - [ ] All 13 acceptance criteria checked with evidence.
-- [ ] All 10 rubric criteria self-scored 3/3 in HANDOFF with full evidence trail.
-- [ ] CI gates green: pnpm typecheck, lint, test, build, grep:pii, vercel:env:check, db:diagnose.
-- [ ] Mid-sprint checkpoint at chunk 7 passed (APPROVE or ADJUST-then-remediated).
+- [ ] All 10 rubric criteria self-scored 3/3 in HANDOFF.
+- [ ] CI gates green: typecheck, lint, test, build, grep:pii, vercel:env:check (with 7 new Stripe-related vars), db:diagnose (with migration 0010 applied).
+- [ ] Mid-sprint checkpoint at chunk 3 passed BEFORE chunk 4 backfill runs against production data. This barrier is earlier than the usual chunk-7 position because the backfill mutates production data — checkpoint must approve the math change BEFORE the backfill commits.
 - [ ] Branch pushed; PR not opened by build agent (human gate).
 
 ---
 
-## Architectural Decisions Added This Sprint (20–26)
+## Architectural Decisions Added This Sprint (27-33)
 
-20. **Attribution window is per-merchant configurable, immutable per proposal.** Default 14 days. Stamped at proposal approval. Future merchant-default changes affect new proposals only.
+27. **Cohort definition is symmetric ITT.** Both treatment and holdout cohorts source from `campaign_group_snapshots` (the frozen Sprint 06 snapshot). Both use the campaign-calendar attribution window anchored at `launched_at`. This supersedes Sprint 08's documented as-treated-vs-ITT asymmetry. Treatment cohort INCLUDES opt-outs and daily-cap-deferred customers in the denominator; they contribute zero revenue but count in the cohort size. Reason: methodological symmetry is the only defensible basis for percentage-of-incremental-revenue billing in Sprint 10.
 
-21. **Single-attribution per order.** Most-recent-preceding-outbound wins. No double-counting across overlapping campaigns.
+28. **Stripe customer creation at merchant onboarding (not lazy).** Every merchant gets a `stripe_customer_id` at first signup, regardless of whether they subscribe. Reason: avoids race conditions where subscription attempts happen before the customer record exists; simplifies downstream code that can assume the ID is always present.
 
-22. **Bandit posterior dual-signal.** Sentiment posterior (leading, Sprint 07) and order posterior (lagging, Sprint 08) tracked separately on `bandit_state`. Selection uses order when `order_observation_count ≥ 30`, sentiment otherwise.
+29. **Stripe is the source of truth for subscription state; local mirror is eventually-consistent.** The `merchant_subscriptions` table is a read mirror updated via Stripe webhooks. Never compute billing decisions from local mirror state without webhook reconciliation. Application code reads from the mirror for display; sensitive operations re-verify against Stripe.
 
-23. **LTV restoration = cohort-relative delta.** Simple, explainable, no stay-probability modelling. Aggregates per-customer delta against holdout baseline.
+30. **Subscription tier determines feature entitlements via a pure function.** `getMerchantEntitlements(merchantId)` reads the cached tier and returns a typed entitlements object. No separate entitlements table. Tier transitions update entitlements via webhook receipt. Reason: single source of truth, no drift possible.
 
-24. **Order events are event-sourced (decision 12 extended).** Append-only `order_events`. Materialised `orders` table is the read view. All writes go through `appendOrderEvent`.
+31. **Failed payments enter 7-day grace period before suspension.** Immediate revocation is hostile UX and a churn driver. Grace period gives merchants time to update expired cards. After grace, entitlements drop to read-only (existing campaigns continue, no new sends, no new approvals).
 
-25. **Order ingestion via Shopify `orders/create` webhook.** Real-time. HMAC-validated. Idempotent on `order_gid`. Re-delivery safe (Shopify retries are real).
+32. **Stripe webhooks are idempotent via Stripe event ID.** Same pattern as Twilio MessageSid idempotency from Sprint 07. The `subscription_events` table stores Stripe event IDs as the dedup key. Re-delivery is safe.
 
-26. **Attribution is computed nightly, materialised into `attribution_results`.** Per-campaign + per-customer rows. UI reads from the materialised table. Re-runnable from event log. The cron is the only write path to `attribution_results`.
+33. **Tax handling via Stripe Tax (automatic).** No custom tax logic. Stripe Tax computes AU GST, US sales tax, UK VAT based on the merchant's billing address. Configure once, let Stripe run. Address collection is part of the subscription checkout flow.
 
-Decisions 1–19 remain. New cumulative count: 26.
+Decisions 1-26 remain. New cumulative count: 33.
 
 ---
 
-## Chunk Sequence (13 chunks, checkpoint barrier after chunk 7)
+## Chunk Sequence (13 chunks, checkpoint barrier after chunk 3)
 
-### Chunk 1 — Migration 0009: attribution schema
+### Chunk 1 — Migration 0010: subscriptions schema
 
-`packages/db/supabase/migrations/0009_attribution.sql`
-
-New tables:
-- `orders` — materialised view; one row per Shopify order. Columns: `id` (PK), `merchant_id`, `customer_id` (gid as text, per Sprint 07 convention), `order_gid` (UNIQUE on `(merchant_id, order_gid)`), `total_amount` (numeric), `currency` (text), `placed_at` (timestamptz), `created_at`, `updated_at`. RLS: merchant-scoped read.
-- `order_events` — append-only source. Columns: `id` (PK), `merchant_id`, `order_id` (FK orders), `customer_id`, `event_type` (text — `'received'`, `'attributed'`, `'refunded'`), `data` (jsonb), `appended_at`. Append-only trigger per decision 12.
-- `attribution_decisions` — append-only audit. Columns: `id` (PK), `merchant_id`, `order_id` (FK orders), `attributed_campaign_id` (FK campaign_proposals nullable — null = "no qualifying outbound"), `attributed_message_id` (FK messages nullable), `attribution_window_days` (int), `decided_at` (timestamptz). Append-only trigger.
-- `attribution_results` — materialised view; one row per (campaign, window-close-date). Columns: `id`, `merchant_id`, `campaign_id` (FK), `window_close_date` (date), `treatment_cohort_size` (int), `holdout_cohort_size` (int), `treatment_revenue_cents` (bigint), `holdout_revenue_cents` (bigint), `incremental_revenue_cents` (bigint), `incremental_ci_low_cents`, `incremental_ci_high_cents`, `ltv_restored_cents`, `insufficient_evidence` (bool), `computed_at`. UNIQUE on `(campaign_id, window_close_date)`. Cron is the only write path.
-- `ltv_snapshots` — per-customer pre/post LTV markers. Columns: `id`, `merchant_id`, `customer_id`, `campaign_id` (FK), `pre_30d_revenue_cents`, `post_30d_revenue_cents`, `delta_cents`, `snapshot_at`.
-- `merchant_attribution_config` — per-merchant settings. Columns: `merchant_id` (PK), `attribution_window_days` (int default 14), `ltv_evaluation_window_days` (int default 30), `created_at`, `updated_at`.
+`packages/db/supabase/migrations/0010_subscriptions.sql`
 
 Schema additions:
-- `campaign_proposals.attribution_window_days` (int, NOT NULL, stamped at approval time)
-- `bandit_state.order_alpha`, `bandit_state.order_beta`, `bandit_state.order_observation_count`, `bandit_state.order_last_updated_at` — dual-signal posterior columns per decision 22
+- `merchants.stripe_customer_id` (text, nullable, UNIQUE) — backfilled to NULL for existing rows
+- `merchants.subscription_tier` (text, nullable — values: 'starter', 'growth', 'scale')
+- `merchants.subscription_status` (text, nullable — values: 'trialing', 'active', 'past_due', 'canceled', 'suspended')
+
+New tables:
+- `merchant_subscriptions` — mirrors Stripe subscription state. Columns: `id` (PK), `merchant_id` (FK UNIQUE — one active subscription per merchant), `stripe_subscription_id` (text UNIQUE), `tier` (text), `status` (text), `current_period_start`, `current_period_end` (timestamptz), `grace_period_started_at` (timestamptz nullable — set when status becomes past_due), `cancel_at` (timestamptz nullable), `canceled_at` (timestamptz nullable), `created_at`, `updated_at`. RLS: merchant-scoped read; service-role write.
+- `subscription_events` — append-only audit. Columns: `id` (PK), `merchant_id`, `stripe_event_id` (text UNIQUE — idempotency key), `event_type` (text), `data` (jsonb — full Stripe event payload), `appended_at`. Append-only trigger.
 
 Indexes:
-- `orders (merchant_id, customer_id, placed_at)` — attribution lookups
-- `orders (merchant_id, placed_at)` — window scans
-- `order_events (order_id, appended_at)` — audit traversal
-- `attribution_decisions (order_id)` — one-decision-per-order lookups
-- `attribution_results (merchant_id, window_close_date)` — rollup queries
-- Partial unique: `attribution_decisions (order_id)` ensures one final attribution per order
+- `merchant_subscriptions (merchant_id)` — fast lookup
+- `subscription_events (merchant_id, appended_at desc)` — audit traversal
+- `merchant_subscriptions (status, grace_period_started_at) where status = 'past_due'` — partial index for grace-expiry cron
 
-RLS: every new table gets merchant-scoped read + service-role write. Verified by RLS tests.
+**No changes to attribution tables.** The cohort fix is in code, not schema.
 
-**No embedding columns on these tables.** Decision 2's embedding requirement applies to narrative-content tables (customer_events, conversations, messages, voice_profile, campaign_proposals). Sprint 08's tables are quantitative. Note this explicitly in the migration header comment to prevent architecture-guardian false-flagging.
+RLS verified by RLS tests for both new tables.
 
-### Chunk 2 — Shopify orders/create webhook handler
-
-`apps/web/app/api/shopify/webhooks/orders/route.ts`
-
-- HMAC signature validation using `SHOPIFY_API_SECRET` (already in env). Reject 401 BEFORE body parsing.
-- Idempotent on `(merchant_id, order_gid)`: if exists, return 200 (don't error — Shopify retries).
-- Customer-gid resolution: match `customer.id` from payload to `customers.shopify_customer_gid`. If unmatched: write the order anyway with `customer_id = null`, append an order_event of type `'unmatched_customer'`, log structured warning. Don't fail.
-- Append `order_events.received` with full payload as `data`.
-- Insert into `orders` materialised view.
-- Response: 200 JSON `{ok: true}` always (except 401 for HMAC failure).
-- Structured logs: `merchant_id`, `order_gid`, `customer_matched` (bool), `elapsed_ms`.
-
-`packages/core/src/order-events.ts` — `appendOrderEvent`, similar shape to `appendMessageEvent`.
-
-`packages/core/src/shopify-orders-ingest.ts` — `ingestShopifyOrder` orchestrator (parse payload → resolve customer → append event → upsert orders row).
-
-Tests: HMAC pass/fail, idempotent re-delivery, customer-matched + customer-unmatched cases, structured-log assertions.
-
-### Chunk 3 — Attribution window resolver + proposal stamping
-
-`packages/core/src/attribution-config.ts`
-
-- `getAttributionWindow(merchantId)` — returns `merchant_attribution_config.attribution_window_days`, default 14 if no row.
-- `getLtvEvaluationWindow(merchantId)` — same pattern, default 30.
-
-`packages/core/src/campaign-approval.ts` (extend Sprint 06)
-- At approval time, BEFORE inserting the approval event, call `getAttributionWindow(merchantId)` and stamp into `campaign_proposals.attribution_window_days`.
-- For proposals approved before this sprint (already in main): backfill migration in 0009 sets `attribution_window_days = 14` for all existing approved proposals.
-
-Tests: default fallback, per-merchant override, stamp immutability (subsequent merchant-config change does NOT update the stamped value on existing proposals).
-
-### Chunk 4 — Treatment cohort engine
+### Chunk 2 — Cohort symmetric ITT refactor (treatment side)
 
 `packages/core/src/attribution-treatment.ts`
 
-- `getTreatmentCohort(campaignId, windowDays)` — returns the set of `customer_id`s who received at least one outbound from the campaign. Sourced from `messages` where `direction = 'outbound'` and `campaign_id = $1`.
-- `getTreatmentOrders(campaignId, windowStart, windowEnd, treatmentCustomerIds)` — orders from those customers placed within `[outbound_sent_at, outbound_sent_at + windowDays]`. Per-customer window relative to THEIR outbound timing.
-- Returns: `{cohort: customer_id[], orders: Order[], revenue_cents: number, customers_with_orders: number}`.
-
-Single-attribution implementation: if a customer received outbounds from multiple campaigns in overlapping windows, the treatment query joins to the most-recent-preceding outbound per order and only returns orders where this campaign IS that most-recent outbound.
-
-Tests: single-campaign happy path, multi-campaign single-attribution (customer in 2 campaigns, order attributed to most recent), order-outside-window exclusion, empty cohort.
-
-### Chunk 5 — Holdout cohort engine
-
-`packages/core/src/attribution-holdout.ts`
-
-- `getHoldoutCohort(campaignId)` — sourced from `campaign_group_snapshots` where `is_holdout = true` and `campaign_proposal_id = $1`. This is the frozen snapshot per decision 15.
-- `getHoldoutOrders(campaignId, windowStart, windowEnd, holdoutCustomerIds)` — orders from holdout customers within the same calendar window as the treatment cohort's send dates (NOT per-customer offset, since holdouts have no send-time anchor).
-- Returns: same shape as treatment.
-
-Tests: holdout-snapshot-frozen verification (modifying group memberships post-snapshot doesn't affect this), correct window-bounding, no-overlap with treatment cohort (the snapshot guarantees disjoint sets).
-
-### Chunk 6 — Incremental revenue calculator
-
-`packages/core/src/incremental-revenue.ts`
-
-- `computeIncrementalRevenue(campaignId)` orchestrates chunks 4 + 5, then:
-  - `treatment_per_customer = treatment_revenue / treatment_cohort_size`
-  - `holdout_per_customer = holdout_revenue / holdout_cohort_size`
-  - `incremental_per_customer = treatment_per_customer - holdout_per_customer`
-  - `incremental_total = incremental_per_customer × treatment_cohort_size`
-  - 95% CI via Welch's t-test on the per-customer revenue distributions (NOT bootstrap — Welch is exact for unequal variances and small samples, well-suited here)
-  - If `treatment_cohort_size < 30` OR `holdout_cohort_size < 30`: return `insufficient_evidence: true` with the raw numbers but no CI.
-
-The Welch t-test math is in `packages/core/src/stats/welch.ts` — exposed as `welchConfidenceInterval(treatment_values, holdout_values, alpha=0.05)`. Standard formula: pooled standard error, Welch–Satterthwaite degrees of freedom, t-critical via the existing math import (or hand-rolled if no stats lib).
+Refactor:
+- `getTreatmentCohort(campaignId)` — change source from `messages where direction=outbound AND campaign_id=X` to `campaign_group_snapshots where is_holdout=false AND campaign_proposal_id=X`. Returns the full ITT treatment cohort including opt-outs and daily-cap-deferred. Returns `customer_id[]`.
+- `getTreatmentOrders(campaignId)` — change time anchor from per-customer `sent_at` to campaign-calendar window `[launched_at, launched_at + attribution_window_days]`. Same as `getHoldoutOrders` from Sprint 08.
+- Single-attribution rule still applies: the LATERAL-equivalent JS logic (most-recent-preceding outbound across all campaigns wins) is unchanged. A customer in the treatment ITT snapshot who never received an outbound contributes zero orders to the campaign's attributed revenue — no outbound means no preceding outbound to win the attribution.
 
 Tests:
-- Known-input test: synthetic distributions with known mean difference; verify CI brackets the true mean difference.
-- Insufficient-evidence path: 29 customers per cohort returns insufficient.
-- Negative-lift case: holdout outperforms treatment → returns negative incremental, no special handling (let the UI surface).
-- Currency arithmetic: all amounts in cents (integer), avoid float drift.
+- `getTreatmentCohort` returns the full snapshot ITT, including customers with no outbound history
+- Cohort size matches `campaign_group_snapshots` row count where `is_holdout = false`
+- `getTreatmentOrders` returns orders attributed to customers regardless of whether they were sent to
+- Edge case: customer in ITT snapshot who opted out before the campaign launched — still in cohort, contributes zero revenue
+- Edge case: customer in ITT snapshot whose send failed (Twilio error) — still in cohort, contributes zero revenue
+- Single-attribution invariant: customer X in campaigns A+B, both ITT-snapshotted; B's outbound more recent than A's; order arrives — still attributes to B only
 
-### Chunk 7 — Bandit dual-signal posterior (CHECKPOINT BARRIER)
+### Chunk 3 — Bandit posterior signal under ITT denominator
 
-`packages/core/src/bandit-order.ts`
+`packages/core/src/attribution-batch.ts`
 
-- `recordOrderArrival(orderId)` — called from the attribution batch cron when a treatment order is finalised:
-  1. Look up the order's attributed campaign + attributed message
-  2. Look up the message's arm_id
-  3. Idempotency: check `attribution_decisions` for prior `recordOrderArrival` event for this order; if present, no-op
-  4. UPDATE `bandit_state.order_alpha`, `order_beta`, `order_observation_count`, `order_last_updated_at` for that arm
-  5. Append `attribution_decisions` row recording the posterior update
-- `selectArm(campaignId)` (extending Sprint 06's `packages/core/src/bandit.ts`):
-  - For each arm, look at `order_observation_count`:
-    - If `≥ 30`: use `(order_alpha, order_beta)` for the Thompson sample
-    - Else: use `(sentiment_alpha, sentiment_beta)` (Sprint 07's existing posterior)
-  - Selection logs which posterior was used per arm — structured `bandit_selection` event with `posterior_source: 'order'` or `'sentiment'`
+Update `recordNoOrderOutcome`:
+- Loop over the ITT treatment cohort returned by `getTreatmentCohort` (chunk 2's new shape)
+- For each customer with NO attributed order in the window, fire `order_beta + 1` via `updateOrderPosterior` (existing chunk 7 path)
+- Idempotency: stamp `(customer_id, campaign_id)` in a way that prevents double-firing on cron re-runs. Could be via `attribution_decisions` (new event type `no_order_itt`) or a new table; choose whatever's idempotent and audit-traversable.
 
-Architecture-guardian note: arm identity is still immutable per decision 14. Only the alpha/beta/observation_count/last_updated_at columns are touched. The `order_*` columns are new but the immutability rule covers them — arms can't be deleted or have their template_text/voice_attributes changed.
+**Critical math note for the build agent:** under symmetric ITT, the bandit's success-rate estimate (`order_alpha / (order_alpha + order_beta)`) is now bounded by the *send rate* — if 80% of the cohort actually got sends and 20% opted out, the maximum order rate the bandit can observe is 80%. This is methodologically correct: the bandit should know its effective reach including losses to opt-outs. Test this by constructing a cohort where 30% opt out and verifying the bandit's order posterior converges to the right rate.
 
 Tests:
-- Order arrival from positive-sentiment-fired arm: sentiment posterior had alpha=2/beta=1 from Sprint 07; order arrives; order posterior moves alpha=2/beta=1 (independent track).
-- Order arrival from negative-sentiment-fired arm (Sprint 07 fired beta + 1): order arrives anyway; order alpha + 1 (the lagging signal can override the leading signal's prior expectation).
-- No-order case (no arrival within window): order_beta + 1 (the failure signal). This update fires from the attribution batch cron at window-close, not from order arrival (which never fires).
-- Selection threshold: arm with 29 order observations falls back to sentiment; arm with 30 uses order.
-- Idempotency: same order processed twice does NOT double-update.
+- ITT denominator iteration: cohort of 100 (60 sent to, 40 opt-out/deferred); 20 orders; verify 80 `order_beta + 1` updates land, not 40
+- Idempotency: cron re-run produces no additional posterior updates
+- Send-rate ceiling: cohort with 30% opt-out and 100% conversion among sent — bandit converges to 0.7, not 1.0
 
-**MID-SPRINT CHECKPOINT BARRIER.** After chunk 7 lands and is auditor-clean, the build agent surfaces:
-> "Chunk 7 complete. Mid-sprint checkpoint evaluator should now run. Awaiting human to launch a separate Claude Code session for checkpoint per CLAUDE.md → Mid-sprint checkpoint evaluator protocol."
+**MID-SPRINT CHECKPOINT BARRIER.** After chunk 3 lands and is auditor-clean, the build agent surfaces:
+> "Chunk 3 complete. Mid-sprint checkpoint evaluator should now run BEFORE the chunk-4 backfill, because the backfill mutates production attribution_results. Awaiting human to launch a separate Claude Code session for checkpoint per CLAUDE.md → Mid-sprint checkpoint evaluator protocol."
 
-Do not proceed to chunk 8 until APPROVE (or ADJUST-then-remediated).
+Do not proceed to chunk 4 until APPROVE (or ADJUST-then-remediated). This barrier is earlier than the usual chunk-7 position; the rationale is the irreversibility of the backfill.
 
-### Chunk 8 — LTV restoration calculator
+### Chunk 4 — Attribution results backfill
 
-`packages/core/src/ltv-restoration.ts`
+`apps/web/app/api/cron/attribution-backfill/route.ts` — one-shot cron route (not scheduled; manually triggered or runs once on next cron tick after merge).
 
-- `computeLtvRestoration(campaignId)` returns per-campaign LTV delta per decision 23:
-  - For each treatment-cohort customer: their revenue in the 30 days AFTER their outbound
-  - For each holdout-cohort customer: their revenue in the 30 days AFTER the campaign's median send time (since holdouts have no individual outbound time)
-  - Per-customer delta: post_treatment_revenue - cohort_mean_holdout_revenue
-  - Aggregated: sum of per-customer deltas
-  - CI via Welch's t-test on the per-customer revenue distributions (same pattern as chunk 6)
-  - Materialise into `ltv_snapshots` rows per treatment customer + a campaign-level summary
-- Insufficient-evidence threshold same as chunk 6: < 30 customers per cohort.
+Behavior:
+- CRON_SECRET auth (existing pattern)
+- For each existing `attribution_results` row: re-compute using the new symmetric-ITT methodology
+- Write the new values back via the UNIQUE constraint (upsert on `(campaign_id, window_close_date)`)
+- For each updated row, append `subscription_events` (or a more appropriate audit table) with event type `attribution_methodology_migration` containing old vs new values for all six fields: `treatment_revenue_cents`, `holdout_revenue_cents`, `incremental_revenue_cents`, `treatment_cohort_size`, `holdout_cohort_size`, `incremental_ci_low_cents`/`incremental_ci_high_cents` if applicable
+- Idempotent: re-running produces the same final state (the audit event captures only the FIRST migration; subsequent runs are no-ops)
+- Structured logs: `merchant_id`, `campaign_id`, `old_incremental_cents`, `new_incremental_cents`, `delta_cents`
 
-Tests:
-- High-restoration case: treatment cohort's avg 30d revenue substantially higher than holdout's → positive delta
-- Zero-restoration case: cohorts indistinguishable → ~0 delta with wide CI
-- Per-customer snapshot persistence: verify ltv_snapshots rows are written
+**Decision: do NOT delete or re-write old `attribution_results` rows.** Update them in place. The audit event is the historical record of what changed. Reason: any merchant who already saw a number in their dashboard before the backfill ran needs the new number to be defensible against the old; the audit trail is the explanation.
 
-### Chunk 9 — Attribution batch cron
-
-`apps/web/app/api/cron/attribution-batch/route.ts`
-
-- CRON_SECRET authentication (existing pattern).
-- Iterates merchants → campaigns approved-and-launched → for each:
-  1. Determine window-close date = `min(now(), launched_at + attribution_window_days)`
-  2. If window-close <= today AND no `attribution_results` row exists for `(campaign_id, window_close_date)`:
-     - Run `computeIncrementalRevenue(campaignId)` and `computeLtvRestoration(campaignId)`
-     - For each attributed order: call `recordOrderArrival(orderId)` (idempotent)
-     - For each treatment-cohort customer with NO order in window: append `attribution_decisions` of type `'no_order'` and update bandit `order_beta + 1` (the failure signal feeds the order posterior)
-     - INSERT into `attribution_results`
-- Structured logs with `merchant_id`, `campaign_id`, `window_close_date`, `treatment_size`, `holdout_size`, `incremental_revenue_cents`, `elapsed_ms`.
-- Idempotency: the UNIQUE on `attribution_results (campaign_id, window_close_date)` prevents duplicate inserts. Re-running the cron the next day skips already-computed campaigns.
-
-`vercel.json` adds:
-```json
-{ "path": "/api/cron/attribution-batch", "schedule": "0 6 * * *" }
-```
-(06:00 UTC = 16:00 AEST, well after rfm/score nightly batches finish.)
+After backfill: the daily attribution batch cron continues writing new rows under the new methodology going forward.
 
 Tests:
-- Idempotent re-run: second invocation produces no new `attribution_results` rows
-- Insufficient-evidence path: writes `attribution_results` with `insufficient_evidence = true`, does NOT update bandit posteriors (don't pollute the bandit with low-confidence signal)
-- Window-not-closed path: campaigns still inside their window are skipped
+- Backfill of a known scenario: pre-backfill row with `treatment_size=60, treatment_revenue=$5000`; post-backfill same campaign now has `treatment_size=100, treatment_revenue=$5000` (revenue unchanged, denominator grew) → `treatment_per_customer` drops from $83.33 to $50; incremental decreases proportionally
+- Idempotency: re-run produces zero new audit events, identical row values
+- Audit event has both old and new values
 
-### Chunk 10 — Per-campaign attribution UI
+### Chunk 5 — Stripe client wrapper
 
-`apps/web/app/app/campaigns/[id]/attribution/page.tsx`
+`packages/core/src/stripe-client.ts`
 
-- Server component reads from `attribution_results` for the given campaign
-- Sections:
-  - **Window in effect**: shows the `attribution_window_days` value stamped on the proposal
-  - **Cohorts**: treatment size, holdout size, percentages
-  - **Incremental revenue**: dollar amount with CI low/high in parentheses; if `insufficient_evidence: true`, replace with explicit "Insufficient evidence — need 30+ customers per cohort. Currently treatment: X, holdout: Y." card
-  - **LTV restored**: same pattern
-  - **Attributed orders table**: list of orders attributed to this campaign with linked customer + outbound message
-- Vellum tokens only. No hex/rgb. WCAG 2.2 AA.
-- Vocabulary: NO "cohort" in UI strings (use "group" — per existing Sprint 04 vocabulary). Internal code can use "cohort" because it's the technical term for the math; UI translates.
+- Wraps the `stripe` npm package. All Stripe SDK calls go through this module.
+- Exports: `createCustomer(merchant)`, `createCheckoutSession(merchant, tier, returnUrls)`, `createPortalSession(merchant, returnUrl)`, `validateWebhookSignature(rawBody, signatureHeader)`, `parseWebhookEvent(rawBody)`.
+- Configurable via `STRIPE_SECRET_KEY`. Throws structured errors with Stripe error codes preserved.
+- Idempotency keys on customer creation and checkout session creation.
+- Tests use `stripe-mock` or hand-mocked Stripe client; integration tests use real Stripe test mode.
 
-### Chunk 11 — Merchant rollup attribution UI
+### Chunk 6 — Merchant Stripe customer creation
 
-`apps/web/app/app/dashboard/attribution/page.tsx`
+Extend the merchant onboarding flow (find the existing onboarding API/route — likely `/api/merchants/onboarding` or similar):
+- After merchant record is created, call `createCustomer(merchant)` from chunk 5
+- Store returned `stripe_customer_id` on `merchants` table
+- Idempotency: if `merchants.stripe_customer_id` is already populated, no-op
+- Failure handling: if Stripe customer creation fails, log structured `level: critical` event; do NOT block onboarding (merchant can still use the app, will be prompted to retry on first subscription attempt)
 
-- Server component reads aggregates from `attribution_results` joined to `campaign_proposals`
-- Sections:
-  - **Headline**: "Revenue restored this month: $X". Three tabs: last 30d / last 90d / all-time.
-  - **Top 5 campaigns by incremental revenue**: sortable table
-  - **LTV restored**: same headline pattern
-  - **Holdout effectiveness check**: the configured `HOLDOUT_RATE` env value compared against the realised average across campaigns. If they diverge >10%, surface a warning ("Holdout assignment may be skewed").
-  - **Time series chart**: revenue restored by week, last 12 weeks (recharts, Vellum tokens)
-- Same UI rules as chunk 10.
+For existing merchants without a Stripe customer ID: a separate one-shot backfill creates Stripe customers for all existing merchant rows. Could be combined with chunk 4's backfill route or kept separate. Prefer separate — they're conceptually different operations.
 
-### Chunk 12 — E2E + constructed-scenario validation
+### Chunk 7 — Subscription checkout flow
 
-`apps/web/e2e/attribution-scenarios.spec.ts` (Playwright) AND `packages/core/src/__tests__/attribution-scenarios.test.ts` (Vitest)
+`apps/web/app/app/billing/subscribe/page.tsx` + supporting API route `/api/billing/checkout`.
 
-**The defensibility test.** Five constructed scenarios run against the live attribution engine with synthetic data:
+UI:
+- Three tier cards: Starter $299/mo, Growth $799/mo, Scale $1499/mo
+- Each card shows: price, tier features (campaign approval limit, monthly send cap, support tier, etc.)
+- "Select" button on each card → POST to `/api/billing/checkout` with `{tier}` → returns Stripe Checkout session URL → client redirects
+- Vellum tokens, no hex. WCAG 2.2 AA. No "cohort" / "blast" / etc. in copy.
 
-1. **High-lift scenario.** Treatment cohort of 100 customers, 40 of whom place orders ($50 avg). Holdout cohort of 30 customers, 6 of whom place orders. Expected: positive incremental, narrow CI excluding 0, LTV restored positive.
-2. **Zero-lift scenario.** Treatment 100 customers, 20 orders. Holdout 30 customers, 6 orders. Both cohorts ~20% conversion. Expected: ~$0 incremental, CI brackets 0, LTV restored ≈ 0.
-3. **Negative-lift scenario.** Treatment 100 customers, 10 orders. Holdout 30 customers, 12 orders. Holdout outperforms. Expected: negative incremental, negative LTV, surfaced cleanly in UI without crashing or hiding the result.
-4. **Insufficient-evidence scenario.** Treatment 25 customers, 5 orders. Holdout 10 customers, 2 orders. Expected: `insufficient_evidence: true`, raw numbers shown, no CI, UI shows the "need 30+ per cohort" message.
-5. **Multi-campaign-overlap scenario.** Customer X in both campaign A and campaign B (treatment for both). Customer X places an order 5 days after A's outbound, 2 days after B's outbound. Expected: attributed to B only (most-recent-preceding). A's treatment_cohort still includes X (membership), but A's attributed orders does not include this order.
+API route:
+- Validates merchant is authenticated
+- Validates `tier` is one of the three valid values
+- Looks up merchant's `stripe_customer_id` (creates if missing per chunk 6)
+- Resolves tier → Stripe price ID from env (`STRIPE_PRICE_STARTER`, etc.)
+- Calls `createCheckoutSession` with success URL `/app/billing/success` and cancel URL `/app/billing/subscribe`
+- Returns the Stripe-hosted session URL
 
-Each scenario seeds synthetic data via direct DB inserts (NOT via the Shopify webhook — the math is what's being tested), runs `computeIncrementalRevenue` and `computeLtvRestoration`, and asserts against expected outcomes within tight tolerances.
+### Chunk 8 — Stripe webhook handler
+
+`apps/web/app/api/stripe/webhooks/route.ts`
+
+- HMAC signature validation via `stripeClient.validateWebhookSignature(rawBody, signatureHeader)` BEFORE body parsing. Failure: 400, no DB writes.
+- Idempotency: check `subscription_events.stripe_event_id` for incoming `event.id`. If present, return 200 immediately (Stripe retries are real).
+- Append `subscription_events` row with full event payload.
+- Switch on `event.type`:
+  - `customer.subscription.created` / `customer.subscription.updated`: upsert `merchant_subscriptions` row; update `merchants.subscription_tier` and `merchants.subscription_status`. On status transition into `past_due`, set `grace_period_started_at = now()`.
+  - `customer.subscription.deleted`: update status to `canceled`; set `canceled_at`.
+  - `invoice.payment_succeeded`: clear `grace_period_started_at` if set (recovery from past_due).
+  - `invoice.payment_failed`: no-op (the subsequent `customer.subscription.updated` to `past_due` handles state).
+- Unknown event types: log structured warning, return 200 (don't fail Stripe's webhook stream).
+- Structured logs: `merchant_id`, `event_type`, `event_id`, `elapsed_ms`.
+
+Tests:
+- Signature validation: tampered signature returns 400, no DB writes
+- Idempotency: same event ID processed twice produces one row, one merchant state update
+- Each event type's state transition
+- Unknown event type returns 200 without error
+
+### Chunk 9 — Failed payment grace period cron
+
+`apps/web/app/api/cron/billing-grace/route.ts`
+
+- CRON_SECRET auth
+- Runs daily at 07:00 UTC (after the rfm/score/attribution-batch crons)
+- Queries `merchant_subscriptions where status = 'past_due' AND grace_period_started_at < now() - interval 'BILLING_GRACE_PERIOD_DAYS days'`
+- For each: transition `merchants.subscription_status` to `'suspended'`; entitlements drop to read-only (handled in chunk 11)
+- Append `subscription_events` row with event type `grace_period_expired`
+- Notification: append a flag to the merchant for next-login banner; (in-app notification UI is Sprint 11 polish — for now, the flag is sufficient)
+- Structured logs: `merchant_id`, `grace_started_at`, `days_in_grace`, `suspended_at`
+
+Add to `apps/web/vercel.json` in the same commit (Sprint 07/08 lesson).
+
+### Chunk 10 — Stripe customer portal integration
+
+`apps/web/app/app/settings/billing/page.tsx`
+
+- "Manage Billing" button → POST to `/api/billing/portal` → returns Stripe portal session URL → client redirects
+- API route creates portal session via `stripeClient.createPortalSession(merchant, returnUrl)` where returnUrl = `/app/settings/billing`
+- The portal handles: tier upgrades/downgrades, payment method updates, view invoices, cancellation
+- Subsequent Stripe webhook receipt syncs state back to our DB
+
+UI: simple settings card with current tier display + portal link. Vellum tokens, accessibility compliant.
+
+### Chunk 11 — Entitlements + feature gates
+
+`packages/core/src/entitlements.ts`
+
+- `getMerchantEntitlements(merchantId)`: reads `merchants.subscription_tier` + `merchants.subscription_status`; returns typed entitlements object: `{maxCampaignsPerMonth, maxSendsPerMonth, supportTier, canExportData, ...}`. If `status = 'suspended'`, returns read-only entitlements regardless of tier.
+- Cached in-process for ~5 min via a simple Map. Invalidated on Stripe webhook receipt (chunk 8 calls invalidation).
+- Used as a gate at API layer: campaign approval (Sprint 06) checks `entitlements.maxCampaignsPerMonth`; outbound launcher (Sprint 07) checks `entitlements.maxSendsPerMonth`; etc.
+
+Feature gates to add in this chunk:
+- Campaign approval: deny if monthly count exceeded
+- Outbound send: deny if monthly count exceeded
+- Suspended status: deny all writes; allow reads
+
+Tests:
+- Each tier returns correct entitlements
+- Suspended status forces read-only
+- Cache invalidation on webhook receipt
+- Gate denial returns proper user-facing error
+
+### Chunk 12 — Constructed scenarios + E2E
+
+Two test files:
+
+`packages/core/__tests__/billing-scenarios.test.ts` (Vitest):
+- Stripe customer creation idempotency
+- Subscription lifecycle (create → upgrade → downgrade → cancel)
+- Failed payment → grace → recovery happy path
+- Failed payment → grace expiry → suspension
+- Webhook idempotency (same event ID processed twice)
+- Webhook signature validation (tampered = 400)
+- Entitlements per tier
+- Suspended status forces read-only
+
+`apps/web/e2e/billing-flow.spec.ts` (Playwright):
+- Onboarding → subscribe → Stripe Checkout (test mode) → success → state reflected in app
+- Settings → portal → simulate Stripe webhook on return → state updated
 
 ### Chunk 13 — HANDOFF.md
 
-Evidence-required format per CLAUDE.md. 10 rubric criteria, each with:
-- Primary implementation file path:line range
-- Test file path:line range
-- Test count
-- Named assertion(s)
+Evidence-required format. 10 rubric criteria, each with file:line implementation refs + file:line test refs + test count + named assertion.
 
-Deliberate deviations section (anticipate at least one — math choices, threshold tuning, etc.).
+Deliberate deviations to include:
+- Cohort methodology change (with backfill audit comparison data — at least one example old-vs-new from a real-ish scenario)
+- Stripe test mode vs production mode toggle status
+- The fact that Sprint 10 will add usage metering on top; Sprint 09's subscription billing is functionally complete without it but charges only the flat tier until Sprint 10 ships
+- Any deferred items (refund UI, coupon codes, etc.)
 
 ---
 
-## Quality Rubric (10 criteria, score 0–3 each)
+## Quality Rubric (10 criteria)
 
 | # | Criterion | What 3/3 looks like |
 |---|---|---|
-| 1 | Order ingestion via Shopify webhook | HMAC validated, idempotent on order_gid, customer-match + unmatched both handled, structured logs |
-| 2 | Per-merchant attribution window | `merchant_attribution_config` table, `getAttributionWindow` helper, proposal-stamping at approval, immutability test |
-| 3 | Treatment cohort attribution | `getTreatmentCohort` + `getTreatmentOrders`, single-attribution rule enforced, per-customer-window math |
-| 4 | Holdout cohort attribution | `getHoldoutCohort` queries frozen snapshot, no-overlap with treatment, calendar-window correct |
-| 5 | Incremental revenue + CI | Welch t-test implementation, integer cents arithmetic, insufficient-evidence threshold, constructed-scenario passing |
-| 6 | LTV restoration | Cohort-relative delta per decision 23, per-customer ltv_snapshots persisted, CI calculated |
-| 7 | Bandit dual-signal | `bandit_state.order_*` columns, `recordOrderArrival` write path, selection threshold at 30 observations, idempotent |
-| 8 | RLS tenancy | Every new table has merchant-scoped read + service-role write; RLS tests pass |
-| 9 | Attribution dashboard UI | Per-campaign + rollup pages, insufficient-evidence state, Vellum tokens, WCAG 2.2 AA, vocabulary compliance |
-| 10 | Observability + HANDOFF | Structured logs at every cron step, deliberate-deviations section in HANDOFF, evidence-required format compliance |
+| 1 | Cohort symmetric ITT | getTreatmentCohort + getTreatmentOrders refactored, snapshot source, calendar window, single-attribution preserved |
+| 2 | ITT bandit posterior signal | recordNoOrderOutcome iterates full snapshot, posterior signal correct for opt-outs/deferred, idempotent |
+| 3 | Backfill with audit trail | Backfill cron idempotent, audit event captures old vs new for every changed row |
+| 4 | Stripe customer creation | Idempotent at onboarding, failure handling, structured logs |
+| 5 | Subscription checkout flow | Three tier cards, Stripe Checkout session, success/cancel routing, vellum/a11y compliant |
+| 6 | Stripe webhook handler | Signature validated pre-parse, idempotent on event ID, all 5 event types handled, audit trail |
+| 7 | Failed payment grace period | 7-day grace via cron, suspension on expiry, notification flag, vercel.json updated |
+| 8 | Customer portal | Portal session creation, redirect, state sync via webhook |
+| 9 | Entitlements + feature gates | getMerchantEntitlements per tier, suspension forces read-only, gates at API layer |
+| 10 | Observability + HANDOFF | Structured logs at every billing operation, evidence-required HANDOFF, deliberate deviations |
 
 ---
 
 ## Out of Scope
 
-- Stripe billing on incremental revenue → Sprint 09
-- Multi-touch attribution (multiple campaigns share credit) → v2
-- Customer-journey reconstruction across channels → v2
-- LTV forecasting beyond observed restoration delta → v2 (would require stay-probability modelling)
-- A/B-test orchestration UI → v2
-- Email/web-channel attribution → v2 (channel-agnostic infra exists per decision 3 but no other channel ingestion built)
-- Per-merchant attribution-model selection → v2 (v1 ships one model)
-- Retroactive attribution-window changes on existing proposals → v2 (would invalidate already-computed results)
-- Order refund handling beyond appending refund event → v2 (UI surfacing + posterior corrections deferred)
+- Usage-based metering on incremental revenue → Sprint 10
+- Refund workflow UI → v2
+- Coupon codes / discounts → v2 (Stripe Coupons can be added later)
+- Free trials → v2 (Stripe trial periods can be added later as config)
+- Multi-currency invoicing beyond Stripe defaults → v2
+- Custom tax logic → v2 (Stripe Tax handles AU GST, US sales tax, UK VAT)
+- Admin dashboard for billing across all merchants → Sprint 11 (ops)
+- Per-merchant Twilio numbers → Sprint 11
+- Retroactive attribution-window changes on existing proposals → v2
+- In-app notification UI for grace period → Sprint 11 polish (a flag is set in chunk 9; UI to surface it comes later)
+- Email notifications on payment events → v2 (Stripe sends its own; we can add custom emails later)
