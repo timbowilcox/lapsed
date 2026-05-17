@@ -13,13 +13,17 @@
 // route-level security boundaries (signature 403, cron 401) are covered by
 // apps/web/e2e/conversation-engine.spec.ts.
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { launchMerchantCampaigns } from "../src/launch-campaigns";
+import { _clearEntitlementsCache } from "../src/entitlements";
 import { handleInboundMessage } from "../src/handle-inbound";
 import { validateWebhookSignature } from "../src/twilio-client";
 import type { TwilioClient } from "../src/twilio-client";
 import { makeFakeSupabase, type FakeRow } from "./_fake-supabase";
 import type Anthropic from "@anthropic-ai/sdk";
+
+// The entitlements cache is process-global — clear it between tests.
+beforeEach(() => _clearEntitlementsCache());
 
 const MERCHANT = "550e8400-e29b-41d4-a716-446655440000";
 const PROPOSAL = "11111111-1111-4111-8111-111111111111";
@@ -86,6 +90,16 @@ function countingLlm(
 /** Seeds an approved Sprint-06 campaign with one targeted customer. */
 function seedApprovedCampaign() {
   return makeFakeSupabase({
+    // Sprint 09: the launcher gates on merchant entitlements — an active
+    // subscription is required for outbound sends to proceed.
+    merchants: [
+      {
+        id: MERCHANT,
+        shopify_shop_domain: "flow-test.myshopify.com",
+        subscription_tier: "growth",
+        subscription_status: "active",
+      },
+    ],
     campaign_proposals: [
       { id: PROPOSAL, merchant_id: MERCHANT, group_slug: "lapsed_vips", version_number: 1, model_version: "m" },
     ],

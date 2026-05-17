@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { launchMerchantCampaigns } from "../src/launch-campaigns";
+import { _clearEntitlementsCache } from "../src/entitlements";
 import type { TwilioClient } from "../src/twilio-client";
 import { makeFakeSupabase, type FakeRow } from "./_fake-supabase";
+
+// The entitlements cache is process-global — clear it between tests so a
+// merchant's subscription state from one test never leaks into the next.
+beforeEach(() => _clearEntitlementsCache());
 
 const MERCHANT = "550e8400-e29b-41d4-a716-446655440000";
 const PROPOSAL = "11111111-1111-4111-8111-111111111111";
@@ -44,6 +49,12 @@ interface SeedOpts {
   withArms?: boolean;
   /** Omit the campaign_approved event so the proposal is not "ready". */
   ready?: boolean;
+  /** Merchant subscription tier (Sprint 09 entitlement gate). Default "growth". */
+  subscriptionTier?: string;
+  /** Merchant subscription status (Sprint 09 entitlement gate). Default "active". */
+  subscriptionStatus?: string;
+  /** message_outbound_sent events already recorded this calendar month. */
+  priorMonthlySends?: number;
 }
 
 function seedWorld(opts: SeedOpts = {}) {
@@ -55,6 +66,16 @@ function seedWorld(opts: SeedOpts = {}) {
   const allCustomers = [...targets, ...holdout];
 
   const seed: Record<string, FakeRow[]> = {
+    // Sprint 09: the launcher gates on merchant entitlements — an active
+    // subscription is required for sends to proceed.
+    merchants: [
+      {
+        id: MERCHANT,
+        shopify_shop_domain: "launch-test.myshopify.com",
+        subscription_tier: opts.subscriptionTier ?? "growth",
+        subscription_status: opts.subscriptionStatus ?? "active",
+      },
+    ],
     campaign_proposals: [
       { id: PROPOSAL, merchant_id: MERCHANT, group_slug: "lapsed_vips", version_number: 1, model_version: "claude-sonnet-4-6-test" },
     ],
@@ -114,6 +135,18 @@ function seedWorld(opts: SeedOpts = {}) {
       occurred_at: new Date().toISOString(),
       payload: { twilio_sid: `SM_old_${i}` },
     }));
+  }
+  if (opts.priorMonthlySends && opts.priorMonthlySends > 0) {
+    seed.message_events = [
+      ...(seed.message_events ?? []),
+      ...Array.from({ length: opts.priorMonthlySends }, (_, i) => ({
+        merchant_id: MERCHANT,
+        conversation_id: "c",
+        event_type: "message_outbound_sent",
+        occurred_at: new Date().toISOString(),
+        payload: { twilio_sid: `SM_month_${i}` },
+      })),
+    ];
   }
   return makeFakeSupabase(seed);
 }
@@ -290,6 +323,9 @@ describe("launchMerchantCampaigns — edge cases", () => {
     const ARM_Z = "99999999-9999-4999-8999-999999999999";
     const ARM_W = "88888888-8888-4888-8888-888888888888";
     const fake = makeFakeSupabase({
+      merchants: [
+        { id: MERCHANT, shopify_shop_domain: "x.myshopify.com", subscription_tier: "growth", subscription_status: "active" },
+      ],
       campaign_proposals: [
         { id: PROPOSAL, merchant_id: MERCHANT, group_slug: "lapsed_vips", version_number: 1, model_version: "m" },
       ],
@@ -325,6 +361,9 @@ describe("launchMerchantCampaigns — edge cases", () => {
     const PROPOSAL_2 = "55555555-5555-4555-8555-555555555555";
     const ARM_2 = "66666666-6666-4666-8666-666666666666";
     const fake = makeFakeSupabase({
+      merchants: [
+        { id: MERCHANT, shopify_shop_domain: "x.myshopify.com", subscription_tier: "growth", subscription_status: "active" },
+      ],
       campaign_proposals: [
         { id: PROPOSAL, merchant_id: MERCHANT, group_slug: "g1", version_number: 1, model_version: "m" },
         { id: PROPOSAL_2, merchant_id: MERCHANT, group_slug: "g2", version_number: 1, model_version: "m" },
@@ -362,5 +401,71 @@ describe("launchMerchantCampaigns — edge cases", () => {
     expect(result.proposalsConsidered).toBe(2);
     // The second proposal's customer was never messaged.
     expect((fake.tables.messages ?? [])).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 09 chunk 11 — billing entitlement gate
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("launchMerchantCampaigns — billing gate", () => {
+  it("sends nothing for a suspended merchant (writeBlocked)", async () => {
+    const fake = seedWorld({
+      targets: ["gid://shopify/Customer/1", "gid://shopify/Customer/2"],
+      subscriptionStatus: "suspended",
+    });
+    const twilio = fakeTwilio();
+    const result = await launchMerchantCampaigns(fake.client, twilio.client, opts());
+    expect(result.writeBlocked).toBe(true);
+    expect(result.sent).toBe(0);
+    expect(twilio.sendCount()).toBe(0);
+    expect((fake.tables.messages ?? [])).toHaveLength(0);
+  });
+
+  it("sends nothing for a merchant with no plan (writeBlocked)", async () => {
+    const fake = seedWorld({ subscriptionTier: undefined, subscriptionStatus: undefined });
+    // Override: a merchant row with null tier/status.
+    fake.tables.merchants![0]!.subscription_tier = null;
+    fake.tables.merchants![0]!.subscription_status = null;
+    const twilio = fakeTwilio();
+    const result = await launchMerchantCampaigns(fake.client, twilio.client, opts());
+    expect(result.writeBlocked).toBe(true);
+    expect(result.sent).toBe(0);
+  });
+
+  it("stops before exceeding the tier's monthly send quota — no overshoot", async () => {
+    // starter cap = 5000. 4999 already sent this month + 2 targets → budget 1:
+    // the first target sends, the second trips monthlySendCapReached.
+    const fake = seedWorld({
+      targets: ["gid://shopify/Customer/1", "gid://shopify/Customer/2"],
+      subscriptionTier: "starter",
+      priorMonthlySends: 4999,
+    });
+    const twilio = fakeTwilio();
+    // A large daily cap so the MONTHLY quota — not the daily one — stops the run.
+    const result = await launchMerchantCampaigns(
+      fake.client,
+      twilio.client,
+      opts({ outboundDailyCap: 1_000_000 }),
+    );
+    expect(result.monthlySendCapReached).toBe(true);
+    expect(result.sent).toBe(1); // exactly the 1-message budget, never overshot
+    expect(twilio.sendCount()).toBe(1);
+  });
+
+  it("sends nothing when the monthly send quota is already exhausted", async () => {
+    const fake = seedWorld({
+      targets: ["gid://shopify/Customer/1"],
+      subscriptionTier: "starter",
+      priorMonthlySends: 5000, // at the cap
+    });
+    const twilio = fakeTwilio();
+    const result = await launchMerchantCampaigns(
+      fake.client,
+      twilio.client,
+      opts({ outboundDailyCap: 1_000_000 }),
+    );
+    expect(result.monthlySendCapReached).toBe(true);
+    expect(result.sent).toBe(0);
   });
 });

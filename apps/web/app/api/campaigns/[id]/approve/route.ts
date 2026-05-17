@@ -11,7 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@lapsed/db";
-import { approveProposal } from "@lapsed/core";
+import { approveProposal, checkCampaignApprovalAllowed } from "@lapsed/core";
 import { getMerchantFromSession } from "@/app/lib/session";
 import { serverEnv } from "@/app/lib/env";
 import { campaignErrorResponse, isUuid } from "../../_shared";
@@ -48,6 +48,17 @@ export async function POST(
     url: env.supabaseUrl,
     serviceKey: env.supabaseSecretKey,
   });
+
+  // Billing gate (decisions 30/31): a suspended / no-plan merchant cannot
+  // approve a campaign, and an active merchant cannot exceed their tier's
+  // monthly campaign allowance.
+  const gate = await checkCampaignApprovalAllowed(client, merchant.id);
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { error: "billing_gate", reason: gate.reason },
+      { status: 403 },
+    );
+  }
 
   try {
     const result = await approveProposal(client, merchant.id, id, body.userId);

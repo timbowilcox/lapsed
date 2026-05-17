@@ -39,7 +39,14 @@
         "TWILIO_PHONE_NUMBER",
         "OUTBOUND_DAILY_CAP_DEFAULT",
         "INBOUND_REPLY_LATENCY_BUDGET_MS",
-        "NO_REPLY_SWEEP_DAYS"
+        "NO_REPLY_SWEEP_DAYS",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_PUBLISHABLE_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_PRICE_STARTER",
+        "STRIPE_PRICE_GROWTH",
+        "STRIPE_PRICE_SCALE",
+        "BILLING_GRACE_PERIOD_DAYS"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },

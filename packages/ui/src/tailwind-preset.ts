@@ -34,6 +34,9 @@ const preset: Partial<Config> = {
           100: "#F8ECCD",
         },
         danger: {
+          // 700 is the AA-contrast text shade — small (12px) danger text on a
+          // cream surface needs ≥ 4.5:1, which danger-500 does not clear.
+          700: "#9A2F2F",
           500: "#C04848",
           100: "#F4DCDC",
         },

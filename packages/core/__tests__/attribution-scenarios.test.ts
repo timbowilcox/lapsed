@@ -33,8 +33,12 @@ const day = (n: number): string =>
 interface CampaignSpec {
   id: string;
   windowDays?: number;
-  /** outbounds: each treatment customer + the day their outbound was sent */
-  treatment: Array<{ customerId: string; sentDay: number }>;
+  /**
+   * ITT treatment cohort: each customer + the day their outbound was sent.
+   * `sentDay` undefined → customer is in the ITT snapshot but received no
+   * outbound (opt-out / daily-cap-deferred) — decision 27.
+   */
+  treatment: Array<{ customerId: string; sentDay?: number }>;
   /** holdout customer ids (frozen snapshot) */
   holdout: string[];
 }
@@ -61,7 +65,24 @@ function seedScenario(
       status: "approved",
       attribution_window_days: c.windowDays ?? 14,
     });
+    // Symmetric ITT (decision 27): every treatment customer is frozen into the
+    // campaign_group_snapshots with included_in_holdout = false. The cohort is
+    // the snapshot, not the set of senders — opt-outs/deferred customers can be
+    // added to `treatment` with a `sentDay` of undefined (no outbound row).
+    const snapshotted = new Set<string>();
     for (const t of c.treatment) {
+      if (!snapshotted.has(t.customerId)) {
+        snapshotted.add(t.customerId);
+        snapshots.push({
+          proposal_id: c.id,
+          merchant_id: MERCHANT,
+          customer_id: t.customerId,
+          included_in_holdout: false,
+        });
+      }
+      // A customer with no sentDay is in the ITT cohort but received no
+      // outbound (opt-out / cap-deferred) — snapshot row only, no message.
+      if (t.sentDay === undefined) continue;
       if (!conversations.has(t.customerId)) {
         conversations.set(t.customerId, {
           id: `conv-${t.customerId}`,

@@ -57,11 +57,17 @@ export interface IncrementalRevenueResult {
 }
 
 /**
- * The calendar window over which the holdout cohort is measured: anchored at
- * the MEDIAN treatment send time and `windowDays` long — the same length as
- * each treatment customer's per-customer window, placed over the campaign's
- * typical send period so the cohorts are comparable. Exported so the LTV
- * calculator (chunk 8) anchors its post-window on the identical median.
+ * The campaign-calendar window over which BOTH cohorts are measured (decision
+ * 27): anchored at `launched_at` — the campaign's EARLIEST outbound — and
+ * `windowDays` long. This is exactly the window `getTreatmentOrders` uses for
+ * the treatment cohort, so the holdout cohort is measured over the identical
+ * `[launched_at, launched_at + windowDays]` interval. Methodological symmetry
+ * (decision 27) requires the same anchor on both sides.
+ *
+ * Sprint 08 anchored this at the MEDIAN send time, which left the treatment
+ * (per-customer windows) and holdout (median calendar window) cohorts measured
+ * over different intervals. Anchoring both at `launched_at` removes that
+ * asymmetry. Exported so the LTV calculator anchors its post-window identically.
  */
 export function campaignCalendarWindow(
   outbounds: readonly CampaignOutbound[],
@@ -70,21 +76,17 @@ export function campaignCalendarWindow(
   if (outbounds.length === 0) {
     throw new Error("campaignCalendarWindow: campaign has no outbounds to anchor the window");
   }
-  const sentMs = outbounds
-    .map((o) => {
-      const ms = new Date(o.sentAt).getTime();
-      if (!Number.isFinite(ms)) {
-        throw new Error(`campaignCalendarWindow: invalid sent_at on message ${o.messageId}`);
-      }
-      return ms;
-    })
-    .sort((x, y) => x - y);
-  const mid = Math.floor(sentMs.length / 2);
-  const medianMs =
-    sentMs.length % 2 === 1 ? sentMs[mid]! : (sentMs[mid - 1]! + sentMs[mid]!) / 2;
+  let launchedMs = Infinity;
+  for (const o of outbounds) {
+    const ms = new Date(o.sentAt).getTime();
+    if (!Number.isFinite(ms)) {
+      throw new Error(`campaignCalendarWindow: invalid sent_at on message ${o.messageId}`);
+    }
+    if (ms < launchedMs) launchedMs = ms;
+  }
   return {
-    startIso: new Date(medianMs).toISOString(),
-    endIso: new Date(medianMs + windowDays * DAY_MS).toISOString(),
+    startIso: new Date(launchedMs).toISOString(),
+    endIso: new Date(launchedMs + windowDays * DAY_MS).toISOString(),
   };
 }
 

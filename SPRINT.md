@@ -22,7 +22,7 @@ Sprint 09 does two things, in order:
 
 - [ ] `getTreatmentCohort` sources from `campaign_group_snapshots` where `is_holdout = false AND campaign_proposal_id = $1` — same pattern as `getHoldoutCohort` from Sprint 08.
 - [ ] `getTreatmentOrders` uses campaign-calendar window (anchored at `launched_at` + `attribution_window_days`), NOT per-customer windows. Symmetric with `getHoldoutOrders`.
-- [ ] `recordNoOrderOutcome` in `attribution-batch.ts` loops over the full ITT treatment snapshot (including opt-outs and daily-cap-deferred), not just sent-to customers. Bandit `order_beta + 1` fires for every cohort member with no order in window. Idempotent per (customer, campaign).
+- [ ] The no-order loop in `attribution-batch.ts` iterates the full ITT treatment snapshot (including opt-outs and daily-cap-deferred), not just sent-to customers. A `no_order` `attribution_decisions` row is written for every cohort member with no order in window (audit trail + ITT denominator). The bandit `order_beta + 1` posterior is moved ONLY for arm-exposed customers — never-sent opt-out / cap-deferred customers carry `arm_id = null` and move no posterior (mid-sprint checkpoint ruling — see Chunk 3). Idempotent per (customer, campaign).
 - [ ] Backfill all existing `attribution_results` rows under the new methodology via `/api/cron/attribution-backfill`. Audit trail: each backfilled row writes a `attribution_methodology_migration` event capturing old vs new `treatment_revenue_cents`, `holdout_revenue_cents`, `incremental_revenue_cents`, `treatment_cohort_size`, `holdout_cohort_size`.
 - [ ] Constructed scenarios (Sprint 08 chunk 12) re-run under new methodology and pass with adjusted expectations (treatment cohort sizes now include opt-outs/deferred — verify the math direction matches: treatment_per_customer should DECREASE; incremental should DECREASE relative to Sprint 08's numbers).
 - [ ] Monte Carlo Welch CI coverage test still passes in [0.93, 0.97] bracket band.
@@ -114,17 +114,19 @@ Tests:
 
 `packages/core/src/attribution-batch.ts`
 
-Update `recordNoOrderOutcome`:
+Update the no-order outcome loop:
 - Loop over the ITT treatment cohort returned by `getTreatmentCohort` (chunk 2's new shape)
-- For each customer with NO attributed order in the window, fire `order_beta + 1` via `updateOrderPosterior` (existing chunk 7 path)
-- Idempotency: stamp `(customer_id, campaign_id)` in a way that prevents double-firing on cron re-runs. Could be via `attribution_decisions` (new event type `no_order_itt`) or a new table; choose whatever's idempotent and audit-traversable.
+- For each customer with NO attributed order in the window, write a `no_order` `attribution_decisions` row via `recordNoOrderOutcome` — for EVERY ITT cohort member (audit trail + ITT denominator stamp)
+- The bandit `order_beta + 1` posterior is moved ONLY for arm-exposed customers: a sent-to customer's outbound arm. A never-sent opt-out / cap-deferred customer carries `arm_id = null`; `recordNoOrderOutcome` writes their decision row but skips the posterior.
+- Idempotency: the existing `attribution_decisions` `no_order` rows (partial UNIQUE on `(attributed_campaign_id, customer_id)`) are the idempotency stamp — a cron re-run finds the row and no-ops. No new event type or table is needed.
 
-**Critical math note for the build agent:** under symmetric ITT, the bandit's success-rate estimate (`order_alpha / (order_alpha + order_beta)`) is now bounded by the *send rate* — if 80% of the cohort actually got sends and 20% opted out, the maximum order rate the bandit can observe is 80%. This is methodologically correct: the bandit should know its effective reach including losses to opt-outs. Test this by constructing a cohort where 30% opt out and verifying the bandit's order posterior converges to the right rate.
+**Methodology note (mid-sprint checkpoint ruling — Position B).** The bandit ORDER posterior measures *arm efficacy among customers an arm actually reached* — it is an arm-selection signal (decisions 4/14/19/22). A never-sent customer (opt-out / cap-deferred) was exposed to no arm, so their non-conversion carries no information about any arm's offer/tone/timing and must NOT touch a per-arm posterior — booking it onto an arm would make the posterior a function of the campaign's send rate rather than the arm's efficacy, and arms are reused across campaigns. The campaign's *effective reach* (the opt-out drag) is captured — correctly and without double-counting — in the symmetric-ITT `attribution_results.treatment_cohort_size` denominator and the incremental-revenue per-customer math (chunk 2). The earlier draft of this chunk routed never-sent failures onto arms; the checkpoint evaluator ruled that a methodology bug and this section was amended.
 
 Tests:
-- ITT denominator iteration: cohort of 100 (60 sent to, 40 opt-out/deferred); 20 orders; verify 80 `order_beta + 1` updates land, not 40
-- Idempotency: cron re-run produces no additional posterior updates
-- Send-rate ceiling: cohort with 30% opt-out and 100% conversion among sent — bandit converges to 0.7, not 1.0
+- ITT denominator iteration: cohort of 100 (60 sent to, 40 opt-out/deferred); 20 orders; verify 80 `no_order` decision rows land AND only 40 `order_beta` posterior updates (the sent-no-order customers), not 80
+- Idempotency: cron re-run produces no additional posterior updates or decision rows
+- Arm-efficacy isolation: cohort with 30% opt-out and 100% conversion among sent — the bandit order posterior converges to 1.0 (arm efficacy among reached customers); the 0.7 effective reach is recorded separately in `treatment_cohort_size`
+- Never-sent customers move no posterior; a campaign whose outbounds carry no arm moves no posterior at all
 
 **MID-SPRINT CHECKPOINT BARRIER.** After chunk 3 lands and is auditor-clean, the build agent surfaces:
 > "Chunk 3 complete. Mid-sprint checkpoint evaluator should now run BEFORE the chunk-4 backfill, because the backfill mutates production attribution_results. Awaiting human to launch a separate Claude Code session for checkpoint per CLAUDE.md → Mid-sprint checkpoint evaluator protocol."

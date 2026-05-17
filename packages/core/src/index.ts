@@ -168,6 +168,65 @@ export {
 } from "./attribution-batch";
 
 export {
+  runAttributionBackfill,
+  type RunAttributionBackfillOptions,
+  type AttributionBackfillResult,
+  type AttributionResultSnapshot,
+} from "./attribution-backfill";
+
+export {
+  createStripeClient,
+  isSubscriptionTier,
+  SUBSCRIPTION_TIERS,
+  StripeClientError,
+  StripeWebhookSignatureError,
+  type SubscriptionTier,
+  type StripeClientConfig,
+  type LapsedStripeClient,
+  type StripeSdkLike,
+  type StripeWebhookEvent,
+  type MerchantBillingRef,
+  type CheckoutReturnUrls,
+} from "./stripe-client";
+
+export {
+  ensureStripeCustomer,
+  backfillStripeCustomers,
+  type EnsureStripeCustomerResult,
+  type BackfillStripeCustomersResult,
+} from "./ensure-stripe-customer";
+
+export {
+  TIER_PLANS,
+  supportTierLabel,
+  type TierPlan,
+  type SupportTier,
+} from "./subscription-tiers";
+
+export {
+  handleStripeWebhookEvent,
+  type StripeWebhookHandlerConfig,
+  type StripeWebhookHandlerResult,
+  type MirrorSubscriptionStatus,
+} from "./stripe-webhook";
+
+export {
+  runBillingGraceSweep,
+  type RunBillingGraceSweepOptions,
+  type BillingGraceSweepResult,
+} from "./billing-grace";
+
+export {
+  getMerchantEntitlements,
+  invalidateMerchantEntitlements,
+  checkCampaignApprovalAllowed,
+  _clearEntitlementsCache,
+  type MerchantEntitlements,
+  type CampaignApprovalGateResult,
+  type CampaignApprovalDenialReason,
+} from "./entitlements";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,

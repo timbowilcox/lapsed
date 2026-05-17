@@ -91,6 +91,40 @@ export function serverEnv(): ServerEnv {
 }
 
 /**
+ * Sprint 09 billing env. Kept SEPARATE from serverEnv() so a non-billing
+ * route never throws merely because the Stripe keys are not yet provisioned —
+ * only the billing routes (checkout, webhook, portal, grace cron) call this.
+ * The Stripe keys are test-mode (sk_test_.../whsec_...) for Sprint 09; the
+ * production-key swap is an MVP-launch step.
+ */
+export interface BillingEnv {
+  stripeSecretKey: string;
+  stripeWebhookSecret: string;
+  stripePublishableKey: string;
+  stripePriceIds: { starter: string; growth: string; scale: string };
+  /** Failed-payment grace window before suspension (decision 31). Default 7. */
+  billingGracePeriodDays: number;
+}
+
+let cachedBilling: BillingEnv | null = null;
+
+export function billingEnv(): BillingEnv {
+  if (cachedBilling) return cachedBilling;
+  cachedBilling = {
+    stripeSecretKey: required("STRIPE_SECRET_KEY"),
+    stripeWebhookSecret: required("STRIPE_WEBHOOK_SECRET"),
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
+    stripePriceIds: {
+      starter: required("STRIPE_PRICE_STARTER"),
+      growth: required("STRIPE_PRICE_GROWTH"),
+      scale: required("STRIPE_PRICE_SCALE"),
+    },
+    billingGracePeriodDays: parseIntOr(process.env.BILLING_GRACE_PERIOD_DAYS, 7),
+  };
+  return cachedBilling;
+}
+
+/**
  * Public env values that may be read from client components. Next
  * inlines `process.env.NEXT_PUBLIC_*` at build time, so these are
  * embedded into the client JS bundle and safe to read in browser code.

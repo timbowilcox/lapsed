@@ -21,11 +21,17 @@ vi.mock("@lapsed/core", () => ({
   approveProposal: vi.fn(),
   rejectProposal: vi.fn(),
   editProposal: vi.fn(),
+  checkCampaignApprovalAllowed: vi.fn(),
 }));
 
 import { getMerchantFromSession } from "@/app/lib/session";
 import { getPendingProposals, getProposalById } from "@lapsed/db";
-import { approveProposal, rejectProposal, editProposal } from "@lapsed/core";
+import {
+  approveProposal,
+  rejectProposal,
+  editProposal,
+  checkCampaignApprovalAllowed,
+} from "@lapsed/core";
 import { campaignErrorResponse, isUuid } from "../app/api/campaigns/_shared";
 import { GET as getPending } from "../app/api/campaigns/pending/route";
 import { GET as getById } from "../app/api/campaigns/[id]/route";
@@ -134,6 +140,43 @@ describe("GET /api/campaigns/[id]", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("POST /api/campaigns/[id]/approve", () => {
+  beforeEach(() => {
+    // Default: the billing gate allows the approval. Individual tests override.
+    vi.mocked(checkCampaignApprovalAllowed).mockResolvedValue({ allowed: true } as never);
+  });
+
+  it("returns 403 when the billing gate denies (suspended)", async () => {
+    vi.mocked(checkCampaignApprovalAllowed).mockResolvedValue({
+      allowed: false,
+      reason: "suspended",
+    } as never);
+    const res = await postApprove(postRequest({ userId: "u1" }), paramsFor(PROPOSAL_ID));
+    expect(res.status).toBe(403);
+    expect((await res.json()).reason).toBe("suspended");
+    expect(approveProposal).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 with reason monthly_limit_reached when the tier allowance is used up", async () => {
+    vi.mocked(checkCampaignApprovalAllowed).mockResolvedValue({
+      allowed: false,
+      reason: "monthly_limit_reached",
+    } as never);
+    const res = await postApprove(postRequest({ userId: "u1" }), paramsFor(PROPOSAL_ID));
+    expect(res.status).toBe(403);
+    expect((await res.json()).reason).toBe("monthly_limit_reached");
+    expect(approveProposal).not.toHaveBeenCalled();
+  });
+
+  it("validates the id BEFORE the billing gate — a bad id is 404, not 403", async () => {
+    vi.mocked(checkCampaignApprovalAllowed).mockResolvedValue({
+      allowed: false,
+      reason: "suspended",
+    } as never);
+    const res = await postApprove(postRequest({ userId: "u1" }), paramsFor("not-a-uuid"));
+    expect(res.status).toBe(404);
+    expect(checkCampaignApprovalAllowed).not.toHaveBeenCalled();
+  });
+
   it("returns 401 with no session merchant", async () => {
     vi.mocked(getMerchantFromSession).mockResolvedValue(null);
     const res = await postApprove(postRequest({ userId: "u1" }), paramsFor(PROPOSAL_ID));

@@ -4,8 +4,17 @@
 // attribution window has closed, it:
 //   1. computes incremental revenue (chunk 6) + LTV restoration (chunk 8),
 //   2. fires the ground-truth bandit ORDER posterior (chunk 7) — success for
-//      every attributed order, failure for every treated customer who placed
-//      no order in the window,
+//      every attributed order, failure for every ARM-EXPOSED customer who
+//      placed no order in the window. Under symmetric ITT (decision 27, Sprint
+//      09 chunk 3) the cohort includes opt-out / cap-deferred customers who
+//      received no outbound: a `no_order` attribution_decisions row is written
+//      for every ITT cohort member (audit trail + ITT denominator), but the
+//      bandit posterior is moved ONLY for customers an arm actually reached.
+//      A never-sent customer was exposed to no arm, so their non-conversion is
+//      not a signal about any arm's efficacy — booking it onto an arm would
+//      contaminate the arm-selection posterior with the campaign's send rate.
+//      Effective reach is captured separately, in attribution_results'
+//      treatment_cohort_size (the ITT denominator),
 //   3. materialises one `attribution_results` row per (campaign, window-close).
 //
 // IDEMPOTENT. The UNIQUE on `attribution_results (campaign_id, window_close_date)`
@@ -209,7 +218,7 @@ async function processCampaign(
   // Fire the ground-truth bandit ORDER posterior — but ONLY when evidence is
   // sufficient. A sub-30 cohort is too noisy to feed the posterior.
   if (!incremental.insufficientEvidence) {
-    // Most-recent outbound arm per cohort customer (decision 19 pattern).
+    // Most-recent outbound arm per SENT customer (decision 19 pattern).
     const armByCustomer = new Map<string, { armId: string | null; sentMs: number }>();
     for (const ob of cohort.outbounds) {
       const sentMs = new Date(ob.sentAt).getTime();
@@ -219,6 +228,24 @@ async function processCampaign(
       }
     }
 
+    // Symmetric-ITT bandit signal (decision 27, Sprint 09 chunk 3). The
+    // treatment cohort (`cohort.cohort`) is now the full ITT snapshot — it
+    // includes opt-out / daily-cap-deferred customers who received NO outbound.
+    //
+    // A `no_order` attribution_decisions row is written for EVERY ITT cohort
+    // member with no attributed order (audit trail + the ITT denominator's
+    // idempotency stamp). But the bandit ORDER posterior is moved only for a
+    // customer an arm actually reached: `recordNoOrderOutcome` fires the
+    // posterior only when `armId` is non-null.
+    //
+    // A never-sent customer was exposed to NO arm — their non-conversion is
+    // not a signal about any arm's offer/tone/timing efficacy, so it must not
+    // touch a per-arm posterior (decisions 4/14/19/22; mid-sprint checkpoint
+    // ruling). Booking it onto an arm would make the arm-selection posterior a
+    // function of the campaign's send rate rather than the arm's efficacy, and
+    // arms are reused across campaigns. The campaign's effective reach is
+    // already captured — correctly — in attribution_results.treatment_cohort_size
+    // (the ITT denominator) and in the incremental-revenue per-customer math.
     const customersWithOrder = new Set<string>();
     for (const order of treatmentOrders.orders) {
       customersWithOrder.add(order.customerId);
@@ -233,7 +260,9 @@ async function processCampaign(
       });
     }
 
-    // Every treated customer with no attributed order is a failure observation.
+    // Every ITT cohort customer with no attributed order gets a `no_order`
+    // decision row. armId is the customer's own outbound arm when they were
+    // sent to, else null — a never-sent customer moves no posterior.
     for (const customerId of cohort.cohort) {
       if (customersWithOrder.has(customerId)) continue;
       await recordNoOrderOutcome(client, {

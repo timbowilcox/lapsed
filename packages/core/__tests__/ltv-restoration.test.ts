@@ -35,6 +35,13 @@ function seedCampaign(opts: {
   for (let i = 0; i < opts.treatmentCount; i++) {
     const cid = `t${i}`;
     conversations.push({ id: `conv-${cid}`, merchant_id: MERCHANT, customer_id: cid });
+    // Symmetric ITT (decision 27): the treatment cohort is the frozen snapshot.
+    snapshots.push({
+      proposal_id: CAMPAIGN,
+      merchant_id: MERCHANT,
+      customer_id: cid,
+      included_in_holdout: false,
+    });
     messages.push({
       id: `mt${i}`,
       merchant_id: MERCHANT,
@@ -219,12 +226,20 @@ describe("computeLtvRestoration", () => {
         arm_id: "arm-0",
         sent_at: day(0),
       })),
-      campaign_group_snapshots: Array.from({ length: 31 }, (_, i) => ({
-        proposal_id: CAMPAIGN,
-        merchant_id: MERCHANT,
-        customer_id: `h${i}`,
-        included_in_holdout: true,
-      })),
+      campaign_group_snapshots: [
+        ...Array.from({ length: 32 }, (_, i) => ({
+          proposal_id: CAMPAIGN,
+          merchant_id: MERCHANT,
+          customer_id: `t${i}`,
+          included_in_holdout: false,
+        })),
+        ...Array.from({ length: 31 }, (_, i) => ({
+          proposal_id: CAMPAIGN,
+          merchant_id: MERCHANT,
+          customer_id: `h${i}`,
+          included_in_holdout: true,
+        })),
+      ],
       orders: Array.from({ length: 10 }, (_, i) => ({
         id: `o${i}`,
         merchant_id: MERCHANT,
@@ -310,12 +325,20 @@ describe("computeLtvRestoration", () => {
       campaign_proposals: [{ id: CAMPAIGN, merchant_id: MERCHANT, attribution_window_days: 14 }],
       conversations,
       messages,
-      campaign_group_snapshots: Array.from({ length: 31 }, (_, i) => ({
-        proposal_id: CAMPAIGN,
-        merchant_id: MERCHANT,
-        customer_id: `h${i}`,
-        included_in_holdout: true,
-      })),
+      campaign_group_snapshots: [
+        ...Array.from({ length: 31 }, (_, i) => ({
+          proposal_id: CAMPAIGN,
+          merchant_id: MERCHANT,
+          customer_id: `t${i}`,
+          included_in_holdout: false,
+        })),
+        ...Array.from({ length: 31 }, (_, i) => ({
+          proposal_id: CAMPAIGN,
+          merchant_id: MERCHANT,
+          customer_id: `h${i}`,
+          included_in_holdout: true,
+        })),
+      ],
       orders: [
         {
           id: "o0",
@@ -347,7 +370,9 @@ describe("computeLtvRestoration", () => {
           sent_at: day(0),
         },
       ],
-      campaign_group_snapshots: [],
+      campaign_group_snapshots: [
+        { proposal_id: CAMPAIGN, merchant_id: MERCHANT, customer_id: "t0", included_in_holdout: false },
+      ],
     }, { failOn: [{ table: "orders", op: "select" }] });
     await expect(computeLtvRestoration(client, CAMPAIGN)).rejects.toThrow(/fake error/);
   });
@@ -376,12 +401,20 @@ describe("computeLtvRestoration", () => {
           arm_id: "arm-0",
           sent_at: day(0),
         })),
-        campaign_group_snapshots: Array.from({ length: 31 }, (_, i) => ({
-          proposal_id: CAMPAIGN,
-          merchant_id: MERCHANT,
-          customer_id: `h${i}`,
-          included_in_holdout: true,
-        })),
+        campaign_group_snapshots: [
+          ...Array.from({ length: 31 }, (_, i) => ({
+            proposal_id: CAMPAIGN,
+            merchant_id: MERCHANT,
+            customer_id: `t${i}`,
+            included_in_holdout: false,
+          })),
+          ...Array.from({ length: 31 }, (_, i) => ({
+            proposal_id: CAMPAIGN,
+            merchant_id: MERCHANT,
+            customer_id: `h${i}`,
+            included_in_holdout: true,
+          })),
+        ],
         orders: [],
       },
       { failOn: [{ table: "ltv_snapshots", op: "upsert" }] },
@@ -411,7 +444,9 @@ describe("computeLtvRestoration", () => {
           sent_at: day(0),
         },
       ],
-      campaign_group_snapshots: [],
+      campaign_group_snapshots: [
+        { proposal_id: CAMPAIGN, merchant_id: MERCHANT, customer_id: "t0", included_in_holdout: false },
+      ],
       orders: [
         {
           id: "o0",
