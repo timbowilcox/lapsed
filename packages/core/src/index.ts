@@ -197,6 +197,13 @@ export {
 } from "./ensure-stripe-customer";
 
 export {
+  TIER_PLANS,
+  supportTierLabel,
+  type TierPlan,
+  type SupportTier,
+} from "./subscription-tiers";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
