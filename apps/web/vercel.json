@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/attribution-batch",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/billing-grace",
+      "schedule": "0 7 * * *"
     }
   ]
 }

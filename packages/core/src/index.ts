@@ -211,6 +211,12 @@ export {
 } from "./stripe-webhook";
 
 export {
+  runBillingGraceSweep,
+  type RunBillingGraceSweepOptions,
+  type BillingGraceSweepResult,
+} from "./billing-grace";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
