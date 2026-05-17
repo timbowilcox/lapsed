@@ -168,6 +168,13 @@ export {
 } from "./attribution-batch";
 
 export {
+  runAttributionBackfill,
+  type RunAttributionBackfillOptions,
+  type AttributionBackfillResult,
+  type AttributionResultSnapshot,
+} from "./attribution-backfill";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
