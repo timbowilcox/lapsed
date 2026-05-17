@@ -36,7 +36,7 @@ const sections: SidebarNavSection[] = [
   {
     label: "Account",
     items: [
-      { href: "/app/billing", icon: "CreditCard", label: "Billing" },
+      { href: "/app/settings/billing", icon: "CreditCard", label: "Billing" },
       { href: "/app/settings", icon: "Settings", label: "Settings" },
     ],
   },
@@ -47,7 +47,10 @@ function resolveActive(pathname: string): string {
   if (pathname.startsWith("/app/campaigns")) return "/app/campaigns";
   if (pathname.startsWith("/app/conversations")) return "/app/conversations";
   if (pathname.startsWith("/app/attribution")) return "/app/attribution";
-  if (pathname.startsWith("/app/billing")) return "/app/billing";
+  // Billing settings + the subscribe/success checkout pages all highlight the
+  // Billing nav item. This must precede the generic /app/settings check.
+  if (pathname.startsWith("/app/settings/billing")) return "/app/settings/billing";
+  if (pathname.startsWith("/app/billing")) return "/app/settings/billing";
   if (pathname.startsWith("/app/settings")) return "/app/settings";
   if (pathname.startsWith("/app/onboarding")) return "/app/onboarding";
   return "/app";

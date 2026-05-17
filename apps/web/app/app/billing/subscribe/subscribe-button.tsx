@@ -50,7 +50,7 @@ export function SubscribeButton({ tier, label }: SubscribeButtonProps) {
         {loading ? "Starting checkout…" : label}
       </Button>
       {error ? (
-        <p role="alert" className="text-mini text-danger-500">
+        <p role="alert" className="text-mini text-danger-700">
           {error}
         </p>
       ) : null}
