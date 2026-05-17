@@ -57,11 +57,57 @@ export async function seedTestMerchant(): Promise<void> {
   }
 }
 
+/**
+ * Gives the test merchant an active Growth subscription mirror row so the
+ * billing settings page renders the "Manage billing" (portal) state.
+ */
+export async function seedTestSubscription(): Promise<void> {
+  const env = loadEnv();
+  const pg = new PgClient({ connectionString: env.supabaseDbUrl });
+  await pg.connect();
+  try {
+    const { rows } = await pg.query<{ id: string }>(
+      `select id from public.merchants where shopify_shop_domain = $1`,
+      [TEST_MERCHANT_SHOP],
+    );
+    const merchantId = rows[0]?.id;
+    if (!merchantId) throw new Error("seedTestSubscription: test merchant not found");
+    await pg.query(
+      `update public.merchants
+         set stripe_customer_id = 'cus_e2e_test',
+             subscription_tier = 'growth',
+             subscription_status = 'active'
+       where id = $1`,
+      [merchantId],
+    );
+    await pg.query(
+      `insert into public.merchant_subscriptions
+         (merchant_id, stripe_subscription_id, tier, status,
+          current_period_start, current_period_end)
+       values ($1, 'sub_e2e_test', 'growth', 'active', now(), now() + interval '30 days')
+       on conflict (merchant_id) do update
+         set tier = 'growth', status = 'active'`,
+      [merchantId],
+    );
+  } finally {
+    await pg.end();
+  }
+}
+
 export async function removeTestMerchant(): Promise<void> {
   const env = loadEnv();
   const pg = new PgClient({ connectionString: env.supabaseDbUrl });
   await pg.connect();
   try {
+    // merchant_subscriptions FKs merchants with ON DELETE RESTRICT — clear it
+    // first so removeTestMerchant works whether or not a subscription was seeded.
+    await pg.query(
+      `delete from public.merchant_subscriptions
+       where merchant_id in (
+         select id from public.merchants where shopify_shop_domain = $1
+       )`,
+      [TEST_MERCHANT_SHOP],
+    );
     await pg.query(
       `delete from public.merchants where shopify_shop_domain = $1`,
       [TEST_MERCHANT_SHOP],

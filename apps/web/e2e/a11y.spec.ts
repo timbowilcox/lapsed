@@ -14,7 +14,9 @@ const routes = [
   { name: "campaigns", path: "/app/campaigns" },
   { name: "conversations", path: "/app/conversations" },
   { name: "attribution", path: "/app/attribution" },
-  { name: "billing", path: "/app/billing" },
+  { name: "billing-settings", path: "/app/settings/billing" },
+  { name: "billing-subscribe", path: "/app/billing/subscribe" },
+  { name: "billing-success", path: "/app/billing/success" },
   { name: "settings", path: "/app/settings" },
 ];
 
