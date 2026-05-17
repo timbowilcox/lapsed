@@ -6,8 +6,11 @@
 // ground-truth order outcomes — a LAGGING signal: slow, but real.
 //
 //   recordOrderArrival     — an attributed order landed → order_alpha + 1
-//   recordNoOrderOutcome   — a treated customer's window closed with no order
-//                            → order_beta + 1
+//   recordNoOrderOutcome   — a cohort customer's window closed with no order.
+//                            Writes the no_order decision row for the audit
+//                            trail; moves order_beta + 1 ONLY when the customer
+//                            had an arm (a never-sent ITT customer is called
+//                            with armId = null → decision row only, no posterior)
 //   selectArm              — Thompson selection that routes to the order
 //                            posterior once it has ≥ 30 observations, else the
 //                            sentiment posterior
@@ -242,11 +245,17 @@ const RecordNoOrderInputSchema = z.object({
 export type RecordNoOrderInput = z.infer<typeof RecordNoOrderInputSchema>;
 
 /**
- * Records a treated customer whose attribution window closed with no order:
- * writes a `no_order` `attribution_decisions` row and fires the arm's ORDER
- * posterior with success=false. Idempotent per (campaign, customer).
+ * Records an ITT cohort customer whose attribution window closed with no
+ * order: writes a `no_order` `attribution_decisions` row and, when `armId` is
+ * non-null, fires that arm's ORDER posterior with success=false. Idempotent
+ * per (campaign, customer).
  *
- * Called by the attribution batch cron (chunk 9) at window-close.
+ * `armId` is null for a never-sent opt-out / cap-deferred customer (Sprint 09
+ * symmetric ITT): the decision row is still written for the ITT audit trail,
+ * but no posterior moves — a customer no arm reached carries no arm-efficacy
+ * signal (mid-sprint checkpoint ruling).
+ *
+ * Called by the attribution batch cron at window-close.
  */
 export async function recordNoOrderOutcome(
   client: LapsedSupabaseClient,

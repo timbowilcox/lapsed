@@ -333,10 +333,13 @@ describe("runAttributionBatch", () => {
   // Sprint 09 chunk 3 — bandit posterior over the ITT denominator (decision 27)
   // ───────────────────────────────────────────────────────────────────────────
 
-  it("fires order_beta for EVERY ITT no-order customer, including never-sent opt-outs", async () => {
+  it("writes a no_order decision for every ITT member; moves the posterior only for arm-exposed ones", async () => {
     // Cohort of 100: 60 sent-to + 40 opt-out/cap-deferred (never sent). 20 of
-    // the sent customers order. The bandit must see 80 failure observations
-    // (100 cohort − 20 orders), NOT 40 (the Sprint 08 as-attempted count).
+    // the sent customers order. A no_order decision row is written for all 80
+    // no-order customers (the ITT audit trail), but the bandit posterior moves
+    // only for the 40 SENT-no-order customers — the 40 never-sent customers
+    // were exposed to no arm and move no posterior (mid-sprint checkpoint:
+    // Position B). The campaign's effective reach lives in treatment_cohort_size.
     const { client, tables } = seedBatch({
       treatmentCount: 60,
       optOutCount: 40,
@@ -349,22 +352,23 @@ describe("runAttributionBatch", () => {
     expect(row.insufficient_evidence).toBe(false);
     expect(row.treatment_cohort_size).toBe(100); // full ITT denominator
 
-    // 20 attributed + 80 no_order decision rows.
+    // 20 attributed + 80 no_order decision rows — the full ITT audit trail.
     const decisions = tables.attribution_decisions ?? [];
     expect(decisions).toHaveLength(100);
     expect(decisions.filter((d) => d.decision_type === "no_order")).toHaveLength(80);
     expect(decisions.filter((d) => d.decision_type === "attributed")).toHaveLength(20);
 
-    // Posteriors: 20 order_alpha+1 and 80 order_beta+1 across the 3 arms.
+    // Posteriors move only for arm-exposed customers: 20 order_alpha (orders)
+    // + 40 order_beta (sent-no-order). The 40 never-sent move NO posterior.
     const totalAlpha = tables.bandit_state!.reduce((s, a) => s + (a.order_alpha as number), 0);
     const totalBeta = tables.bandit_state!.reduce((s, a) => s + (a.order_beta as number), 0);
     expect(totalAlpha).toBe(3 + 20);
-    expect(totalBeta).toBe(3 + 80); // 80, not 40 — the ITT denominator
+    expect(totalBeta).toBe(3 + 40); // 40 sent-no-order — NOT 80, never-sent excluded
     const totalObs = tables.bandit_state!.reduce(
       (s, a) => s + (a.order_observation_count as number),
       0,
     );
-    expect(totalObs).toBe(100);
+    expect(totalObs).toBe(60); // 20 + 40 arm-exposed observations, not 100
   });
 
   it("is idempotent — a re-run moves no posterior and writes no new decisions", async () => {
@@ -392,30 +396,31 @@ describe("runAttributionBatch", () => {
     expect(tables.attribution_results).toHaveLength(1);
   });
 
-  it("spreads never-sent opt-out failures across arms — never dumps them on one arm", async () => {
+  it("never-sent opt-out customers move no bandit posterior — only sent customers do", async () => {
     // 60 sent (even arm split via ARMS[i%3]) + 40 never-sent opt-outs, no
-    // orders → 100 no-order failures. The 60 sent-no-order land on their own
-    // arm (20 each); the 40 never-sent are cycled across the proportional
-    // sent-arm sequence. Every arm must receive a share of the never-sent
-    // failures — a bug that dumped all 40 on one arm would be caught here.
+    // orders. The 60 sent-no-order customers each move their own arm's
+    // order_beta (20 per arm). The 40 never-sent customers were exposed to no
+    // arm — they move NO posterior. Each arm therefore ends at exactly
+    // order_beta = 1 (prior) + 20 (its sent-no-order customers), and the
+    // never-sent failures are absent from the posterior entirely.
     const { client, tables } = seedBatch({
       treatmentCount: 60,
       optOutCount: 40,
       holdoutCount: 31,
-      // No orders — all 100 ITT customers are no-order failures.
+      // No orders — all 100 ITT customers are no-order; only 60 are arm-exposed.
     });
     await runAttributionBatch(client, { merchantId: MERCHANT, now: at(20) });
 
     const betas = tables.bandit_state!.map((a) => a.order_beta as number);
-    // Total: 3 arm priors (1 each) + 100 failures.
-    expect(betas.reduce((s, b) => s + b, 0)).toBe(3 + 100);
-    // Each arm got its 20 sent-no-order customers (order_beta ≥ 1 + 20) PLUS a
-    // share of the 40 never-sent — so strictly above 21, and well below the
-    // 1 + 20 + 40 = 61 a single-arm dump would produce.
+    // 3 arms, even split: each arm got exactly its 20 sent-no-order customers.
     for (const b of betas) {
-      expect(b).toBeGreaterThan(21); // received never-sent failures too
-      expect(b).toBeLessThan(61); // not all never-sent dumped here
+      expect(b).toBe(1 + 20);
     }
+    // Total order_beta = 3 priors + 60 sent-no-order — the 40 never-sent
+    // customers contribute NOTHING to the per-arm posterior.
+    expect(betas.reduce((s, b) => s + b, 0)).toBe(3 + 60);
+    // But all 100 ITT customers still have a no_order decision row (audit).
+    expect(tables.attribution_decisions ?? []).toHaveLength(100);
   });
 
   it("fires no posterior for never-sent customers when the campaign used no arms", async () => {
@@ -510,17 +515,22 @@ describe("runAttributionBatch", () => {
     const row = tables.attribution_results![0]!;
     expect(row.treatment_cohort_size).toBe(35);
     expect(row.insufficient_evidence).toBe(false); // ITT denominator cleared 30
-    // Posteriors fired: 8 order_alpha + 27 order_beta (35 cohort − 8 orders).
+    // Posteriors fired for arm-exposed customers only: 8 order_alpha (orders)
+    // + 17 order_beta (25 sent − 8 orders). The 10 never-sent opt-outs move no
+    // posterior — they count toward the cohort size but not the bandit signal.
     const totalAlpha = tables.bandit_state!.reduce((s, a) => s + (a.order_alpha as number), 0);
     const totalBeta = tables.bandit_state!.reduce((s, a) => s + (a.order_beta as number), 0);
     expect(totalAlpha).toBe(3 + 8);
-    expect(totalBeta).toBe(3 + 27);
+    expect(totalBeta).toBe(3 + 17);
   });
 
-  it("bounds the order posterior by the send rate — converges to 0.7 with 30% opt-out", async () => {
-    // 70 sent (100% of them order) + 30 never-sent opt-outs. Without ITT the
-    // observed order rate would be 70/70 = 1.0; under symmetric ITT the 30
-    // opt-out failures pull it to 70/100 = 0.7 — the campaign's effective reach.
+  it("keeps the order posterior a measure of arm efficacy among exposed customers", async () => {
+    // 70 sent (100% of them order) + 30 never-sent opt-outs. The bandit order
+    // posterior must converge to 1.0 — every customer an arm actually reached
+    // converted. The 30 opt-outs are NOT booked onto any arm: they were
+    // exposed to no arm, so they carry no signal about arm efficacy
+    // (mid-sprint checkpoint ruling, Position B). The campaign's 0.7 effective
+    // reach is recorded separately, in attribution_results.treatment_cohort_size.
     const { client, tables } = seedBatch({
       treatmentCount: 70,
       optOutCount: 30,
@@ -538,9 +548,12 @@ describe("runAttributionBatch", () => {
       0,
     );
     expect(successes).toBe(70);
-    expect(failures).toBe(30); // the opt-out tax — NOT zero
+    expect(failures).toBe(0); // never-sent opt-outs do NOT contaminate the posterior
     const observedRate = successes / (successes + failures);
-    expect(observedRate).toBeCloseTo(0.7, 5);
-    expect(observedRate).toBeLessThan(1.0); // the send-rate ceiling bites
+    expect(observedRate).toBe(1.0); // arm efficacy among reached customers
+
+    // The 0.7 effective reach IS recorded — in the ITT cohort size, not the bandit.
+    const row = tables.attribution_results![0]!;
+    expect(row.treatment_cohort_size).toBe(100); // 70 sent + 30 opt-out
   });
 });
