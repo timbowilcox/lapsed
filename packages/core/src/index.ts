@@ -190,6 +190,13 @@ export {
 } from "./stripe-client";
 
 export {
+  ensureStripeCustomer,
+  backfillStripeCustomers,
+  type EnsureStripeCustomerResult,
+  type BackfillStripeCustomersResult,
+} from "./ensure-stripe-customer";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,

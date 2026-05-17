@@ -12,7 +12,9 @@ import {
   decodeEncryptionKey,
   encryptToken,
 } from "@lapsed/db";
+import { ensureStripeCustomer } from "@lapsed/core";
 import { serverEnv } from "@/app/lib/env";
+import { billingStripeClient } from "@/app/lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,6 +110,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error || !merchantRow) {
     console.warn(`merchant_upsert_failed code=${error?.code ?? "unknown"}`);
     return NextResponse.json({ error: "persistence_failed" }, { status: 500 });
+  }
+
+  // Decision 28: every merchant gets a Stripe customer at onboarding, before
+  // they ever subscribe. Idempotent — a re-install of an existing merchant
+  // (whose stripe_customer_id is already set) is a no-op. Best-effort: a
+  // Stripe outage must NOT block the install, so a failure is logged
+  // `level:critical` and onboarding proceeds; the customer is re-provisioned
+  // on the first subscription attempt or by the one-shot backfill.
+  try {
+    await ensureStripeCustomer(admin, billingStripeClient(), merchantRow.id);
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        event: "onboarding_stripe_customer_failed",
+        level: "critical",
+        merchant_id: merchantRow.id,
+        error: (e as Error).message,
+      }),
+    );
   }
 
   // Schedule background extraction via `after` (Next.js 15.1 stable API).
