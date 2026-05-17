@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/sweep-no-reply",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/attribution-batch",
+      "schedule": "0 6 * * *"
     }
   ]
 }

@@ -222,7 +222,9 @@ async function loadBanditStates(
 ): Promise<BanditState[]> {
   const { data, error } = await serviceClient
     .from("bandit_state")
-    .select("arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at")
+    .select(
+      "arm_id, merchant_id, proposal_id, sentiment_alpha, sentiment_beta, observation_count, last_updated_at",
+    )
     .eq("merchant_id", merchantId)
     .eq("proposal_id", proposalId);
   if (error) throw error;
@@ -230,8 +232,8 @@ async function loadBanditStates(
     armId: row.arm_id,
     merchantId: row.merchant_id,
     proposalId: row.proposal_id,
-    alpha: row.alpha,
-    beta: row.beta,
+    alpha: row.sentiment_alpha,
+    beta: row.sentiment_beta,
     observationCount: row.observation_count,
     lastUpdatedAt: row.last_updated_at,
   }));

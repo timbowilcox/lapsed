@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { LapsedSupabaseClient, Json } from "@lapsed/db";
 import { appendCampaignEvent, materializeCampaign, type CampaignStatus } from "./campaign-events";
 import { initializeBanditArm } from "./bandit";
+import { getAttributionWindow } from "./attribution-config";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // approveProposal
@@ -68,6 +69,37 @@ export async function approveProposal(
 
   const alreadyApproved = before.status === "approved";
   if (!alreadyApproved) {
+    // Stamp the merchant's current attribution window onto the proposal
+    // (decision 20). This happens BEFORE the campaign_approved event, per the
+    // SPRINT.md chunk-3 spec, so the window is fixed as part of becoming
+    // approved.
+    //
+    // Decision-20 immutability holds across a crash between this stamp and the
+    // event append: the proposal is still `proposed` (NOT approved) until the
+    // campaign_approved event lands, so a retry legitimately re-enters this
+    // branch and re-stamps with the merchant's then-current window. Decision 20
+    // guarantees immutability AFTER approval — a pre-approval re-stamp is the
+    // correct behaviour (the approval, hence the window, is finalised at the
+    // moment the event is recorded). Once approved, no code path UPDATEs this
+    // column again. A later change to the merchant default affects only future
+    // approvals, keeping reported lift figures deterministic and auditable.
+    const attributionWindowDays = await getAttributionWindow(serviceClient, merchantId);
+    const { data: stamped, error: stampErr } = await serviceClient
+      .from("campaign_proposals")
+      .update({ attribution_window_days: attributionWindowDays })
+      .eq("id", proposalId)
+      .eq("merchant_id", merchantId)
+      .select("id");
+    if (stampErr) throw stampErr;
+    // materializeCampaign above already proved existence + tenancy; a zero-row
+    // stamp would mean the row vanished mid-call — fail loud rather than
+    // append an approval event for an unstamped proposal.
+    if (!stamped || stamped.length === 0) {
+      throw new Error(
+        `approveProposal: attribution-window stamp matched no row for proposal ${proposalId}`,
+      );
+    }
+
     await appendCampaignEvent(serviceClient, {
       eventType: "campaign_approved",
       merchantId,

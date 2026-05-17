@@ -105,6 +105,69 @@ export {
 } from "./campaign-events";
 
 export {
+  getAttributionWindow,
+  getLtvEvaluationWindow,
+  ATTRIBUTION_WINDOW_DAYS_DEFAULT,
+  LTV_EVALUATION_WINDOW_DAYS_DEFAULT,
+} from "./attribution-config";
+
+export {
+  getTreatmentCohort,
+  getTreatmentOrders,
+  type CampaignOutbound,
+  type AttributedOrder,
+  type TreatmentCohortResult,
+  type TreatmentOrdersResult,
+} from "./attribution-treatment";
+
+export {
+  getHoldoutCohort,
+  getHoldoutOrders,
+  type CalendarWindow,
+  type HoldoutCohortResult,
+  type HoldoutOrder,
+  type HoldoutOrdersResult,
+} from "./attribution-holdout";
+
+export {
+  welchConfidenceInterval,
+  studentTCdf,
+  studentTQuantile,
+  type WelchResult,
+} from "./stats/welch";
+
+export {
+  computeIncrementalRevenue,
+  campaignCalendarWindow,
+  INSUFFICIENT_EVIDENCE_MIN_COHORT,
+  type IncrementalRevenueResult,
+} from "./incremental-revenue";
+
+export {
+  recordOrderArrival,
+  recordNoOrderOutcome,
+  selectArm,
+  ORDER_POSTERIOR_MIN_OBSERVATIONS,
+  type RecordOrderArrivalInput,
+  type RecordNoOrderInput,
+  type RecordOutcomeResult,
+  type PosteriorSource,
+  type ArmPosteriorChoice,
+  type ArmSelection,
+} from "./bandit-order";
+
+export {
+  computeLtvRestoration,
+  type LtvRestorationResult,
+} from "./ltv-restoration";
+
+export {
+  runAttributionBatch,
+  type RunAttributionBatchOptions,
+  type AttributionBatchResult,
+} from "./attribution-batch";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,

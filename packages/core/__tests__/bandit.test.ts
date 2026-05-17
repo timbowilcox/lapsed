@@ -409,16 +409,23 @@ function makeMockClient(config: MockConfig = {}) {
   return { client, inserts, updates };
 }
 
+// alpha/beta in overrides map to the sentiment posterior columns (migration
+// 0009 renamed bandit_state.alpha/beta to sentiment_alpha/sentiment_beta).
 function banditRow(overrides: Record<string, unknown> = {}) {
+  const { alpha, beta, ...rest } = overrides;
   return {
     arm_id: ARM_A,
     merchant_id: MERCHANT_ID,
     proposal_id: PROPOSAL_ID,
-    alpha: 1,
-    beta: 1,
+    sentiment_alpha: alpha ?? 1,
+    sentiment_beta: beta ?? 1,
     observation_count: 0,
     last_updated_at: "2026-05-16T00:00:00.000Z",
-    ...overrides,
+    order_alpha: 1,
+    order_beta: 1,
+    order_observation_count: 0,
+    order_last_updated_at: null,
+    ...rest,
   };
 }
 
@@ -445,8 +452,8 @@ describe("initializeBanditArm", () => {
       arm_id: ARM_A,
       merchant_id: MERCHANT_ID,
       proposal_id: PROPOSAL_ID,
-      alpha: 1,
-      beta: 1,
+      sentiment_alpha: 1,
+      sentiment_beta: 1,
       observation_count: 0,
     });
   });
@@ -597,8 +604,8 @@ describe("updatePosterior", () => {
     });
     expect(updates).toHaveLength(1);
     expect(updates[0]!.row).toEqual({
-      alpha: 4,
-      beta: 5,
+      sentiment_alpha: 4,
+      sentiment_beta: 5,
       observation_count: 7,
       last_updated_at: "2026-05-16T12:00:00.000Z",
     });
@@ -613,7 +620,11 @@ describe("updatePosterior", () => {
     await updatePosterior(client, ARM_A, false, {
       now: () => new Date("2026-05-16T12:00:00.000Z"),
     });
-    expect(updates[0]!.row).toMatchObject({ alpha: 3, beta: 6, observation_count: 7 });
+    expect(updates[0]!.row).toMatchObject({
+      sentiment_alpha: 3,
+      sentiment_beta: 6,
+      observation_count: 7,
+    });
   });
 
   it("starts from the neutral prior — first success yields Beta(2,1)", async () => {
@@ -622,7 +633,11 @@ describe("updatePosterior", () => {
       updatedRow: banditRow({ alpha: 2, beta: 1, observation_count: 1 }),
     });
     await updatePosterior(client, ARM_A, true);
-    expect(updates[0]!.row).toMatchObject({ alpha: 2, beta: 1, observation_count: 1 });
+    expect(updates[0]!.row).toMatchObject({
+      sentiment_alpha: 2,
+      sentiment_beta: 1,
+      observation_count: 1,
+    });
   });
 
   it("the update payload never includes an identity column (decision 14)", async () => {
@@ -634,10 +649,10 @@ describe("updatePosterior", () => {
       now: () => new Date("2026-05-16T12:00:00.000Z"),
     });
     expect(Object.keys(updates[0]!.row).sort()).toEqual([
-      "alpha",
-      "beta",
       "last_updated_at",
       "observation_count",
+      "sentiment_alpha",
+      "sentiment_beta",
     ]);
   });
 

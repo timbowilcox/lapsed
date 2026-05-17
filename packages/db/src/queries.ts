@@ -861,7 +861,7 @@ export async function getProposalById(
 
   const { data: banditRows, error: banditErr } = await client
     .from("bandit_state")
-    .select("arm_id, alpha, beta, observation_count, last_updated_at")
+    .select("arm_id, sentiment_alpha, sentiment_beta, observation_count, last_updated_at")
     .eq("merchant_id", merchantId)
     .eq("proposal_id", proposalId);
   if (banditErr) throw banditErr;
@@ -884,8 +884,8 @@ export async function getProposalById(
     variants: variantsByProposal.get(proposalId) ?? [],
     banditState: (banditRows ?? []).map((b) => ({
       armId: b.arm_id,
-      alpha: b.alpha,
-      beta: b.beta,
+      alpha: b.sentiment_alpha,
+      beta: b.sentiment_beta,
       observationCount: b.observation_count,
       lastUpdatedAt: b.last_updated_at,
     })),
@@ -1412,4 +1412,179 @@ export async function getConversationThread(
 export function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Attribution views — Sprint 08 chunks 10-11. Read-only projections over the
+// cron-materialised attribution_results + attribution_decisions tables.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AttributionResultRow =
+  Database["public"]["Tables"]["attribution_results"]["Row"];
+
+export interface AttributedOrderView {
+  decisionId: string;
+  orderId: string;
+  customerId: string;
+  attributedMessageId: string | null;
+  decidedAt: string;
+  totalPriceCents: number;
+  placedAt: string;
+}
+
+export interface CampaignAttributionView {
+  campaignId: string;
+  groupSlug: string;
+  attributionWindowDays: number;
+  /** Latest materialised result; null until the attribution batch has run. */
+  result: AttributionResultRow | null;
+  attributedOrders: AttributedOrderView[];
+}
+
+/**
+ * Per-campaign attribution view (chunk 10). Returns null when the campaign
+ * proposal does not exist for this merchant — the page answers 404 without
+ * leaking existence. The `result` is null until the attribution batch cron has
+ * materialised a row.
+ */
+export async function getCampaignAttribution(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  campaignId: string,
+): Promise<CampaignAttributionView | null> {
+  const { data: proposal, error: pErr } = await client
+    .from("campaign_proposals")
+    .select("group_slug, attribution_window_days")
+    .eq("id", campaignId)
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (pErr) throw pErr;
+  if (!proposal) return null;
+
+  const { data: resultRow, error: rErr } = await client
+    .from("attribution_results")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .eq("merchant_id", merchantId)
+    .order("window_close_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (rErr) throw rErr;
+
+  // Cap the attributed-orders list — the headline numbers come from the
+  // materialised attribution_results row, so this table is illustrative; the
+  // 200 most-recent keeps the .in() below comfortably within URL limits.
+  const { data: decisionRows, error: dErr } = await client
+    .from("attribution_decisions")
+    .select("id, order_id, customer_id, attributed_message_id, decided_at")
+    .eq("merchant_id", merchantId)
+    .eq("attributed_campaign_id", campaignId)
+    .eq("decision_type", "attributed")
+    .order("decided_at", { ascending: false })
+    .limit(200);
+  if (dErr) throw dErr;
+
+  const decisions = (decisionRows ?? []).filter(
+    (d): d is typeof d & { order_id: string } => d.order_id !== null,
+  );
+  const orderIds = decisions.map((d) => d.order_id);
+  const ordersById = new Map<string, { total_price_cents: number; shopify_created_at: string }>();
+  if (orderIds.length > 0) {
+    const { data: orderRows, error: oErr } = await client
+      .from("orders")
+      .select("id, total_price_cents, shopify_created_at")
+      .eq("merchant_id", merchantId)
+      .in("id", orderIds);
+    if (oErr) throw oErr;
+    for (const o of orderRows ?? []) {
+      ordersById.set(o.id, {
+        total_price_cents: o.total_price_cents,
+        shopify_created_at: o.shopify_created_at,
+      });
+    }
+  }
+
+  // A decision whose order row is absent is a data anomaly — omit it rather
+  // than render a misleading $0 order that understates attributed revenue.
+  const attributedOrders: AttributedOrderView[] = decisions
+    .filter((d) => ordersById.has(d.order_id))
+    .map((d) => {
+      const o = ordersById.get(d.order_id)!;
+      return {
+        decisionId: d.id,
+        orderId: d.order_id,
+        customerId: d.customer_id ?? "",
+        attributedMessageId: d.attributed_message_id,
+        decidedAt: d.decided_at,
+        totalPriceCents: o.total_price_cents,
+        placedAt: o.shopify_created_at,
+      };
+    });
+
+  return {
+    campaignId,
+    groupSlug: proposal.group_slug,
+    attributionWindowDays: proposal.attribution_window_days,
+    result: (resultRow as AttributionResultRow | null) ?? null,
+    attributedOrders,
+  };
+}
+
+export interface MerchantAttributionCampaign {
+  campaignId: string;
+  groupSlug: string;
+  windowCloseDate: string;
+  treatmentCohortSize: number;
+  holdoutCohortSize: number;
+  incrementalRevenueCents: number;
+  ltvRestoredCents: number;
+  insufficientEvidence: boolean;
+}
+
+export interface MerchantAttributionRollup {
+  /** Every materialised attribution result for the merchant, newest first. */
+  campaigns: MerchantAttributionCampaign[];
+}
+
+/**
+ * Merchant-wide attribution rollup (chunk 11). One entry per materialised
+ * attribution_results row, joined to its proposal's group slug. The UI does the
+ * 30/90/all-time windowing + aggregation from this flat list.
+ */
+export async function getMerchantAttributionRollup(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<MerchantAttributionRollup> {
+  const { data: resultRows, error: rErr } = await client
+    .from("attribution_results")
+    .select("campaign_id, window_close_date, treatment_cohort_size, holdout_cohort_size, incremental_revenue_cents, ltv_restored_cents, insufficient_evidence")
+    .eq("merchant_id", merchantId)
+    .order("window_close_date", { ascending: false });
+  if (rErr) throw rErr;
+  const results = resultRows ?? [];
+
+  const campaignIds = [...new Set(results.map((r) => r.campaign_id))];
+  const groupByCampaign = new Map<string, string>();
+  if (campaignIds.length > 0) {
+    const { data: proposalRows, error: pErr } = await client
+      .from("campaign_proposals")
+      .select("id, group_slug")
+      .eq("merchant_id", merchantId)
+      .in("id", campaignIds);
+    if (pErr) throw pErr;
+    for (const p of proposalRows ?? []) groupByCampaign.set(p.id, p.group_slug);
+  }
+
+  return {
+    campaigns: results.map((r) => ({
+      campaignId: r.campaign_id,
+      groupSlug: groupByCampaign.get(r.campaign_id) ?? "unknown",
+      windowCloseDate: r.window_close_date,
+      treatmentCohortSize: r.treatment_cohort_size,
+      holdoutCohortSize: r.holdout_cohort_size,
+      incrementalRevenueCents: r.incremental_revenue_cents,
+      ltvRestoredCents: r.ltv_restored_cents,
+      insufficientEvidence: r.insufficient_evidence,
+    })),
+  };
 }

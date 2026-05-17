@@ -110,9 +110,13 @@ function seedApprovedCampaign() {
       arm_id: armId,
       merchant_id: MERCHANT,
       proposal_id: PROPOSAL,
-      alpha: 1,
-      beta: 1,
+      sentiment_alpha: 1,
+      sentiment_beta: 1,
       observation_count: 0,
+      order_alpha: 1,
+      order_beta: 1,
+      order_observation_count: 0,
+      order_last_updated_at: null,
     })),
     campaign_group_snapshots: [
       { proposal_id: PROPOSAL, merchant_id: MERCHANT, customer_id: CUSTOMER, included_in_holdout: false },
@@ -192,8 +196,8 @@ describe("conversation engine — end-to-end flow (chunk 12)", () => {
     // ── 3. The bandit posterior moved on the sampled arm (positive+purchase
     //       → success → alpha + 1) ───────────────────────────────────────────
     const armState = (fake.tables.bandit_state ?? []).find((b) => b.arm_id === sampledArm) as FakeRow;
-    expect(armState.alpha).toBe(2);
-    expect(armState.beta).toBe(1);
+    expect(armState.sentiment_alpha).toBe(2);
+    expect(armState.sentiment_beta).toBe(1);
 
     // ── 4. The customer texts STOP — opted out, dual-recorded ────────────────
     const stop = await handleInboundMessage(deps, {
@@ -256,8 +260,8 @@ describe("conversation engine — end-to-end flow (chunk 12)", () => {
     const retry = await handleInboundMessage(deps, inboundInput);
     expect(retry.outcome).toBe("duplicate");
     const armState = (fake.tables.bandit_state ?? []).find((b) => b.arm_id === sampledArm) as FakeRow;
-    // alpha stayed at 2 — the posterior was not double-counted.
-    expect(armState.alpha).toBe(2);
+    // sentiment_alpha stayed at 2 — the posterior was not double-counted.
+    expect(armState.sentiment_alpha).toBe(2);
     // Neither Sonnet call was re-invoked on the retry (decision 17 — the
     // dedup short-circuit happens before any LLM call).
     expect(classify.calls()).toBe(callsAfterFirst.classify);

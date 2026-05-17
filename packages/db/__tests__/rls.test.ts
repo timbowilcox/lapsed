@@ -94,10 +94,12 @@ beforeAll(async () => {
            'customer_events','order_events',
            'customers','scoring_runs',
            'storefront_snapshots','voice_events','voice_versions','agent_profiles',
-           'conversations','messages','message_events','customer_opt_outs'
+           'conversations','messages','message_events','customer_opt_outs',
+           'merchant_attribution_config','attribution_results',
+           'attribution_decisions','ltv_snapshots'
          )`,
     );
-    if ((rows[0]?.count ?? 0) < 12) {
+    if ((rows[0]?.count ?? 0) < 16) {
       schemaReady = false;
       console.warn("[rls.test] Required tables missing — skipping all RLS tests");
       return;
@@ -290,6 +292,66 @@ beforeAll(async () => {
         merchantIdB, versionIdByMerchant.get(merchantIdB),
       ],
     );
+
+    // Sprint 08: campaign_proposals — one per merchant, parent of the
+    // attribution tables seeded below.
+    const proposalRes = await pg.query<{ id: string; merchant_id: string }>(
+      `insert into public.campaign_proposals
+         (merchant_id, group_slug, model_version)
+       values ($1, 'lapsed_vips', 'claude-sonnet-4-6-test'),
+              ($2, 'lapsed_vips', 'claude-sonnet-4-6-test')
+       returning id, merchant_id`,
+      [merchantIdA, merchantIdB],
+    );
+    const proposalIdByMerchant = new Map<string, string>();
+    for (const row of proposalRes.rows) proposalIdByMerchant.set(row.merchant_id, row.id);
+
+    // Sprint 08: merchant_attribution_config — one per merchant
+    await pg.query(
+      `insert into public.merchant_attribution_config (merchant_id)
+       values ($1), ($2)`,
+      [merchantIdA, merchantIdB],
+    );
+
+    // Sprint 08: attribution_results — one per merchant
+    await pg.query(
+      `insert into public.attribution_results
+         (merchant_id, campaign_id, window_close_date, treatment_cohort_size,
+          holdout_cohort_size, treatment_revenue_cents, holdout_revenue_cents,
+          incremental_revenue_cents, ltv_restored_cents)
+       values ($1, $2, current_date, 40, 10, 200000, 30000, 170000, 150000),
+              ($3, $4, current_date, 40, 10, 200000, 30000, 170000, 150000)`,
+      [
+        merchantIdA, proposalIdByMerchant.get(merchantIdA),
+        merchantIdB, proposalIdByMerchant.get(merchantIdB),
+      ],
+    );
+
+    // Sprint 08: attribution_decisions — one 'no_order' decision per merchant
+    await pg.query(
+      `insert into public.attribution_decisions
+         (merchant_id, customer_id, decision_type, attributed_campaign_id,
+          attribution_window_days)
+       values ($1, $2, 'no_order', $3, 14),
+              ($4, $5, 'no_order', $6, 14)`,
+      [
+        merchantIdA, GID_A, proposalIdByMerchant.get(merchantIdA),
+        merchantIdB, GID_B, proposalIdByMerchant.get(merchantIdB),
+      ],
+    );
+
+    // Sprint 08: ltv_snapshots — one per merchant
+    await pg.query(
+      `insert into public.ltv_snapshots
+         (merchant_id, campaign_id, customer_id, pre_30d_revenue_cents,
+          post_30d_revenue_cents, delta_cents)
+       values ($1, $2, $3, 10000, 25000, 15000),
+              ($4, $5, $6, 10000, 25000, 15000)`,
+      [
+        merchantIdA, proposalIdByMerchant.get(merchantIdA), GID_A,
+        merchantIdB, proposalIdByMerchant.get(merchantIdB), GID_B,
+      ],
+    );
   } finally {
     await pg.end();
   }
@@ -332,6 +394,12 @@ afterAll(async () => {
     );
     await pg.query(
       `delete from public.order_events where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    // Sprint 08: attribution_decisions is append-only — delete it here while
+    // session_replication_role='replica' disables its triggers.
+    await pg.query(
+      `delete from public.attribution_decisions where merchant_id = any($1::uuid[])`,
       [[merchantIdA, merchantIdB]],
     );
     await pg.query(
@@ -387,6 +455,25 @@ afterAll(async () => {
     );
 
     await pg.query(`set session_replication_role = 'origin'`);
+
+    // Sprint 08: attribution tables (delete before campaign_proposals + merchants
+    // due to RESTRICT FKs).
+    await pg.query(
+      `delete from public.attribution_results where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.ltv_snapshots where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.merchant_attribution_config where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    await pg.query(
+      `delete from public.campaign_proposals where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
 
     // Merchants last — all RESTRICT FKs are now satisfied.
     await pg.query(
@@ -1631,6 +1718,191 @@ describe.skipIf(!SUPABASE_AVAILABLE)("Idempotency constraints — Sprint 07 tabl
       await pg.query(
         `delete from public.message_events
          where merchant_id = $1 and event_type = 'reply_sent'`,
+        [merchantIdA],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — merchant_attribution_config (Sprint 08)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — merchant_attribution_config", () => {
+  it("merchant A sees only their own config row", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("merchant_attribution_config")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBe(1);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's config", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("merchant_attribution_config")
+      .select("merchant_id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — attribution_results (Sprint 08)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — attribution_results", () => {
+  it("merchant A sees only their own attribution results", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("attribution_results")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's attribution results", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("attribution_results")
+      .select("id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — attribution_decisions (Sprint 08)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — attribution_decisions", () => {
+  it("merchant A sees only their own attribution decisions", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("attribution_decisions")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's attribution decisions", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("attribution_decisions")
+      .select("id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — ltv_snapshots (Sprint 08)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — ltv_snapshots", () => {
+  it("merchant A sees only their own ltv snapshots", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("ltv_snapshots")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's ltv snapshots", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("ltv_snapshots")
+      .select("id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Append-only triggers — attribution_decisions (Sprint 08, decision 21)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — attribution_decisions", () => {
+  it("UPDATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `update public.attribution_decisions set attribution_window_days = 21
+           where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("DELETE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `delete from public.attribution_decisions where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("TRUNCATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(pg.query(`truncate public.attribution_decisions`)).rejects.toThrow(
+        /append-only/i,
+      );
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Single-attribution invariant — attribution_decisions(order_id) partial UNIQUE
+// (Sprint 08, decision 21)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Single-attribution — attribution_decisions(order_id)", () => {
+  it("rejects a second 'attributed' decision for the same order_id", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      const { rows } = await pg.query<{ id: string }>(
+        `select id from public.orders where merchant_id = $1 limit 1`,
+        [merchantIdA],
+      );
+      const orderId = rows[0]!.id;
+      // First attribution for the order — accepted.
+      await pg.query(
+        `insert into public.attribution_decisions
+           (merchant_id, order_id, decision_type, attribution_window_days)
+         values ($1, $2, 'attributed', 14)`,
+        [merchantIdA, orderId],
+      );
+      // A second decision for the SAME order must be rejected by the partial
+      // unique index — single-attribution per order (decision 21).
+      await expect(
+        pg.query(
+          `insert into public.attribution_decisions
+             (merchant_id, order_id, decision_type, attribution_window_days)
+           values ($1, $2, 'attributed', 14)`,
+          [merchantIdA, orderId],
+        ),
+      ).rejects.toThrow(/attribution_decisions_order_unique|unique/i);
+    } finally {
+      // Cleanup via session_replication_role to bypass the append-only trigger.
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.attribution_decisions
+         where merchant_id = $1 and decision_type = 'attributed'`,
         [merchantIdA],
       );
       await pg.query(`set session_replication_role = 'origin'`);

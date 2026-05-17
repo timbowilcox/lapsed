@@ -328,22 +328,25 @@ interface BanditStateRow {
   arm_id: string;
   merchant_id: string;
   proposal_id: string;
-  alpha: number;
-  beta: number;
+  // Sprint 08: alpha/beta renamed to sentiment_alpha/sentiment_beta in
+  // migration 0009. This module owns the sentiment posterior (Sprint 07's
+  // leading signal); the order posterior is owned by bandit-order.ts.
+  sentiment_alpha: number;
+  sentiment_beta: number;
   observation_count: number;
   last_updated_at: string;
 }
 
 const BANDIT_STATE_COLUMNS =
-  "arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at";
+  "arm_id, merchant_id, proposal_id, sentiment_alpha, sentiment_beta, observation_count, last_updated_at";
 
 function toBanditState(row: BanditStateRow): BanditState {
   return {
     armId: row.arm_id,
     merchantId: row.merchant_id,
     proposalId: row.proposal_id,
-    alpha: row.alpha,
-    beta: row.beta,
+    alpha: row.sentiment_alpha,
+    beta: row.sentiment_beta,
     observationCount: row.observation_count,
     lastUpdatedAt: row.last_updated_at,
   };
@@ -413,8 +416,8 @@ export async function initializeBanditArm(
       arm_id: v.armId,
       merchant_id: v.merchantId,
       proposal_id: v.proposalId,
-      alpha: NEUTRAL_PRIOR.alpha,
-      beta: NEUTRAL_PRIOR.beta,
+      sentiment_alpha: NEUTRAL_PRIOR.alpha,
+      sentiment_beta: NEUTRAL_PRIOR.beta,
       observation_count: 0,
     })
     .select(BANDIT_STATE_COLUMNS)
@@ -461,7 +464,7 @@ export async function updatePosterior(
 
   const { data: current, error: readErr } = await serviceClient
     .from("bandit_state")
-    .select("arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at")
+    .select(BANDIT_STATE_COLUMNS)
     .eq("arm_id", armId)
     .maybeSingle();
   if (readErr) throw readErr;
@@ -470,21 +473,21 @@ export async function updatePosterior(
   }
 
   const row = current as BanditStateRow;
-  const nextAlpha = row.alpha + (success ? 1 : 0);
-  const nextBeta = row.beta + (success ? 0 : 1);
+  const nextAlpha = row.sentiment_alpha + (success ? 1 : 0);
+  const nextBeta = row.sentiment_beta + (success ? 0 : 1);
   const nextObservationCount = row.observation_count + 1;
   const lastUpdatedAt = now().toISOString();
 
   const { data: updated, error: upErr } = await serviceClient
     .from("bandit_state")
     .update({
-      alpha: nextAlpha,
-      beta: nextBeta,
+      sentiment_alpha: nextAlpha,
+      sentiment_beta: nextBeta,
       observation_count: nextObservationCount,
       last_updated_at: lastUpdatedAt,
     })
     .eq("arm_id", armId)
-    .select("arm_id, merchant_id, proposal_id, alpha, beta, observation_count, last_updated_at")
+    .select(BANDIT_STATE_COLUMNS)
     .maybeSingle();
   if (upErr) throw upErr;
   if (!updated) {

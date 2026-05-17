@@ -14,6 +14,7 @@ function proposalRow(id: string, overrides: FakeRow = {}): FakeRow {
     group_slug: "lapsed_vips",
     version_number: 1,
     status: "proposed",
+    attribution_window_days: 14,
     model_version: "claude-sonnet-4-6",
     generated_at: "2026-05-16T10:00:00.000Z",
     created_at: "2026-05-16T10:00:00.000Z",
@@ -102,6 +103,60 @@ describe("approveProposal", () => {
     expect(tables.campaign_proposals![0]!.approved_by_user_id).toBe(USER_ID);
   });
 
+  it("stamps the default attribution window (14) when the merchant has no config", async () => {
+    const pid = randomUUID();
+    const seed = seedPendingProposal(pid);
+    // No merchant_attribution_config row → getAttributionWindow returns 14.
+    const { client, tables } = makeFakeSupabase(seed);
+    await approveProposal(client, MERCHANT_ID, pid, USER_ID);
+    expect(tables.campaign_proposals![0]!.attribution_window_days).toBe(14);
+  });
+
+  it("stamps the merchant's configured attribution window at approval time", async () => {
+    const pid = randomUUID();
+    const seed = {
+      ...seedPendingProposal(pid),
+      merchant_attribution_config: [
+        { merchant_id: MERCHANT_ID, attribution_window_days: 21, ltv_evaluation_window_days: 30 },
+      ],
+    };
+    const { client, tables } = makeFakeSupabase(seed);
+    await approveProposal(client, MERCHANT_ID, pid, USER_ID);
+    expect(tables.campaign_proposals![0]!.attribution_window_days).toBe(21);
+  });
+
+  it("the stamped window is immutable — a later merchant-config change does not move it", async () => {
+    const pid = randomUUID();
+    const seed = {
+      ...seedPendingProposal(pid),
+      merchant_attribution_config: [
+        { merchant_id: MERCHANT_ID, attribution_window_days: 21, ltv_evaluation_window_days: 30 },
+      ],
+    };
+    const { client, tables } = makeFakeSupabase(seed);
+    await approveProposal(client, MERCHANT_ID, pid, USER_ID);
+    expect(tables.campaign_proposals![0]!.attribution_window_days).toBe(21);
+
+    // The merchant changes their default AFTER approval.
+    tables.merchant_attribution_config![0]!.attribution_window_days = 7;
+    // A re-approve is a no-op (already approved) and must NOT re-stamp.
+    await approveProposal(client, MERCHANT_ID, pid, USER_ID);
+    expect(tables.campaign_proposals![0]!.attribution_window_days).toBe(21);
+  });
+
+  it("aborts approval (no campaign_approved event) when the window stamp fails", async () => {
+    const pid = randomUUID();
+    const { client, tables } = makeFakeSupabase(seedPendingProposal(pid), {
+      failOn: [{ table: "campaign_proposals", op: "update" }],
+    });
+    await expect(approveProposal(client, MERCHANT_ID, pid, USER_ID)).rejects.toThrow(/fake error/);
+    // The stamp failed before the event append — the proposal must NOT be
+    // recorded as approved.
+    expect(
+      (tables.campaign_events ?? []).filter((e) => e.event_type === "campaign_approved"),
+    ).toHaveLength(0);
+  });
+
   it("initializes a Beta(1,1) bandit_state row for each of the three arms", async () => {
     const pid = randomUUID();
     const { client, tables } = makeFakeSupabase(seedPendingProposal(pid));
@@ -110,8 +165,8 @@ describe("approveProposal", () => {
     expect(result.initializedArmIds).toHaveLength(3);
     expect(tables.bandit_state).toHaveLength(3);
     for (const row of tables.bandit_state!) {
-      expect(row.alpha).toBe(1);
-      expect(row.beta).toBe(1);
+      expect(row.sentiment_alpha).toBe(1);
+      expect(row.sentiment_beta).toBe(1);
       expect(row.observation_count).toBe(0);
       expect(row.proposal_id).toBe(pid);
     }

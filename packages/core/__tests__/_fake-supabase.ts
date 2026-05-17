@@ -45,10 +45,14 @@ function applyDefaults(table: string, input: FakeRow): FakeRow {
     r.payload ??= {};
   }
   if (table === "bandit_state") {
-    r.alpha ??= 1;
-    r.beta ??= 1;
+    r.sentiment_alpha ??= 1;
+    r.sentiment_beta ??= 1;
     r.observation_count ??= 0;
     r.last_updated_at ??= nowIso;
+    r.order_alpha ??= 1;
+    r.order_beta ??= 1;
+    r.order_observation_count ??= 0;
+    r.order_last_updated_at ??= null;
     r.created_at ??= nowIso;
   }
   if (table === "campaign_group_snapshots") {
@@ -121,6 +125,8 @@ export function makeFakeSupabase(
     const filters: Filter[] = [];
     const orders: Array<{ col: string; asc: boolean }> = [];
     let limitN: number | null = null;
+    let rangeFrom: number | null = null;
+    let rangeTo: number | null = null;
     let wantSingle = false;
     let wantMaybeSingle = false;
     let countHead = false;
@@ -147,11 +153,15 @@ export function makeFakeSupabase(
         const ignoreDuplicates = upsertOpts?.ignoreDuplicates === true;
         for (const raw of rowsArr) {
           const row = applyDefaults(table, raw);
-          if (ignoreDuplicates && conflictCols.length > 0) {
-            const dup = tableOf(table).some((existing) =>
-              conflictCols.every((col) => existing[col] === row[col]),
+          if (conflictCols.length > 0) {
+            const existing = tableOf(table).find((r) =>
+              conflictCols.every((col) => r[col] === row[col]),
             );
-            if (dup) continue; // ON CONFLICT DO NOTHING
+            if (existing) {
+              // ON CONFLICT: DO NOTHING when ignoreDuplicates, else DO UPDATE.
+              if (!ignoreDuplicates) Object.assign(existing, row);
+              continue;
+            }
           }
           tableOf(table).push(row);
         }
@@ -175,6 +185,10 @@ export function makeFakeSupabase(
         });
       }
       if (limitN !== null) rows = rows.slice(0, limitN);
+      // .range(from, to) — Supabase semantics: inclusive both ends.
+      if (rangeFrom !== null) {
+        rows = rows.slice(rangeFrom, (rangeTo ?? rows.length) + 1);
+      }
       if (countHead) return { data: null, error: null, count: rows.length };
       if (wantSingle || wantMaybeSingle) return { data: rows[0] ?? null, error: null };
       return { data: rows.map((r) => ({ ...r })), error: null };
@@ -224,6 +238,11 @@ export function makeFakeSupabase(
     };
     builder.limit = (n: number) => {
       limitN = n;
+      return builder;
+    };
+    builder.range = (from: number, to: number) => {
+      rangeFrom = from;
+      rangeTo = to;
       return builder;
     };
     builder.select = (_cols?: string, opts?: { count?: string; head?: boolean }) => {

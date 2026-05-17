@@ -1042,10 +1042,228 @@ export type Database = {
           },
         ]
       }
+      merchant_attribution_config: {
+        Row: {
+          attribution_window_days: number
+          created_at: string
+          ltv_evaluation_window_days: number
+          merchant_id: string
+          updated_at: string
+        }
+        Insert: {
+          attribution_window_days?: number
+          created_at?: string
+          ltv_evaluation_window_days?: number
+          merchant_id: string
+          updated_at?: string
+        }
+        Update: {
+          attribution_window_days?: number
+          created_at?: string
+          ltv_evaluation_window_days?: number
+          merchant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_attribution_config_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: true
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attribution_decisions: {
+        Row: {
+          attributed_campaign_id: string | null
+          attributed_message_id: string | null
+          attribution_window_days: number
+          customer_id: string | null
+          decided_at: string
+          decision_type: string
+          id: string
+          merchant_id: string
+          order_id: string | null
+        }
+        Insert: {
+          attributed_campaign_id?: string | null
+          attributed_message_id?: string | null
+          attribution_window_days: number
+          customer_id?: string | null
+          decided_at?: string
+          decision_type?: string
+          id?: string
+          merchant_id: string
+          order_id?: string | null
+        }
+        Update: {
+          attributed_campaign_id?: string | null
+          attributed_message_id?: string | null
+          attribution_window_days?: number
+          customer_id?: string | null
+          decided_at?: string
+          decision_type?: string
+          id?: string
+          merchant_id?: string
+          order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_decisions_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attribution_decisions_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attribution_decisions_attributed_campaign_id_fkey"
+            columns: ["attributed_campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attribution_decisions_attributed_message_id_fkey"
+            columns: ["attributed_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attribution_results: {
+        Row: {
+          campaign_id: string
+          computed_at: string
+          holdout_cohort_size: number
+          holdout_revenue_cents: number
+          id: string
+          incremental_ci_high_cents: number | null
+          incremental_ci_low_cents: number | null
+          incremental_revenue_cents: number
+          insufficient_evidence: boolean
+          ltv_ci_high_cents: number | null
+          ltv_ci_low_cents: number | null
+          ltv_restored_cents: number
+          merchant_id: string
+          treatment_cohort_size: number
+          treatment_revenue_cents: number
+          window_close_date: string
+        }
+        Insert: {
+          campaign_id: string
+          computed_at?: string
+          holdout_cohort_size: number
+          holdout_revenue_cents: number
+          id?: string
+          incremental_ci_high_cents?: number | null
+          incremental_ci_low_cents?: number | null
+          incremental_revenue_cents: number
+          insufficient_evidence?: boolean
+          ltv_ci_high_cents?: number | null
+          ltv_ci_low_cents?: number | null
+          ltv_restored_cents: number
+          merchant_id: string
+          treatment_cohort_size: number
+          treatment_revenue_cents: number
+          window_close_date: string
+        }
+        Update: {
+          campaign_id?: string
+          computed_at?: string
+          holdout_cohort_size?: number
+          holdout_revenue_cents?: number
+          id?: string
+          incremental_ci_high_cents?: number | null
+          incremental_ci_low_cents?: number | null
+          incremental_revenue_cents?: number
+          insufficient_evidence?: boolean
+          ltv_ci_high_cents?: number | null
+          ltv_ci_low_cents?: number | null
+          ltv_restored_cents?: number
+          merchant_id?: string
+          treatment_cohort_size?: number
+          treatment_revenue_cents?: number
+          window_close_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attribution_results_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attribution_results_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ltv_snapshots: {
+        Row: {
+          campaign_id: string
+          customer_id: string
+          delta_cents: number
+          id: string
+          merchant_id: string
+          post_30d_revenue_cents: number
+          pre_30d_revenue_cents: number
+          snapshot_at: string
+        }
+        Insert: {
+          campaign_id: string
+          customer_id: string
+          delta_cents: number
+          id?: string
+          merchant_id: string
+          post_30d_revenue_cents: number
+          pre_30d_revenue_cents: number
+          snapshot_at?: string
+        }
+        Update: {
+          campaign_id?: string
+          customer_id?: string
+          delta_cents?: number
+          id?: string
+          merchant_id?: string
+          post_30d_revenue_cents?: number
+          pre_30d_revenue_cents?: number
+          snapshot_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ltv_snapshots_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ltv_snapshots_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_proposals: {
         Row: {
           approved_at: string | null
           approved_by_user_id: string | null
+          attribution_window_days: number
           created_at: string
           generated_at: string
           group_slug: string
@@ -1061,6 +1279,7 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by_user_id?: string | null
+          attribution_window_days?: number
           created_at?: string
           generated_at?: string
           group_slug: string
@@ -1076,6 +1295,7 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by_user_id?: string | null
+          attribution_window_days?: number
           created_at?: string
           generated_at?: string
           group_slug?: string
@@ -1167,34 +1387,46 @@ export type Database = {
       }
       bandit_state: {
         Row: {
-          alpha: number
           arm_id: string
-          beta: number
           created_at: string
           last_updated_at: string
           merchant_id: string
           observation_count: number
+          order_alpha: number
+          order_beta: number
+          order_last_updated_at: string | null
+          order_observation_count: number
           proposal_id: string
+          sentiment_alpha: number
+          sentiment_beta: number
         }
         Insert: {
-          alpha?: number
           arm_id: string
-          beta?: number
           created_at?: string
           last_updated_at?: string
           merchant_id: string
           observation_count?: number
+          order_alpha?: number
+          order_beta?: number
+          order_last_updated_at?: string | null
+          order_observation_count?: number
           proposal_id: string
+          sentiment_alpha?: number
+          sentiment_beta?: number
         }
         Update: {
-          alpha?: number
           arm_id?: string
-          beta?: number
           created_at?: string
           last_updated_at?: string
           merchant_id?: string
           observation_count?: number
+          order_alpha?: number
+          order_beta?: number
+          order_last_updated_at?: string | null
+          order_observation_count?: number
           proposal_id?: string
+          sentiment_alpha?: number
+          sentiment_beta?: number
         }
         Relationships: [
           {
