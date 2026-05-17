@@ -96,10 +96,11 @@ beforeAll(async () => {
            'storefront_snapshots','voice_events','voice_versions','agent_profiles',
            'conversations','messages','message_events','customer_opt_outs',
            'merchant_attribution_config','attribution_results',
-           'attribution_decisions','ltv_snapshots'
+           'attribution_decisions','ltv_snapshots',
+           'merchant_subscriptions','subscription_events'
          )`,
     );
-    if ((rows[0]?.count ?? 0) < 16) {
+    if ((rows[0]?.count ?? 0) < 18) {
       schemaReady = false;
       console.warn("[rls.test] Required tables missing — skipping all RLS tests");
       return;
@@ -352,6 +353,31 @@ beforeAll(async () => {
         merchantIdB, proposalIdByMerchant.get(merchantIdB), GID_B,
       ],
     );
+
+    // Sprint 09: merchant_subscriptions — one per merchant
+    await pg.query(
+      `insert into public.merchant_subscriptions
+         (merchant_id, stripe_subscription_id, tier, status,
+          current_period_start, current_period_end)
+       values ($1, $2, 'growth', 'active', now(), now() + interval '30 days'),
+              ($3, $4, 'starter', 'active', now(), now() + interval '30 days')`,
+      [
+        merchantIdA, `sub_rls_a_${Date.now()}`,
+        merchantIdB, `sub_rls_b_${Date.now()}`,
+      ],
+    );
+
+    // Sprint 09: subscription_events — one per merchant
+    await pg.query(
+      `insert into public.subscription_events
+         (merchant_id, stripe_event_id, event_type, data)
+       values ($1, $2, 'customer.subscription.created', '{}'::jsonb),
+              ($3, $4, 'customer.subscription.created', '{}'::jsonb)`,
+      [
+        merchantIdA, `evt_rls_a_${Date.now()}`,
+        merchantIdB, `evt_rls_b_${Date.now()}`,
+      ],
+    );
   } finally {
     await pg.end();
   }
@@ -400,6 +426,12 @@ afterAll(async () => {
     // session_replication_role='replica' disables its triggers.
     await pg.query(
       `delete from public.attribution_decisions where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
+    // Sprint 09: subscription_events is append-only — delete here too, while
+    // session_replication_role='replica' disables its triggers.
+    await pg.query(
+      `delete from public.subscription_events where merchant_id = any($1::uuid[])`,
       [[merchantIdA, merchantIdB]],
     );
     await pg.query(
@@ -458,6 +490,11 @@ afterAll(async () => {
 
     // Sprint 08: attribution tables (delete before campaign_proposals + merchants
     // due to RESTRICT FKs).
+    // Sprint 09: merchant_subscriptions (not append-only — safe in 'origin').
+    await pg.query(
+      `delete from public.merchant_subscriptions where merchant_id = any($1::uuid[])`,
+      [[merchantIdA, merchantIdB]],
+    );
     await pg.query(
       `delete from public.attribution_results where merchant_id = any($1::uuid[])`,
       [[merchantIdA, merchantIdB]],
@@ -1908,5 +1945,213 @@ describe.skipIf(!SUPABASE_AVAILABLE)("Single-attribution — attribution_decisio
       await pg.query(`set session_replication_role = 'origin'`);
       await pg.end();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — merchant_subscriptions (Sprint 09)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — merchant_subscriptions", () => {
+  it("merchant A sees only their own subscription row", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("merchant_subscriptions")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBe(1);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's subscription", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("merchant_subscriptions")
+      .select("id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS — subscription_events (Sprint 09)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("RLS — subscription_events", () => {
+  it("merchant A sees only their own subscription events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("subscription_events")
+      .select("merchant_id");
+    expect(error).toBeNull();
+    expect(data?.length).toBeGreaterThan(0);
+    expect(data?.every((r) => r.merchant_id === merchantIdA)).toBe(true);
+  });
+
+  it("merchant A cannot see merchant B's subscription events", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("subscription_events")
+      .select("id")
+      .eq("merchant_id", merchantIdB);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Append-only triggers — subscription_events (Sprint 09, decision 32)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Append-only triggers — subscription_events", () => {
+  it("UPDATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `update public.subscription_events set event_type = 'tampered'
+           where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("DELETE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(
+          `delete from public.subscription_events where merchant_id = $1`,
+          [merchantIdA],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+
+  it("TRUNCATE raises append-only exception", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      await expect(
+        pg.query(`truncate public.subscription_events`),
+      ).rejects.toThrow(/append-only/i);
+    } finally {
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Idempotency — subscription_events.stripe_event_id partial UNIQUE (decision 32)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Idempotency — subscription_events.stripe_event_id", () => {
+  it("rejects a duplicate non-null stripe_event_id (Stripe re-delivery is a no-op)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    const eventId = `evt_dup_${Date.now()}`;
+    try {
+      await pg.query(
+        `insert into public.subscription_events
+           (merchant_id, stripe_event_id, event_type)
+         values ($1, $2, 'customer.subscription.updated')`,
+        [merchantIdA, eventId],
+      );
+      // A second row with the SAME stripe_event_id must be rejected by the
+      // partial unique index — this is the webhook idempotency backstop.
+      await expect(
+        pg.query(
+          `insert into public.subscription_events
+             (merchant_id, stripe_event_id, event_type)
+           values ($1, $2, 'customer.subscription.updated')`,
+          [merchantIdA, eventId],
+        ),
+      ).rejects.toThrow(/subscription_events_stripe_event_id_unique|unique/i);
+    } finally {
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.subscription_events
+         where merchant_id = $1 and stripe_event_id = $2`,
+        [merchantIdA, eventId],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
+      await pg.end();
+    }
+  });
+
+  it("permits multiple rows with a null stripe_event_id (internal audit events)", async () => {
+    const pg = new PgClient({ connectionString: env.dbUrl });
+    await pg.connect();
+    try {
+      // Two NULL-keyed internal audit events must both insert — the partial
+      // index (WHERE stripe_event_id IS NOT NULL) does not constrain NULLs.
+      await pg.query(
+        `insert into public.subscription_events (merchant_id, event_type, data)
+         values ($1, 'attribution_methodology_migration', '{"k":1}'::jsonb),
+                ($1, 'attribution_methodology_migration', '{"k":2}'::jsonb)`,
+        [merchantIdA],
+      );
+      const { rows } = await pg.query<{ count: number }>(
+        `select count(*)::int as count from public.subscription_events
+         where merchant_id = $1 and stripe_event_id is null
+           and event_type = 'attribution_methodology_migration'`,
+        [merchantIdA],
+      );
+      expect(rows[0]!.count).toBe(2);
+    } finally {
+      await pg.query(`set session_replication_role = 'replica'`);
+      await pg.query(
+        `delete from public.subscription_events
+         where merchant_id = $1 and stripe_event_id is null
+           and event_type = 'attribution_methodology_migration'`,
+        [merchantIdA],
+      );
+      await pg.query(`set session_replication_role = 'origin'`);
+      await pg.end();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Write-lock — no INSERT/UPDATE/DELETE policy for the authenticated role
+// (Sprint 09, decision 29 — "absence of a write policy is the enforcement")
+// ─────────────────────────────────────────────────────────────────────────────
+describe.skipIf(!SUPABASE_AVAILABLE)("Write-lock — merchant_subscriptions", () => {
+  it("authenticated merchant client cannot INSERT a subscription row", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("merchant_subscriptions")
+      .insert({
+        merchant_id: merchantIdA,
+        stripe_subscription_id: `sub_block_${Date.now()}`,
+        tier: "starter",
+        status: "active",
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 86_400_000).toISOString(),
+      });
+    // RLS with no INSERT policy rejects the write.
+    expect(error).not.toBeNull();
+  });
+
+  it("authenticated merchant client cannot UPDATE a subscription row", async () => {
+    const { data, error } = await (await clientFor(SHOP_A))
+      .from("merchant_subscriptions")
+      .update({ tier: "scale" })
+      .eq("merchant_id", merchantIdA)
+      .select();
+    // No UPDATE policy — the write touches zero rows (or errors).
+    expect(error === null ? data ?? [] : []).toEqual([]);
+  });
+});
+
+describe.skipIf(!SUPABASE_AVAILABLE)("Write-lock — subscription_events", () => {
+  it("authenticated merchant client cannot INSERT an event row", async () => {
+    const { error } = await (await clientFor(SHOP_A))
+      .from("subscription_events")
+      .insert({
+        merchant_id: merchantIdA,
+        event_type: "customer.subscription.created",
+        data: {},
+      });
+    expect(error).not.toBeNull();
   });
 });

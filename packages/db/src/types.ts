@@ -425,6 +425,9 @@ export type Database = {
           shopify_access_token: string
           shopify_scope: string
           shopify_shop_domain: string
+          stripe_customer_id: string | null
+          subscription_status: string | null
+          subscription_tier: string | null
           uninstalled_at: string | null
           updated_at: string
         }
@@ -437,6 +440,9 @@ export type Database = {
           shopify_access_token: string
           shopify_scope: string
           shopify_shop_domain: string
+          stripe_customer_id?: string | null
+          subscription_status?: string | null
+          subscription_tier?: string | null
           uninstalled_at?: string | null
           updated_at?: string
         }
@@ -449,10 +455,101 @@ export type Database = {
           shopify_access_token?: string
           shopify_scope?: string
           shopify_shop_domain?: string
+          stripe_customer_id?: string | null
+          subscription_status?: string | null
+          subscription_tier?: string | null
           uninstalled_at?: string | null
           updated_at?: string
         }
         Relationships: []
+      }
+      merchant_subscriptions: {
+        Row: {
+          cancel_at: string | null
+          canceled_at: string | null
+          created_at: string
+          current_period_end: string
+          current_period_start: string
+          grace_period_started_at: string | null
+          id: string
+          merchant_id: string
+          status: string
+          stripe_subscription_id: string
+          tier: string
+          updated_at: string
+        }
+        Insert: {
+          cancel_at?: string | null
+          canceled_at?: string | null
+          created_at?: string
+          current_period_end: string
+          current_period_start: string
+          grace_period_started_at?: string | null
+          id?: string
+          merchant_id: string
+          status: string
+          stripe_subscription_id: string
+          tier: string
+          updated_at?: string
+        }
+        Update: {
+          cancel_at?: string | null
+          canceled_at?: string | null
+          created_at?: string
+          current_period_end?: string
+          current_period_start?: string
+          grace_period_started_at?: string | null
+          id?: string
+          merchant_id?: string
+          status?: string
+          stripe_subscription_id?: string
+          tier?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_subscriptions_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: true
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscription_events: {
+        Row: {
+          appended_at: string
+          data: Json
+          event_type: string
+          id: string
+          merchant_id: string
+          stripe_event_id: string | null
+        }
+        Insert: {
+          appended_at?: string
+          data?: Json
+          event_type: string
+          id?: string
+          merchant_id: string
+          stripe_event_id?: string | null
+        }
+        Update: {
+          appended_at?: string
+          data?: Json
+          event_type?: string
+          id?: string
+          merchant_id?: string
+          stripe_event_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscription_events_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       order_events: {
         Row: {
