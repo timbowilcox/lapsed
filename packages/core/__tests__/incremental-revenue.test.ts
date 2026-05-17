@@ -40,6 +40,13 @@ function seedCampaign(opts: {
   for (let i = 0; i < opts.treatmentCount; i++) {
     const cid = `t${i}`;
     conversations.push({ id: `conv-${cid}`, merchant_id: MERCHANT, customer_id: cid });
+    // Symmetric ITT (decision 27): the treatment cohort is the frozen snapshot.
+    snapshots.push({
+      proposal_id: CAMPAIGN,
+      merchant_id: MERCHANT,
+      customer_id: cid,
+      included_in_holdout: false,
+    });
     messages.push({
       id: `mt${i}`,
       merchant_id: MERCHANT,
@@ -95,28 +102,28 @@ function buyers(count: number, cents: number, placedDay = 5): OrderSpec[] {
 }
 
 describe("campaignCalendarWindow", () => {
-  it("anchors a windowDays-long window at the median send time", () => {
+  it("anchors a windowDays-long window at launched_at (the earliest send) — decision 27", () => {
     const outbounds = [
-      { messageId: "m1", customerId: "c1", campaignId: CAMPAIGN, armId: null, sentAt: day(0) },
-      { messageId: "m2", customerId: "c2", campaignId: CAMPAIGN, armId: null, sentAt: day(2) },
+      { messageId: "m1", customerId: "c1", campaignId: CAMPAIGN, armId: null, sentAt: day(2) },
+      { messageId: "m2", customerId: "c2", campaignId: CAMPAIGN, armId: null, sentAt: day(0) },
       { messageId: "m3", customerId: "c3", campaignId: CAMPAIGN, armId: null, sentAt: day(10) },
     ];
     const w = campaignCalendarWindow(outbounds, 14);
-    expect(w.startIso).toBe(day(2)); // median of {0,2,10}
-    expect(w.endIso).toBe(day(16)); // median + 14 days
+    expect(w.startIso).toBe(day(0)); // earliest of {0,2,10} — NOT the median
+    expect(w.endIso).toBe(day(14)); // launched_at + 14 days
   });
 
-  it("averages the two middle send times for an even outbound count", () => {
+  it("is unaffected by send spread — only the earliest send anchors the window", () => {
     const outbounds = [
-      { messageId: "m1", customerId: "c1", campaignId: CAMPAIGN, armId: null, sentAt: day(0) },
-      { messageId: "m2", customerId: "c2", campaignId: CAMPAIGN, armId: null, sentAt: day(2) },
-      { messageId: "m3", customerId: "c3", campaignId: CAMPAIGN, armId: null, sentAt: day(4) },
+      { messageId: "m1", customerId: "c1", campaignId: CAMPAIGN, armId: null, sentAt: day(4) },
+      { messageId: "m2", customerId: "c2", campaignId: CAMPAIGN, armId: null, sentAt: day(0) },
+      { messageId: "m3", customerId: "c3", campaignId: CAMPAIGN, armId: null, sentAt: day(2) },
       { messageId: "m4", customerId: "c4", campaignId: CAMPAIGN, armId: null, sentAt: day(10) },
     ];
-    // median of {0,2,4,10} days = (2+4)/2 = day 3.
+    // launched_at = day 0 regardless of the later sends.
     const w = campaignCalendarWindow(outbounds, 14);
-    expect(w.startIso).toBe(day(3));
-    expect(w.endIso).toBe(day(17));
+    expect(w.startIso).toBe(day(0));
+    expect(w.endIso).toBe(day(14));
   });
 
   it("throws when the campaign has no outbounds", () => {

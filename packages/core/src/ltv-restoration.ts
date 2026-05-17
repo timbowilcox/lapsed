@@ -6,9 +6,16 @@
 //   treatment customer i  → post_i  = their revenue in the ltvWindow days
 //                                     AFTER their (earliest) campaign outbound
 //   holdout cohort        → holdout_mean = average revenue of holdout customers
-//                                     over the same calendar window (anchored
-//                                     at the campaign's median send time, since
-//                                     holdout customers have no send anchor)
+//                                     over the campaign-calendar window
+//                                     (anchored at launched_at — the earliest
+//                                     campaign outbound — since holdout
+//                                     customers have no per-customer send
+//                                     anchor; see decision 27)
+//
+// The treatment numerator is per-customer (decision 23: "per-customer 30-day-
+// post-outbound revenue"); the holdout baseline is a single calendar window.
+// The COHORT on both sides is the symmetric ITT snapshot (decision 27) —
+// getTreatmentCohort and getHoldoutCohort both read campaign_group_snapshots.
 //   per-customer delta    → delta_i = post_i − holdout_mean
 //   restored LTV          → Σ delta_i  = Σ post_i − treatmentSize × holdout_mean
 //
@@ -162,8 +169,9 @@ export async function computeLtvRestoration(
     }
   }
 
-  // Holdout cohort's revenue over the same calendar window, anchored at the
-  // campaign's median send time (holdout customers have no send anchor).
+  // Holdout cohort's revenue over the campaign-calendar window, anchored at
+  // launched_at — the campaign's earliest outbound (decision 27). Holdout
+  // customers have no per-customer send anchor.
   const holdoutWindow = campaignCalendarWindow(treatmentCohort.outbounds, ltvWindowDays);
   const holdoutOrders = await getHoldoutOrders(client, holdoutCohort, holdoutWindow);
 

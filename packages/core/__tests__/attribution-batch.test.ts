@@ -52,6 +52,13 @@ function seedBatch(opts: {
   for (let i = 0; i < opts.treatmentCount; i++) {
     const cid = `t${i}`;
     conversations.push({ id: `conv-${cid}`, merchant_id: MERCHANT, customer_id: cid });
+    // Symmetric ITT (decision 27): the treatment cohort is the frozen snapshot.
+    snapshots.push({
+      proposal_id: CAMPAIGN,
+      merchant_id: MERCHANT,
+      customer_id: cid,
+      included_in_holdout: false,
+    });
     messages.push({
       // Message ids are real UUIDs — recordOrderArrival validates them.
       id: `33333333-3333-4333-8333-${String(i).padStart(12, "0")}`,
@@ -217,7 +224,12 @@ describe("runAttributionBatch", () => {
           arm_id: ARMS[i % 3],
           sent_at: day(0),
         })),
-        campaign_group_snapshots: [],
+        campaign_group_snapshots: Array.from({ length: 35 }, (_, i) => ({
+          proposal_id: CAMPAIGN,
+          merchant_id: MERCHANT,
+          customer_id: `t${i}`,
+          included_in_holdout: false,
+        })),
       },
       { failOn: [{ table: "attribution_results", op: "select" }] },
     );
@@ -253,12 +265,20 @@ describe("runAttributionBatch", () => {
         arm_id: ARMS[0],
         sent_at: day(0),
       })),
-      snapshots: Array.from({ length: 12 }, (_, i) => ({
-        proposal_id: cId,
-        merchant_id: mId,
-        customer_id: `${custPrefix}h${i}`,
-        included_in_holdout: true,
-      })),
+      snapshots: [
+        ...Array.from({ length: 12 }, (_, i) => ({
+          proposal_id: cId,
+          merchant_id: mId,
+          customer_id: `${custPrefix}${i}`,
+          included_in_holdout: false,
+        })),
+        ...Array.from({ length: 12 }, (_, i) => ({
+          proposal_id: cId,
+          merchant_id: mId,
+          customer_id: `${custPrefix}h${i}`,
+          included_in_holdout: true,
+        })),
+      ],
     });
     const c1 = mkCampaign(MERCHANT, CAMPAIGN, "m1c");
     const c2 = mkCampaign(MERCHANT_2, CAMPAIGN_2, "m2c");

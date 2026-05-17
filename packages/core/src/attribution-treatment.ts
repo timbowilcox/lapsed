@@ -1,19 +1,35 @@
-// Treatment cohort engine — Sprint 08 chunk 4.
+// Treatment cohort engine — Sprint 09 chunk 2 (symmetric-ITT refactor of the
+// Sprint 08 chunk 4 original).
 //
-// The treatment cohort of a campaign is the set of customers who received at
-// least one outbound message from that campaign. Their attributed orders are
-// the orders they placed within the per-customer attribution window measured
-// from THEIR outbound send time.
+// SYMMETRIC ITT (decision 27). The treatment cohort of a campaign is the
+// INTENT-TO-TREAT set: every customer frozen into `campaign_group_snapshots`
+// at proposal time with `included_in_holdout = false` — exactly the mirror of
+// the holdout cohort (`included_in_holdout = true`). This INCLUDES customers
+// who opted out before the send, whose send failed, or who were deferred by
+// the daily cap and never actually received an outbound. They contribute zero
+// attributed revenue but count in the cohort denominator.
+//
+// This supersedes Sprint 08's as-attempted treatment cohort (customers sourced
+// from `messages WHERE direction = outbound`), which biased incremental revenue
+// upward: it excluded opt-outs / cap-deferred customers from the treatment
+// denominator while the holdout denominator (always ITT) kept them. Percentage-
+// of-incremental-revenue billing (Sprint 10) is only defensible when both
+// cohorts are measured the same way.
+//
+// CALENDAR WINDOW (decision 27). Attributed orders are counted over the
+// campaign-calendar window `[launched_at, launched_at + attribution_window_days]`
+// — anchored at `launched_at` (the campaign's earliest outbound), NOT at each
+// customer's own send time. Symmetric with `getHoldoutOrders`, which has always
+// used a single calendar window.
 //
 // SINGLE-ATTRIBUTION (decision 21). A customer may be in several campaigns'
-// treatment cohorts at once (overlapping campaigns). An order is attributed to
-// exactly ONE campaign: the most-recent outbound preceding the order, among all
-// outbounds whose own attribution window still covers the order. This module
-// resolves that winner per order and only returns the orders this campaign
-// won. The naive "join orders to messages where customer matches" would return
-// every campaign's outbound and double-count — the per-order winner selection
-// below is the LATERAL/most-recent-preceding pattern done in application code
-// (so it is exercised by the in-memory fake in tests, not only against SQL).
+// treatment cohorts at once. An order is attributed to exactly ONE campaign:
+// the most-recent outbound preceding the order, among all campaigns whose own
+// calendar window covers the order. This module resolves that winner per order
+// and only returns the orders this campaign won. A customer in the ITT snapshot
+// who never received an outbound has no preceding outbound to win attribution —
+// so they contribute zero orders to the campaign's attributed revenue, which is
+// exactly the ITT semantics.
 //
 // All currency is integer cents (bigint in the DB, number here).
 
@@ -61,9 +77,18 @@ export interface TreatmentCohortResult {
   campaignId: string;
   /** Attribution window stamped on the campaign proposal (decision 20). */
   windowDays: number;
-  /** Distinct customer ids that received ≥ 1 outbound from this campaign. */
+  /**
+   * The ITT treatment cohort (decision 27): every `campaign_group_snapshots`
+   * customer for this proposal with `included_in_holdout = false`. INCLUDES
+   * opt-outs and daily-cap-deferred customers — they count in the denominator
+   * and contribute zero revenue.
+   */
   cohort: string[];
-  /** Every outbound this campaign sent (one row per message). */
+  /**
+   * Every outbound this campaign actually sent (one row per message). A subset
+   * of the cohort received these; the rest of the ITT cohort got none. Used to
+   * resolve the campaign's `launched_at` and single-attribution winners.
+   */
   outbounds: CampaignOutbound[];
   /**
    * conversation_id → customer_id map for the merchant, loaded once by
@@ -84,7 +109,7 @@ export interface TreatmentOrdersResult {
    * Per-customer attributed revenue in cents, ONE entry per cohort customer
    * (0 when the customer placed no attributed order). This is the treatment
    * distribution Welch's t-test consumes in chunk 6 — its length equals the
-   * treatment cohort size.
+   * ITT treatment cohort size.
    */
   perCustomerRevenueCents: number[];
 }
@@ -130,10 +155,15 @@ async function loadConversationCustomers(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolves a campaign's treatment cohort: the distinct customers that received
- * at least one outbound from the campaign, plus every outbound message. The
- * attribution window is read from the proposal's stamped `attribution_window_days`
- * (decision 20) — the single source of truth, never re-derived.
+ * Resolves a campaign's ITT treatment cohort (decision 27): the frozen
+ * `campaign_group_snapshots` customers for this proposal where
+ * `included_in_holdout = false`. The cohort is the snapshot — never a live
+ * recompute, never derived from who actually received a send. The campaign's
+ * outbound messages are also loaded (they anchor `launched_at` and resolve
+ * single-attribution), but they do NOT define cohort membership.
+ *
+ * The attribution window is read from the proposal's stamped
+ * `attribution_window_days` (decision 20) — the single source of truth.
  */
 export async function getTreatmentCohort(
   client: LapsedSupabaseClient,
@@ -155,7 +185,21 @@ export async function getTreatmentCohort(
   const windowDays = (proposal.attribution_window_days as number | null)
     ?? ATTRIBUTION_WINDOW_DAYS_DEFAULT;
 
+  // The ITT treatment cohort — the frozen snapshot's non-holdout customers
+  // (decision 27). Mirror of getHoldoutCohort's `included_in_holdout = true`.
+  const snapshotRows = await fetchAllRows<{ customer_id: string }>((from, to) =>
+    client
+      .from("campaign_group_snapshots")
+      .select("customer_id")
+      .eq("proposal_id", campaignId)
+      .eq("included_in_holdout", false)
+      .range(from, to),
+  );
+  const cohort = [...new Set(snapshotRows.map((r) => r.customer_id))].sort();
+
   // This campaign's outbound messages (paged — a campaign can exceed 1000).
+  // These anchor launched_at and resolve single-attribution; they do NOT
+  // define cohort membership.
   const messageRows = await fetchAllRows<MessageRow>((from, to) =>
     client
       .from("messages")
@@ -169,11 +213,10 @@ export async function getTreatmentCohort(
   const conversationCustomers = await loadConversationCustomers(client, merchantId);
 
   const outbounds: CampaignOutbound[] = [];
-  const cohortSet = new Set<string>();
   for (const m of messageRows) {
     const customerId = conversationCustomers.get(m.conversation_id);
     // A message whose conversation we cannot resolve is skipped rather than
-    // silently mis-attributed — it cannot contribute a customer to the cohort.
+    // silently mis-attributed.
     if (!customerId) continue;
     outbounds.push({
       messageId: m.id,
@@ -182,32 +225,36 @@ export async function getTreatmentCohort(
       armId: m.arm_id,
       sentAt: m.sent_at,
     });
-    cohortSet.add(customerId);
   }
 
   return {
     merchantId,
     campaignId,
     windowDays,
-    cohort: [...cohortSet].sort(),
+    cohort,
     outbounds,
     conversationCustomers,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getTreatmentOrders — single-attribution resolution
+// getTreatmentOrders — calendar window + single-attribution resolution
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolves the orders single-attributed to this campaign (decision 21).
+ * Resolves the orders single-attributed to this campaign (decisions 21 + 27).
  *
- * For every order placed by a cohort customer, the winning outbound is the
- * most recent outbound (across ALL campaigns) that precedes the order AND whose
- * own campaign's attribution window still covers the order. The order is
- * attributed to the winner's campaign. This function returns only the orders
- * THIS campaign won — so a customer shared with a more-recent campaign
- * contributes to this campaign's cohort (membership) but not its revenue.
+ * An order placed by an ITT cohort customer is attributed to this campaign iff:
+ *   1. it falls within THIS campaign's calendar window
+ *      `[launched_at, launched_at + windowDays]`, and
+ *   2. the single-attribution winner is this campaign — the most-recent
+ *      outbound (across ALL campaigns) preceding the order, among campaigns
+ *      whose own calendar window covers the order.
+ *
+ * `launched_at` of a campaign is its earliest outbound. A cohort customer who
+ * received no outbound has no preceding outbound — their orders are won by no
+ * campaign (or by another campaign that did send to them), so an ITT customer
+ * with no send contributes zero revenue. This is correct ITT behaviour.
  */
 export async function getTreatmentOrders(
   client: LapsedSupabaseClient,
@@ -226,9 +273,10 @@ export async function getTreatmentOrders(
   }
 
   // Every campaign outbound the merchant sent (any campaign) — needed to
-  // resolve cross-campaign single-attribution. Restricted to outbounds with a
-  // campaign_id (non-campaign AI replies never carry attribution). Paged so a
-  // merchant with > 1000 lifetime campaign outbounds is not silently truncated.
+  // resolve cross-campaign single-attribution AND each campaign's launched_at.
+  // Restricted to outbounds with a campaign_id (non-campaign AI replies never
+  // carry attribution). Paged so a merchant with > 1000 lifetime campaign
+  // outbounds is not silently truncated.
   const allMsgRows = await fetchAllRows<MessageRow>((from, to) =>
     client
       .from("messages")
@@ -240,6 +288,19 @@ export async function getTreatmentOrders(
   );
 
   const cohortSet = new Set(customerIds);
+
+  // launched_at per campaign = the earliest outbound of that campaign. Computed
+  // over EVERY outbound (not just to cohort customers) so a competing
+  // campaign's calendar window is anchored at its true launch.
+  const launchedAtByCampaign = new Map<string, number>();
+  for (const m of allMsgRows) {
+    if (!m.campaign_id) continue;
+    const sentMs = epochMs(m.sent_at, "sent_at", m.id);
+    const prior = launchedAtByCampaign.get(m.campaign_id);
+    if (prior === undefined || sentMs < prior) {
+      launchedAtByCampaign.set(m.campaign_id, sentMs);
+    }
+  }
 
   // Outbounds to cohort customers, keyed by customer.
   const outboundsByCustomer = new Map<string, CampaignOutbound[]>();
@@ -278,6 +339,22 @@ export async function getTreatmentOrders(
     }
   }
 
+  /**
+   * Upper bound (epoch ms) of a campaign's calendar window. Returns -Infinity
+   * for a campaign with no recorded outbound — that makes every `placedMs >
+   * campaignWindowEnd` test true, so an unlaunched campaign wins no order. In
+   * practice this branch is unreachable for a real candidate: every candidate
+   * outbound came from `allMsgRows`, which also populates `launchedAtByCampaign`
+   * — so any campaign that contributed a candidate has a launched_at. It is
+   * kept as a defensive lower bound, not a live code path.
+   */
+  function campaignWindowEnd(cId: string): number {
+    const launchedAt = launchedAtByCampaign.get(cId);
+    if (launchedAt === undefined) return -Infinity; // campaign has no outbound
+    const window = windowByCampaign.get(cId) ?? ATTRIBUTION_WINDOW_DAYS_DEFAULT;
+    return launchedAt + window * DAY_MS;
+  }
+
   // Orders placed by cohort customers (paged, and the id list chunked so a
   // large cohort does not overflow the PostgREST `.in(...)` URL).
   const orderRows: OrderRow[] = [];
@@ -304,13 +381,24 @@ export async function getTreatmentOrders(
     }
     const candidates = outboundsByCustomer.get(o.shopify_customer_gid) ?? [];
 
+    // Single-attribution winner: most-recent outbound preceding the order,
+    // among campaigns whose CALENDAR window covers the order (decision 27).
+    //
+    // The calendar window is [launched_at, launched_at + windowDays]. Only the
+    // UPPER bound is checked explicitly below. The LOWER bound is enforced
+    // transitively: launched_at(campaign) <= sentMs (launched_at is the MIN
+    // sent_at of the campaign) and sentMs <= placedMs (the precedes check), so
+    // placedMs >= launched_at always holds for a real candidate — the order
+    // can never fall before the window start. This keeps the treatment side
+    // symmetric with getHoldoutOrders, which checks both bounds explicitly.
     let winner: CampaignOutbound | null = null;
     let winnerSentMs = -Infinity;
     for (const ob of candidates) {
       const sentMs = epochMs(ob.sentAt, "sent_at", ob.messageId);
       if (sentMs > placedMs) continue; // outbound must precede the order
-      const window = windowByCampaign.get(ob.campaignId) ?? ATTRIBUTION_WINDOW_DAYS_DEFAULT;
-      if (placedMs > sentMs + window * DAY_MS) continue; // order outside this outbound's window
+      // The order must fall inside the outbound's CAMPAIGN calendar window
+      // (anchored at that campaign's launched_at), not the per-outbound window.
+      if (placedMs > campaignWindowEnd(ob.campaignId)) continue;
       // Most-recent-preceding wins; a deterministic messageId tie-break covers
       // the (vanishingly rare) exact-same-sent_at case.
       if (
@@ -334,7 +422,7 @@ export async function getTreatmentOrders(
     }
   }
 
-  // Per-customer revenue distribution — one entry per cohort customer.
+  // Per-customer revenue distribution — one entry per ITT cohort customer.
   const revenueByCustomer = new Map<string, number>();
   for (const id of customerIds) revenueByCustomer.set(id, 0);
   for (const a of attributed) {
