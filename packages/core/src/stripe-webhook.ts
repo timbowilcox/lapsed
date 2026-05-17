@@ -25,6 +25,7 @@
 
 import type { LapsedSupabaseClient, Json } from "@lapsed/db";
 import type { StripeWebhookEvent, SubscriptionTier } from "./stripe-client";
+import { invalidateMerchantEntitlements } from "./entitlements";
 
 /** Subscription statuses the local mirror stores (migration 0010 CHECK). */
 export type MirrorSubscriptionStatus =
@@ -320,6 +321,10 @@ export async function handleStripeWebhookEvent(
     }
     throw insertErr;
   }
+
+  // Invalidate the merchant's cached entitlements (decision 30) — a tier or
+  // status change must take effect immediately, not up to the 5-minute TTL.
+  invalidateMerchantEntitlements(merchantId);
 
   console.info(
     JSON.stringify({

@@ -24,6 +24,8 @@ import type { TwilioClient } from "./twilio-client";
 import { getReadyCampaigns } from "./campaign-events";
 import { thompsonSample, type BanditState } from "./bandit";
 import { sendMessage } from "./send-message";
+import { getMerchantEntitlements } from "./entitlements";
+import { fetchAllRows } from "./paginate";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inputs / outputs
@@ -48,6 +50,13 @@ export interface LaunchMerchantCampaignsResult {
   failed: number;
   /** True when the daily cap was hit — remaining customers resume next day. */
   capReached: boolean;
+  /**
+   * True when the merchant is suspended / has no plan — every send is skipped
+   * (decision 31: a suspended merchant gets no new sends).
+   */
+  writeBlocked: boolean;
+  /** True when the merchant's monthly send entitlement is exhausted. */
+  monthlySendCapReached: boolean;
 }
 
 interface ArmVariant {
@@ -85,7 +94,55 @@ export async function launchMerchantCampaigns(
     skippedNoPhone: 0,
     failed: 0,
     capReached: false,
+    writeBlocked: false,
+    monthlySendCapReached: false,
   };
+
+  // Billing gate (decisions 30/31). A suspended / no-plan merchant sends
+  // nothing; an active merchant cannot exceed their tier's monthly send quota.
+  // skipCache: this is a billing-critical write gate — it must read the live
+  // suspension state, never a (possibly stale, possibly cross-instance) cache.
+  const entitlements = await getMerchantEntitlements(serviceClient, opts.merchantId, {
+    skipCache: true,
+  });
+  if (!entitlements.writesAllowed) {
+    logStructured("launch_campaigns_write_blocked", {
+      merchant_id: opts.merchantId,
+      status: entitlements.status,
+    });
+    result.writeBlocked = true;
+    return result;
+  }
+  // Sends already made this calendar month — counted from the message_outbound_sent
+  // event log (actual confirmed sends, consistent with the daily-cap counter),
+  // not the messages table (which includes pending/failed rows).
+  const monthNow = opts.now ? opts.now() : new Date();
+  const monthStart = new Date(
+    Date.UTC(monthNow.getUTCFullYear(), monthNow.getUTCMonth(), 1),
+  ).toISOString();
+  const priorSendsThisMonth = (
+    await fetchAllRows<{ id: string }>((from, to) =>
+      serviceClient
+        .from("message_events")
+        .select("id")
+        .eq("merchant_id", opts.merchantId)
+        .eq("event_type", "message_outbound_sent")
+        .gte("occurred_at", monthStart)
+        .range(from, to),
+    )
+  ).length;
+  // The remaining monthly send budget — decremented as this run sends, so a
+  // single run cannot overshoot the tier quota (mirrors the daily cap stop).
+  const monthlyBudget = entitlements.maxSendsPerMonth - priorSendsThisMonth;
+  if (monthlyBudget <= 0) {
+    logStructured("launch_campaigns_monthly_send_cap_reached", {
+      merchant_id: opts.merchantId,
+      sent_this_month: priorSendsThisMonth,
+      monthly_cap: entitlements.maxSendsPerMonth,
+    });
+    result.monthlySendCapReached = true;
+    return result;
+  }
 
   const ready = await getReadyCampaigns(serviceClient, opts.merchantId);
   // proposalsConsidered counts every ready campaign this run looked at — it is
@@ -94,7 +151,7 @@ export async function launchMerchantCampaigns(
   result.proposalsConsidered = ready.length;
 
   for (const campaign of ready) {
-    if (result.capReached) break;
+    if (result.capReached || result.monthlySendCapReached) break;
 
     const arms = await loadArms(serviceClient, opts.merchantId, campaign.proposalId);
     const banditStates = await loadBanditStates(serviceClient, opts.merchantId, campaign.proposalId);
@@ -121,6 +178,18 @@ export async function launchMerchantCampaigns(
     );
 
     for (const customerId of targets) {
+      // Stop before exceeding the tier's monthly send quota — this run's sends
+      // (result.sent) plus the prior count must not pass maxSendsPerMonth.
+      if (result.sent >= monthlyBudget) {
+        result.monthlySendCapReached = true;
+        logStructured("launch_campaigns_monthly_send_cap_reached", {
+          merchant_id: opts.merchantId,
+          proposal_id: campaign.proposalId,
+          sent_this_run: result.sent,
+          monthly_budget: monthlyBudget,
+        });
+        break;
+      }
       // Decision 4: Thompson-sample an arm. The seed is deterministic per
       // (proposal, customer) so a re-run samples the same arm — though the
       // sendMessage guard makes a re-run a no-op regardless.

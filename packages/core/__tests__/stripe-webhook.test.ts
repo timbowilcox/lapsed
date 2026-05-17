@@ -4,13 +4,17 @@
 // stripe-client.test.ts); these tests cover handleStripeWebhookEvent — the
 // idempotent application of a verified event to the local mirror.
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   handleStripeWebhookEvent,
   type StripeWebhookHandlerConfig,
 } from "../src/stripe-webhook";
 import type { StripeWebhookEvent } from "../src/stripe-client";
+import { getMerchantEntitlements, _clearEntitlementsCache } from "../src/entitlements";
 import { makeFakeSupabase, type FakeRow } from "./_fake-supabase";
+
+// The entitlements cache is process-global — clear it between tests.
+beforeEach(() => _clearEntitlementsCache());
 
 const MERCHANT = "550e8400-e29b-41d4-a716-446655440000";
 const CUSTOMER = "cus_demo";
@@ -324,5 +328,25 @@ describe("handleStripeWebhookEvent — idempotency + edge cases", () => {
     const result = await handleStripeWebhookEvent(client, event, CONFIG);
     expect(result.status).toBe("no_merchant");
     expect(tables.subscription_events ?? []).toHaveLength(0);
+  });
+
+  it("invalidates the merchant's cached entitlements so a tier change takes effect at once", async () => {
+    const { client } = seed();
+    // Prime the entitlements cache while the merchant has no subscription.
+    const before = await getMerchantEntitlements(client, MERCHANT);
+    expect(before.writesAllowed).toBe(false);
+
+    // A subscription.created event activates a growth plan AND must invalidate
+    // the cache (handleStripeWebhookEvent calls invalidateMerchantEntitlements).
+    await handleStripeWebhookEvent(
+      client,
+      subscriptionEvent("customer.subscription.created"),
+      CONFIG,
+    );
+
+    // The next read reflects the new tier immediately — not the stale cache.
+    const after = await getMerchantEntitlements(client, MERCHANT);
+    expect(after.writesAllowed).toBe(true);
+    expect(after.tier).toBe("growth");
   });
 });

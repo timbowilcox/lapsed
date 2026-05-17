@@ -217,6 +217,16 @@ export {
 } from "./billing-grace";
 
 export {
+  getMerchantEntitlements,
+  invalidateMerchantEntitlements,
+  checkCampaignApprovalAllowed,
+  _clearEntitlementsCache,
+  type MerchantEntitlements,
+  type CampaignApprovalGateResult,
+  type CampaignApprovalDenialReason,
+} from "./entitlements";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
