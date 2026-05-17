@@ -175,6 +175,21 @@ export {
 } from "./attribution-backfill";
 
 export {
+  createStripeClient,
+  isSubscriptionTier,
+  SUBSCRIPTION_TIERS,
+  StripeClientError,
+  StripeWebhookSignatureError,
+  type SubscriptionTier,
+  type StripeClientConfig,
+  type LapsedStripeClient,
+  type StripeSdkLike,
+  type StripeWebhookEvent,
+  type MerchantBillingRef,
+  type CheckoutReturnUrls,
+} from "./stripe-client";
+
+export {
   designCampaign,
   createCampaignClient,
   parseCampaignProposal,
