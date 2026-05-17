@@ -1,5 +1,5 @@
 import { Card, Tag } from "@lapsed/ui";
-import { Lock, Send, BarChart3 } from "lucide-react";
+import { Lock, BarChart3 } from "lucide-react";
 import { InstallButton } from "./_install-button";
 
 const requiredScopes = [
@@ -97,12 +97,6 @@ export default function InstallPage() {
 
         <div className="flex flex-col items-center gap-8">
           <InstallButton />
-          <a
-            href="/app"
-            className="inline-flex items-center gap-4 text-meta text-ink-500 hover:text-ink-900"
-          >
-            <Send strokeWidth={1.75} size={14} /> Preview the dashboard (no install)
-          </a>
         </div>
       </main>
     </div>
