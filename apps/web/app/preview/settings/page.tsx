@@ -76,6 +76,24 @@ export default function DemoSettingsPage() {
         </Card>
 
         <Card className="p-32">
+          <h2 className="mb-16 text-h2 text-ink-900">Agent draft defaults</h2>
+          <p className="mb-12 text-meta text-ink-500">
+            The agent includes one of these words in outbound drafts so customers always know how
+            to opt out.
+          </p>
+          <div className="flex flex-wrap gap-8">
+            {merchant.agentDraftDefaults.map((kw) => (
+              <span
+                key={kw}
+                className="inline-flex items-center rounded-pill bg-cream-200 px-10 py-4 text-mini font-medium text-ink-700"
+              >
+                {kw}
+              </span>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-32">
           <h2 className="mb-16 text-h2 text-ink-900">Integrations</h2>
           <div className="flex flex-col gap-12">
             <div className="flex items-center justify-between rounded-md border border-border bg-cream-100 px-16 py-14">

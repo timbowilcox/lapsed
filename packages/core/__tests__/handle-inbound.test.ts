@@ -61,6 +61,13 @@ function fakeTwilio(): TwilioClient {
 function seededWorld(over: { withArm?: boolean; conversation?: boolean; voice?: boolean } = {}) {
   const withArm = over.withArm ?? true;
   const seed: Record<string, FakeRow[]> = {
+    merchants: [
+      {
+        id: MERCHANT,
+        opt_out_keywords: [],
+        agent_draft_defaults: ["STOP", "UNSUBSCRIBE"],
+      },
+    ],
     customers: [
       {
         merchant_id: MERCHANT,
@@ -409,6 +416,10 @@ describe("handleInboundMessage — resolution + edge cases", () => {
   it("resolves the most recently active merchant when a phone matches multiple", async () => {
     const MERCHANT_B = "660e8400-e29b-41d4-a716-446655440aaa";
     const fake = makeFakeSupabase({
+      merchants: [
+        { id: MERCHANT, opt_out_keywords: [], agent_draft_defaults: ["STOP"] },
+        { id: MERCHANT_B, opt_out_keywords: [], agent_draft_defaults: ["STOP"] },
+      ],
       customers: [
         { merchant_id: MERCHANT, shopify_customer_gid: CUSTOMER, phone: PHONE },
         { merchant_id: MERCHANT_B, shopify_customer_gid: CUSTOMER, phone: PHONE },

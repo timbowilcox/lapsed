@@ -23,7 +23,11 @@ export async function SettingsSyncStatus({ merchantId }: { merchantId: string })
         <div className="mt-2 text-meta text-ink-500">{lastSyncedLabel}</div>
       </div>
       <div className="flex flex-col items-end gap-4">
-        <Button variant="secondary" disabled aria-describedby="resync-note">
+        <Button
+          variant="secondary"
+          disabled={!summary.last_synced_at}
+          aria-describedby={!summary.last_synced_at ? "resync-note" : undefined}
+        >
           Re-sync
         </Button>
         {!summary.last_synced_at && (

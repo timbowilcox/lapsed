@@ -1686,6 +1686,22 @@ export type Database = {
         }
         Returns: undefined
       }
+      merchant_keyword_append: {
+        Args: {
+          p_merchant_id: string
+          p_list: string
+          p_keyword: string
+        }
+        Returns: undefined
+      }
+      merchant_keyword_remove: {
+        Args: {
+          p_merchant_id: string
+          p_list: string
+          p_keyword: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       lifecycle_stage: "new" | "engaged" | "at_risk" | "lapsed" | "won_back" | "churned"

@@ -13,11 +13,9 @@
 // time (add or remove); each change writes immediately to the API. Errors are
 // shown inline; no explicit Save button needed.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { X, Plus, Check } from "lucide-react";
-
-// Twilio-reserved keywords — mirrored from _validate.ts for display purposes.
-const TWILIO_RESERVED: readonly string[] = ["STOP", "STOPALL"];
+import { TWILIO_RESERVED } from "../../api/settings/opt-out-keywords/_validate";
 
 interface OptOutConfig {
   optOutKeywords: string[];
@@ -62,15 +60,18 @@ function KeywordTag({
 function AddKeywordRow({
   listName,
   onAdd,
+  inputRef: externalInputRef,
 }: {
   listName: ListName;
   onAdd: (keyword: string) => Promise<string | null>;
+  inputRef?: RefObject<HTMLInputElement | null>;
 }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const localRef = useRef<HTMLInputElement>(null);
+  const inputRef = externalInputRef ?? localRef;
 
   const handleAdd = useCallback(async () => {
     const trimmed = value.trim();
@@ -87,7 +88,7 @@ function AddKeywordRow({
       setTimeout(() => setSaved(false), 1800);
       inputRef.current?.focus();
     }
-  }, [value, onAdd]);
+  }, [value, onAdd, inputRef]);
 
   const inputId = `add-${listName}`;
 
@@ -129,7 +130,7 @@ function AddKeywordRow({
         </button>
       </div>
       {error && (
-        <p id={`${inputId}-error`} role="alert" className="text-mini text-danger-500">
+        <p id={`${inputId}-error`} role="alert" className="text-mini text-danger-700">
           {error}
         </p>
       )}
@@ -155,18 +156,29 @@ function KeywordSection({
   onMutate: (list: ListName, action: "add" | "remove", keyword: string) => Promise<string | null>;
 }) {
   const [removingKeyword, setRemovingKeyword] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const addInputRef = useRef<HTMLInputElement>(null);
 
   const handleRemove = useCallback(
     async (keyword: string) => {
       setRemovingKeyword(keyword);
-      await onMutate(listName, "remove", keyword);
+      setRemoveError(null);
+      const err = await onMutate(listName, "remove", keyword);
       setRemovingKeyword(null);
+      if (err) {
+        setRemoveError(err);
+      } else {
+        // Move focus to the add input so the user doesn't lose their place in
+        // the DOM after the remove button is unmounted (WCAG 2.4.3).
+        addInputRef.current?.focus();
+      }
     },
     [listName, onMutate],
   );
 
   const handleAdd = useCallback(
     async (keyword: string): Promise<string | null> => {
+      setRemoveError(null);
       return onMutate(listName, "add", keyword);
     },
     [listName, onMutate],
@@ -195,7 +207,12 @@ function KeywordSection({
           <span className="text-mini text-ink-400">No keywords yet.</span>
         )}
       </div>
-      <AddKeywordRow listName={listName} onAdd={handleAdd} />
+      {removeError && (
+        <p role="alert" className="text-mini text-danger-700">
+          {removeError}
+        </p>
+      )}
+      <AddKeywordRow listName={listName} onAdd={handleAdd} inputRef={addInputRef} />
     </div>
   );
 }

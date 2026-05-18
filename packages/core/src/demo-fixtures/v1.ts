@@ -14,6 +14,7 @@ export const v1: DemoFixtures = {
     brandVoice:
       "Warm, knowledgeable, unhurried. Australian English spelling. Speaks like a trusted skincare advisor — never pushy, always precise.",
     optOutKeywords: ["STOP", "STOPALL", "UNSUBSCRIBE", "QUIT", "END", "CANCEL"],
+    agentDraftDefaults: ["STOP", "UNSUBSCRIBE"],
     ownerName: "Sarah Chen",
     ownerInitials: "SC",
     installedAt: "2026-02-12T08:30:00Z",

@@ -117,6 +117,41 @@ describe("detectOptOutKeyword — non-matches", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// detectOptOutKeyword — merchant-configured extras
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("detectOptOutKeyword — merchant-configured keywords", () => {
+  it("matches a merchant-configured keyword that is not in the built-in set", () => {
+    expect(detectOptOutKeyword("OPTOUT", ["OPTOUT"])).toBe("OPTOUT");
+  });
+
+  it("matches a merchant keyword case-insensitively", () => {
+    expect(detectOptOutKeyword("optout", ["OPTOUT"])).toBe("OPTOUT");
+  });
+
+  it("matches a merchant keyword with surrounding whitespace", () => {
+    expect(detectOptOutKeyword("  OPTOUT  ", ["OPTOUT"])).toBe("OPTOUT");
+  });
+
+  it("does not match a word that is only a partial merchant keyword", () => {
+    expect(detectOptOutKeyword("OPTOUT2", ["OPTOUT"])).toBeNull();
+  });
+
+  it("built-in keywords still match when merchantKeywords is provided", () => {
+    expect(detectOptOutKeyword("STOP", ["OPTOUT"])).toBe("STOP");
+  });
+
+  it("returns null when body does not match any keyword in either set", () => {
+    expect(detectOptOutKeyword("hello", ["OPTOUT"])).toBeNull();
+  });
+
+  it("works with empty merchantKeywords array (backward compatibility)", () => {
+    expect(detectOptOutKeyword("STOP", [])).toBe("STOP");
+    expect(detectOptOutKeyword("hello", [])).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // isOptedOut
 // ─────────────────────────────────────────────────────────────────────────────
 

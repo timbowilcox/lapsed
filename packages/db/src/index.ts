@@ -30,6 +30,7 @@ export {
   getMerchantOptOutConfig,
   updateMerchantOptOutKeywords,
   updateMerchantAgentDraftDefaults,
+  mutateMerchantKeyword,
   customerDisplayName,
   customerHandleOf,
   truncate,

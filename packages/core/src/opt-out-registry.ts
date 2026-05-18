@@ -60,10 +60,17 @@ const OPT_OUT_KEYWORDS: ReadonlySet<string> = new Set([
  * matching. Only an *exact* keyword match counts — "stop sending me deals"
  * is NOT a keyword opt-out (the classifier handles intent-based opt-outs).
  *
+ * `merchantKeywords` supplements the built-in set with keywords the merchant
+ * has configured via the opt-out settings panel (`merchants.opt_out_keywords`).
+ * The caller (handle-inbound) fetches them before this call (decision 18).
+ *
  * The returned keyword is recorded in the structured opt-out log for the
  * audit trail.
  */
-export function detectOptOutKeyword(body: string): string | null {
+export function detectOptOutKeyword(
+  body: string,
+  merchantKeywords: readonly string[] = [],
+): string | null {
   if (!body) return null;
   // Strip surrounding whitespace, punctuation (. ! " etc.), and invisible
   // format/control characters (e.g. a U+200B zero-width space a carrier or
@@ -74,7 +81,10 @@ export function detectOptOutKeyword(body: string): string | null {
     .replace(/^[\s\p{P}\p{Cf}\p{Cc}]+|[\s\p{P}\p{Cf}\p{Cc}]+$/gu, "")
     .toUpperCase();
   if (normalized.length === 0) return null;
-  return OPT_OUT_KEYWORDS.has(normalized) ? normalized : null;
+  if (OPT_OUT_KEYWORDS.has(normalized)) return normalized;
+  // Check merchant-configured extras (already upper-cased in DB by the API layer).
+  const merchantSet = new Set(merchantKeywords.map((k) => k.toUpperCase()));
+  return merchantSet.has(normalized) ? normalized : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

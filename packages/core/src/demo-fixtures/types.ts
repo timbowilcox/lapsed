@@ -11,6 +11,7 @@ export interface DemoMerchant {
   monthlyMessagesUsed: number;
   brandVoice: string;
   optOutKeywords: string[];
+  agentDraftDefaults: string[];
   ownerName: string;
   ownerInitials: string;
   installedAt: string;

@@ -1637,3 +1637,28 @@ export async function updateMerchantAgentDraftDefaults(
     .eq("id", merchantId);
   if (error) throw error;
 }
+
+/**
+ * Atomically adds or removes a single keyword from one of the merchant's
+ * keyword arrays. Delegates to `merchant_keyword_append` / `merchant_keyword_remove`
+ * Postgres functions (migration 0012) — no read-modify-write race condition.
+ *
+ * Preconditions (enforced by the API route before calling):
+ *   - `keyword` is already normalised (uppercase, trimmed, validated)
+ *   - reserved keywords are never passed with action "remove"
+ */
+export async function mutateMerchantKeyword(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  list: "opt_out_keywords" | "agent_draft_defaults",
+  action: "add" | "remove",
+  keyword: string,
+): Promise<void> {
+  const fnName = action === "add" ? "merchant_keyword_append" : "merchant_keyword_remove";
+  const { error } = await serviceClient.rpc(fnName, {
+    p_merchant_id: merchantId,
+    p_list: list,
+    p_keyword: keyword,
+  });
+  if (error) throw error;
+}

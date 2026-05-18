@@ -16,8 +16,7 @@ import { NextResponse } from "next/server";
 import {
   createServiceClient,
   getMerchantOptOutConfig,
-  updateMerchantOptOutKeywords,
-  updateMerchantAgentDraftDefaults,
+  mutateMerchantKeyword,
 } from "@lapsed/db";
 import { getMerchantFromSession } from "@/app/lib/session";
 import { serverEnv } from "@/app/lib/env";
@@ -33,44 +32,43 @@ export async function GET(): Promise<NextResponse> {
   const env = serverEnv();
   const client = createServiceClient({ url: env.supabaseUrl, serviceKey: env.supabaseSecretKey });
 
-  const config = await getMerchantOptOutConfig(client, merchant.id);
-
-  // Merge Twilio reserved keywords into the display list (they are always present)
-  const displayOptOut = dedupeKeywords([...TWILIO_RESERVED, ...config.optOutKeywords]);
-
-  return NextResponse.json({
-    optOutKeywords: displayOptOut,
-    agentDraftDefaults: config.agentDraftDefaults,
-  });
-}
-
-interface PatchBody {
-  list: "opt_out_keywords" | "agent_draft_defaults";
-  action: "add" | "remove";
-  keyword: string;
+  try {
+    const config = await getMerchantOptOutConfig(client, merchant.id);
+    const displayOptOut = dedupeKeywords([...TWILIO_RESERVED, ...config.optOutKeywords]);
+    return NextResponse.json({
+      optOutKeywords: displayOptOut,
+      agentDraftDefaults: config.agentDraftDefaults,
+    });
+  } catch {
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: Request): Promise<NextResponse> {
   const merchant = await getMerchantFromSession();
   if (!merchant) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
-  let body: PatchBody;
+  let raw: unknown;
   try {
-    body = (await req.json()) as PatchBody;
+    raw = await req.json();
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const { list, action, keyword } = body;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const { list, action, keyword } = raw as Record<string, unknown>;
 
   if (list !== "opt_out_keywords" && list !== "agent_draft_defaults") {
-    return NextResponse.json({ error: "invalid_list" }, { status: 400 });
+    return NextResponse.json({ error: "Unknown keyword list." }, { status: 400 });
   }
   if (action !== "add" && action !== "remove") {
-    return NextResponse.json({ error: "invalid_action" }, { status: 400 });
+    return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   }
   if (typeof keyword !== "string" || keyword.trim().length === 0) {
-    return NextResponse.json({ error: "keyword_required" }, { status: 400 });
+    return NextResponse.json({ error: "Please enter a keyword." }, { status: 400 });
   }
 
   const keywordValidation = validateKeyword(keyword);
@@ -87,34 +85,19 @@ export async function PATCH(req: Request): Promise<NextResponse> {
 
   const env = serverEnv();
   const client = createServiceClient({ url: env.supabaseUrl, serviceKey: env.supabaseSecretKey });
-
-  const config = await getMerchantOptOutConfig(client, merchant.id);
-  const currentList = list === "opt_out_keywords" ? config.optOutKeywords : config.agentDraftDefaults;
   const normalised = normalise(keyword);
 
-  let updated: string[];
-  if (action === "add") {
-    updated = dedupeKeywords([...currentList, normalised]);
-  } else {
-    updated = currentList.filter((k) => k.toUpperCase() !== normalised);
+  try {
+    // Atomic single-statement UPDATE via Postgres function (migration 0012).
+    await mutateMerchantKeyword(client, merchant.id, list, action, normalised);
+    // Re-read for the response (no race: the mutation already committed).
+    const updatedConfig = await getMerchantOptOutConfig(client, merchant.id);
+    const finalOptOut = dedupeKeywords([...TWILIO_RESERVED, ...updatedConfig.optOutKeywords]);
+    return NextResponse.json({
+      optOutKeywords: finalOptOut,
+      agentDraftDefaults: updatedConfig.agentDraftDefaults,
+    });
+  } catch {
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
-
-  if (list === "opt_out_keywords") {
-    await updateMerchantOptOutKeywords(client, merchant.id, updated);
-  } else {
-    await updateMerchantAgentDraftDefaults(client, merchant.id, updated);
-  }
-
-  // Return the merged display list for opt_out (same as GET)
-  const finalOptOut =
-    list === "opt_out_keywords"
-      ? dedupeKeywords([...TWILIO_RESERVED, ...updated])
-      : dedupeKeywords([...TWILIO_RESERVED, ...config.optOutKeywords]);
-  const finalDrafts =
-    list === "agent_draft_defaults" ? updated : config.agentDraftDefaults;
-
-  return NextResponse.json({
-    optOutKeywords: finalOptOut,
-    agentDraftDefaults: finalDrafts,
-  });
 }
