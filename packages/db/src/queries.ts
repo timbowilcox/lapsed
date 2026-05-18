@@ -1537,6 +1537,10 @@ export interface MerchantAttributionCampaign {
   treatmentCohortSize: number;
   holdoutCohortSize: number;
   incrementalRevenueCents: number;
+  /** 95% CI lower bound in cents; null when evidence was insufficient. */
+  ciLowCents: number | null;
+  /** 95% CI upper bound in cents; null when evidence was insufficient. */
+  ciHighCents: number | null;
   ltvRestoredCents: number;
   insufficientEvidence: boolean;
 }
@@ -1557,7 +1561,7 @@ export async function getMerchantAttributionRollup(
 ): Promise<MerchantAttributionRollup> {
   const { data: resultRows, error: rErr } = await client
     .from("attribution_results")
-    .select("campaign_id, window_close_date, treatment_cohort_size, holdout_cohort_size, incremental_revenue_cents, ltv_restored_cents, insufficient_evidence")
+    .select("campaign_id, window_close_date, treatment_cohort_size, holdout_cohort_size, incremental_revenue_cents, incremental_ci_low_cents, incremental_ci_high_cents, ltv_restored_cents, insufficient_evidence")
     .eq("merchant_id", merchantId)
     .order("window_close_date", { ascending: false });
   if (rErr) throw rErr;
@@ -1583,9 +1587,54 @@ export async function getMerchantAttributionRollup(
       treatmentCohortSize: r.treatment_cohort_size,
       holdoutCohortSize: r.holdout_cohort_size,
       incrementalRevenueCents: r.incremental_revenue_cents,
+      ciLowCents: r.incremental_ci_low_cents ?? null,
+      ciHighCents: r.incremental_ci_high_cents ?? null,
       ltvRestoredCents: r.ltv_restored_cents,
       insufficientEvidence: r.insufficient_evidence,
     })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle pipeline counts (dashboard chunk 10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LifecycleStageCounts {
+  new: number;
+  engaged: number;
+  at_risk: number;
+  lapsed: number;
+  won_back: number;
+  churned: number;
+}
+
+/**
+ * Returns per-stage customer counts for the lifecycle pipeline widget.
+ * Six parallel head-only count queries — one per lifecycle_stage enum value.
+ * Returns zeroes when scoring has not yet run (no rows exist).
+ */
+export async function getLifecyclePipelineCounts(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<LifecycleStageCounts> {
+  const stages = ["new", "engaged", "at_risk", "lapsed", "won_back", "churned"] as const;
+  const results = await Promise.all(
+    stages.map((stage) =>
+      client
+        .from("customer_inferred_state")
+        .select("shopify_customer_gid", { count: "exact", head: true })
+        .eq("merchant_id", merchantId)
+        .eq("lifecycle_stage", stage),
+    ),
+  );
+  const [newR, engagedR, atRiskR, lapsedR, wonBackR, churnedR] = results;
+  return {
+    new: newR.count ?? 0,
+    engaged: engagedR.count ?? 0,
+    at_risk: atRiskR.count ?? 0,
+    lapsed: lapsedR.count ?? 0,
+    won_back: wonBackR.count ?? 0,
+    churned: churnedR.count ?? 0,
   };
 }
 

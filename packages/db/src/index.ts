@@ -36,6 +36,7 @@ export {
   getInsightById,
   insertInsight,
   hasActiveInsight,
+  getLifecyclePipelineCounts,
   customerDisplayName,
   customerHandleOf,
   truncate,
@@ -71,6 +72,7 @@ export {
   type CampaignAttributionView,
   type MerchantAttributionCampaign,
   type MerchantAttributionRollup,
+  type LifecycleStageCounts,
 } from "./queries";
 
 const ROLE = "authenticated";
