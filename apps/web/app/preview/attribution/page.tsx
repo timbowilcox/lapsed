@@ -32,7 +32,7 @@ export default function DemoAttributionPage() {
             ${formatCount(attribution.totalRestoredRevenue)}
           </div>
           <div className="mt-4 text-mini text-ink-500">
-            <span className="text-success-500">↑ {attribution.vsPreviousPeriodPct}%</span> vs
+            <span className="text-ink-700">↑ {attribution.vsPreviousPeriodPct}%</span> vs
             prior period
           </div>
         </div>

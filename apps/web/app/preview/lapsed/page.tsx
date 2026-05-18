@@ -72,7 +72,7 @@ export default function DemoLapsedPage() {
                       <div className="flex items-center gap-8">
                         <div className="h-6 w-48 overflow-hidden rounded-pill bg-cream-300">
                           <div
-                            className="h-full rounded-pill bg-lavender-400"
+                            className="h-full rounded-pill bg-lavender-700"
                             style={{ width: `${c.reactivationScore}%` }}
                           />
                         </div>
@@ -85,11 +85,11 @@ export default function DemoLapsedPage() {
                       <span
                         className={`inline-flex items-center rounded-pill px-8 py-3 text-mini font-medium ${
                           c.status === "converted"
-                            ? "bg-success-100 text-success-500"
+                            ? "bg-success-100 text-ink-900"
                             : c.status === "reactivating"
                               ? "bg-lavender-50 text-lavender-700"
                               : c.status === "churned"
-                                ? "bg-danger-100 text-danger-500"
+                                ? "bg-danger-100 text-danger-700"
                                 : "bg-cream-200 text-ink-700"
                         }`}
                       >

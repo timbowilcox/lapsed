@@ -55,7 +55,7 @@ export function AppShell({
     <div className="grid min-h-screen grid-cols-[248px_1fr]">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 rounded-sm bg-ink-900 px-12 py-8 text-cream-50 text-body-strong"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 rounded-sm bg-ink-900 px-12 py-8 text-cream-50 text-body-strong"
       >
         Skip to content
       </a>

@@ -59,7 +59,7 @@ export function CampaignWizard() {
               <span
                 className={`mt-2 flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-pill text-mini font-semibold ${
                   isDone
-                    ? "bg-success-100 text-success-500"
+                    ? "bg-success-100 text-ink-900"
                     : isActive
                       ? "bg-ink-900 text-cream-50"
                       : "bg-cream-200 text-ink-700"

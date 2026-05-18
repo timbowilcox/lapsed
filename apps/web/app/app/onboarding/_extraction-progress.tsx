@@ -235,11 +235,11 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
               <span
                 className={`flex h-32 w-32 shrink-0 items-center justify-center rounded-pill ${
                   state === "done"
-                    ? "bg-success-100 text-success-500"
+                    ? "bg-success-100 text-ink-900"
                     : state === "active"
                       ? "bg-lavender-50 text-lavender-700"
                       : state === "error"
-                        ? "bg-danger-100 text-danger-500"
+                        ? "bg-danger-100 text-danger-700"
                         : "bg-cream-200 text-ink-500"
                 }`}
               >

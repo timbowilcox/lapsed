@@ -50,7 +50,7 @@ export function OnboardingFlow() {
             <span
               className={`flex h-24 w-24 items-center justify-center rounded-pill text-mini font-semibold ${
                 idx < stepIdx
-                  ? "bg-success-100 text-success-500"
+                  ? "bg-success-100 text-ink-900"
                   : idx === stepIdx
                     ? "bg-ink-900 text-cream-50"
                     : "bg-cream-200 text-ink-700"

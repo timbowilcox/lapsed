@@ -23,7 +23,7 @@ export function DemoBanner() {
   return (
     <div
       role="note"
-      className="flex items-center justify-between gap-12 border-b border-lavender-200 bg-lavender-100 px-32 py-12"
+      className="flex items-center justify-between gap-12 border-b border-lavender-200 bg-lavender-50 px-32 py-12"
     >
       <p className="text-meta text-lavender-700">
         <span className="font-medium">This is a demo.</span> Data shown is simulated — your real

@@ -23,7 +23,7 @@ export default function DemoPage() {
         value={totalRevenueDisplay}
         meta={
           <>
-            <span className="font-medium text-success-500">
+            <span className="font-medium text-ink-700">
               ↑ {attribution.vsPreviousPeriodPct}%
             </span>{" "}
             vs previous period · {attribution.totalRestoredOrders} orders

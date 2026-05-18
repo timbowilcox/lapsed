@@ -76,7 +76,7 @@ export default function DemoBillingPage() {
             </div>
             <div className="h-8 overflow-hidden rounded-pill bg-cream-300">
               <div
-                className="h-full rounded-pill bg-lavender-400 transition-all"
+                className="h-full rounded-pill bg-lavender-700 transition-all"
                 style={{ width: `${usagePct}%` }}
                 role="progressbar"
                 aria-valuenow={usagePct}

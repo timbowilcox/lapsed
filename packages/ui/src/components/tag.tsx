@@ -10,7 +10,7 @@ const tagVariants = cva(
         converted: "bg-success-100 text-ink-900",
         active: "bg-lavender-50 text-lavender-700",
         stalled: "bg-cream-200 text-ink-500",
-        churned: "bg-danger-100 text-danger-500",
+        churned: "bg-danger-100 text-danger-700",
       },
     },
     defaultVariants: { tone: "active" },

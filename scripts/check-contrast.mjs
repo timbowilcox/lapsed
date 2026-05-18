@@ -43,8 +43,9 @@ const COLORS = {
   "danger-100": "#F4DCDC",
 };
 
-// WCAG AA minimum ratios
-const LARGE_TEXT_MIN = 3.0; // ≥18pt (24px) or ≥14pt bold
+// WCAG AA minimum ratio for normal text (≤18pt or ≤14pt bold).
+// We can't determine font size from class names alone, so we conservatively
+// apply the stricter 4.5:1 threshold to all detected pairs.
 const NORMAL_TEXT_MIN = 4.5;
 
 function hexToLinear(c) {
@@ -89,11 +90,14 @@ function* walkFiles(dir) {
   }
 }
 
-// Extract className strings — look for bg-TOKEN and text-TOKEN class combinations.
-// Skip modifier-prefixed classes (hover:, focus:, disabled:, etc.) — they only
-// apply in specific states and have separate contrast requirements.
+// Extract color class combinations from two sources:
+// 1. className= JSX attribute strings
+// 2. Plain quoted string literals (catches CVA variant object values)
+// Skip modifier-prefixed classes (hover:, focus:, disabled:, etc.) via negative lookbehind.
 const BG_RE = /(?<![a-zA-Z0-9:])bg-((?:cream|ink|lavender|success|warning|danger)-\d+)/g;
 const TEXT_RE = /(?<![a-zA-Z0-9:])text-((?:cream|ink|lavender|success|warning|danger)-\d+)/g;
+// Quoted string literals containing at least one Vellum color token (single-line only).
+const COLOR_STRING_RE = /["'][^"'\n]*(?:bg|text)-(cream|ink|lavender|success|warning|danger)-\d+[^"'\n]*["']/g;
 
 const findings = [];
 
@@ -102,9 +106,15 @@ for (const dir of SCOPED_DIRS) {
   try {
     for (const file of walkFiles(abs)) {
       const src = readFileSync(file, "utf-8");
-      // Find all className= strings and check pairs within each
+      // className= attribute strings cover JSX inline usage.
       const classNameBlocks = src.match(/className=["'`][^"'`]*["'`]/g) ?? [];
-      for (const block of classNameBlocks) {
+      // Plain quoted strings cover CVA variant object values and other string-literal class lists.
+      const colorStrings = src.match(COLOR_STRING_RE) ?? [];
+      // Deduplicate: className blocks already include quoted substrings, so track seen content.
+      const seen = new Set(classNameBlocks);
+      const extraBlocks = colorStrings.filter((s) => !seen.has(s));
+      const allBlocks = [...classNameBlocks, ...extraBlocks];
+      for (const block of allBlocks) {
         const bgs = [...block.matchAll(BG_RE)].map((m) => m[1]);
         const texts = [...block.matchAll(TEXT_RE)].map((m) => m[1]);
         for (const bg of bgs) {
@@ -136,12 +146,12 @@ if (findings.length === 0) {
   process.exit(0);
 }
 
-console.log(`\n⚠  Contrast warnings: ${findings.length} pair(s) below WCAG AA 4.5:1\n`);
+console.log(`\n✗ Contrast failures: ${findings.length} pair(s) below WCAG AA 4.5:1\n`);
 for (const f of findings) {
   console.log(`  ${f.file}`);
   console.log(`    bg-${f.bg} (#${COLORS[f.bg]?.slice(1)}) + text-${f.text} (#${COLORS[f.text]?.slice(1)})`);
-  console.log(`    ratio: ${f.ratio}:1  (need ≥ 4.5:1 for normal text, ≥ 3.0:1 for large text)`);
+  console.log(`    ratio: ${f.ratio}:1  (need ≥ 4.5:1 for normal text)`);
   console.log(`    in: ${f.block.trim()}\n`);
 }
-console.log("These are advisory warnings — the script exits 0. Fix before shipping.\n");
-process.exit(0);
+console.log("Fix these pairings before merging — use text-ink-900/text-ink-700 on light tinted backgrounds.\n");
+process.exit(1);
