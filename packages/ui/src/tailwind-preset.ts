@@ -86,7 +86,7 @@ const preset: Partial<Config> = {
         "64": "64px",
       },
       boxShadow: {
-        focus: "0 0 0 3px rgba(156, 133, 238, 0.25)",
+        focus: "0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9",
       },
       animation: {
         pulse: "lapsed-pulse 2s infinite",

@@ -30,7 +30,7 @@ export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
         </div>
         <div className="min-w-0 flex-1">
           {loading ? (
-            <div className="h-[12px] w-[70%] rounded bg-ink-900/20 motion-safe:animate-pulse" />
+            <div className="h-[12px] w-[70%] rounded bg-cream-300 motion-safe:animate-pulse" aria-hidden="true" />
           ) : (
             <div className="truncate text-meta font-semibold text-ink-900">{shopName}</div>
           )}

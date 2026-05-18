@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 
 /**
- * Returns true on the first render pass (before any effects run).
- * Switch to false after the component mounts.
- *
- * Use this to show a skeleton on the server/hydration pass and then
- * transition to real content once the client has mounted, preventing
- * hydration mismatches when content depends on client-only state.
+ * Returns `true` during SSR and the initial hydration render, then `false`
+ * after the component has mounted. Use this to show a skeleton during the
+ * hydration pass and transition to real content once client state is
+ * available, preventing hydration mismatches.
  */
 export function useFirstRender(): boolean {
   const [isFirst, setIsFirst] = useState(true);
