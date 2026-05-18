@@ -329,19 +329,14 @@ The `ink-400` token is used in 50+ places as "de-emphasised secondary text". Man
 
 ---
 
-## Known Pre-Existing Failures
+## Test correction — storefront_snapshots RLS assertion
 
-These are carry-forward bugs, not design choices. Unlike the Deliberate Deviations above (which are deliberate scope decisions), the items here are defects that pre-date Sprint 11 and remain unfixed because they fall outside the sprint's scope.
+During final-evaluator remediation, two tests in `packages/db/__tests__/rls.test.ts:1308-1322` were found to assert the wrong denial mechanism for the `storefront_snapshots` table. They are corrected in this commit. This is a stale test assertion — the test was wrong; the security model is correct.
 
-**`packages/db/__tests__/rls.test.ts` — 2 tests fail with PostgreSQL error 42501**
-
-The two cases under "RLS — storefront_snapshots (Sprint 05, deny all authenticated)" fail with `42501 permission denied for table storefront_snapshots` instead of the expected RLS row-filtered empty result.
-
-- **Root cause:** Sprint 05 introduced the `storefront_snapshots` table without granting `SELECT` to the `authenticated` role. The RLS test was written expecting row-level filtering (query succeeds, returns zero rows for a non-owning merchant); the live database instead denies at the table-grant level.
-- **Production impact:** this is a real bug, not just a test artifact — an authenticated merchant querying `storefront_snapshots` through PostgREST receives a hard `42501` error rather than an empty result set.
-- **Why not remediated in Sprint 11:** no Sprint 11 acceptance criterion or `WALKTHROUGH-FINDINGS.md` finding references this table; fixing it is outside the UX-coherence scope of this sprint.
-- **Recommendation:** apply the one-line fix — `GRANT SELECT ON public.storefront_snapshots TO authenticated;` — either as an immediate hotfix outside Sprint 11, or folded into Sprint 12 alongside the operator-dashboard work. If the intended posture is genuinely table-level deny rather than RLS row-filtering, update `rls.test.ts` to assert the `42501` outcome instead.
-- **Status:** these 2 failures have been present throughout Sprint 11 — noted as pre-existing in the Chunk 6 audit and in subsequent chunk audits. They are not a regression introduced by any Sprint 11 chunk.
+- **What was wrong:** the two "cannot read storefront_snapshots" cases asserted RLS row-filter behaviour (`error === null`, empty `data`) — i.e. that the query succeeds and returns zero rows. But `storefront_snapshots` is service-role-only by design: migration `0006_agent_identity.sql:86-97` enables a deny-all RLS policy AND, as belt-and-braces defense in depth, runs `revoke all on public.storefront_snapshots from authenticated, anon`. A table-level `REVOKE` surfaces as a PostgreSQL `42501 permission denied` error, not an empty result set — so the tests failed.
+- **The security model is correct.** The `42501` an `authenticated` merchant receives when querying this table through PostgREST is the intended, designed behaviour — the table holds the raw and redacted storefront corpus and must never be readable by a merchant JWT. No `GRANT` is needed or wanted; adding `GRANT SELECT ... TO authenticated` would weaken the deliberate defense-in-depth `REVOKE`.
+- **Fix applied in this commit:** `rls.test.ts:1308-1322` now asserts `error.code === "42501"`, matching the table-level-REVOKE security boundary and consistent with the adjacent insert test that already asserts `expect(error).not.toBeNull()`. The `describe.skipIf(!SUPABASE_AVAILABLE)` guard is unchanged — these tests run only against live Supabase.
+- **Not a production bug, not a regression:** this was a stale test assertion, not a defect in the security model or in any Sprint 11 chunk. It surfaced as a red `pnpm test` at the branch tip and is corrected here so CI is green for merge.
 
 ---
 
