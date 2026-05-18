@@ -90,7 +90,7 @@ describe("POST /api/campaigns/create — auth", () => {
     const res = await POST(makeRequest({ groupSlug: "lapsed_vips" }));
     expect(res.status).toBe(401);
     const body = await res.json() as { error: string };
-    expect(body.error).toBe("unauthenticated");
+    expect(body.error).toBe("Your session has expired. Please refresh and try again.");
   });
 });
 

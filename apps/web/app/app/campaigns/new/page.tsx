@@ -30,7 +30,7 @@ export default async function NewCampaignPage({ searchParams }: PageProps) {
 
   return (
     <MerchantShell pageTitle="New campaign">
-      <CampaignWizard groups={groups} />
+      <CampaignWizard groups={groups} merchantId={merchant.id} />
     </MerchantShell>
   );
 }

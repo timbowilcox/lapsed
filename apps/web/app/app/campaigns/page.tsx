@@ -1,7 +1,8 @@
-// Campaigns — approval surface + primary create CTA (Sprint 11, chunk 7).
+// Campaigns — approval surface (Sprint 11, chunk 7).
 //
 // The agent drafts proposals from scored customer groups; the merchant
-// can also build one manually via the wizard at /app/campaigns/new.
+// reviews and approves them here. Merchants can also create a campaign
+// manually via the wizard (a secondary escape hatch, not the primary flow).
 // Approved campaigns enter the sending pipeline (decision 13).
 
 import Link from "next/link";
@@ -22,15 +23,15 @@ export default async function CampaignsPage({ searchParams }: PageProps) {
         <div>
           <h1 className="mb-4 text-h1 text-ink-900">Campaigns</h1>
           <p className="text-meta text-ink-500">
-            Review proposals from the agent or build a campaign yourself. Nothing is sent until
-            you approve.
+            The agent drafts campaigns from your scored customer groups. Review each proposal
+            below — nothing is sent until you approve.
           </p>
         </div>
         <Link
           href="/app/campaigns/new"
-          className="inline-flex shrink-0 items-center gap-8 rounded-md bg-ink-900 px-16 py-10 text-label text-cream-50 transition-colors hover:bg-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+          className="inline-flex shrink-0 items-center gap-8 rounded-md border border-border bg-cream-50 px-16 py-10 text-label text-ink-900 transition-colors hover:bg-cream-100 focus-visible:outline-none focus-visible:shadow-focus"
         >
-          Create campaign
+          Create manually
         </Link>
       </div>
 

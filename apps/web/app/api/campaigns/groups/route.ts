@@ -16,7 +16,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<NextResponse> {
   const merchant = await getMerchantFromSession();
-  if (!merchant) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  if (!merchant)
+    return NextResponse.json(
+      { error: "Your session has expired. Please refresh and try again." },
+      { status: 401 },
+    );
 
   const env = serverEnv();
   const client = createServiceClient({ url: env.supabaseUrl, serviceKey: env.supabaseSecretKey });

@@ -43,7 +43,29 @@ Read CLAUDE.md, section "Architectural load-bearing decisions". Internalize the 
 31. **Failed payments enter 7-day grace period before suspension.** Immediate revocation on first failed payment is hostile UX and a churn driver. Grace period gives merchants time to update expired cards or resolve transient bank issues. After grace expiry, entitlements drop to read-only (existing campaigns continue but no new sends, no new approvals, no exports).
 32. **Stripe webhooks are idempotent via Stripe event ID.** Same pattern as Twilio MessageSid idempotency from Sprint 07. The `subscription_events` table stores Stripe event IDs as the deduplication key. Re-delivery is safe — Stripe retries are real and frequent. Signature validation happens BEFORE body parsing.
 33. **Tax handling via Stripe Tax (automatic), not custom logic.** Stripe Tax computes AU GST, US state sales tax, UK VAT, EU VAT based on the merchant's billing address. Configure Stripe Tax once at account level; let it run on every invoice. Address collection is part of the subscription checkout flow.
+### Decision 34 — Demo mode pattern
 
+Demo mode renders the merchant dashboard against a fixture dataset (`packages/core/src/demo-fixtures/`), not against live DB. Demo routes are public at `/preview` (both `lapsed.ai/preview` marketing entry and `app.lapsed.ai/preview` direct). No demo data ever bleeds into live merchant pages — every authenticated `/app` route shows real data or a real empty state. Demo fixtures are versioned (`demo-fixtures/v{N}.json`) alongside the math; breaking changes to UI layouts require updated fixtures.
+
+Rationale: prospects can preview before installing; the founder/team can review populated screens without seeding real data; sales and onboarding demos work consistently. The strict separation between demo routes and live routes prevents the Sprint 09 walkthrough finding (sidebar badges showing demo counts while pages showed real empty states) from recurring.
+
+### Decision 35 — Vocabulary audit in CI
+
+User-facing strings never contain internal terminology. Internal terms include but are not limited to: sprint names (`Sprint NN`), chunk numbers (`Chunk N`), code identifiers (`arm_id`, `merchant_id`, table names like `attribution_results`, `bandit_state`), and engineering jargon (`posterior`, `holdout`, `cohort`) in user-visible paths. Internal use of these terms in code, tests, comments, and internal docs is unaffected — only user-rendered strings are gated.
+
+A new CI gate (`pnpm grep:vocab`) enforces this with a deny-list scoped to user-facing paths: `apps/web/app/**`, `apps/marketing/app/**`, `packages/ui/**` (rendered components only). The deny-list is maintained in `scripts/vocab-deny-list.json` and reviewed at each sprint kickoff.
+
+Placeholder copy uses confident future-tense when explaining latency or pending state ("Your first scoring run completes within 24 hours" NOT "Pending first score"). The full tone-of-voice guidelines live in `DESIGN-SYSTEM.md` under "Voice & tone".
+
+Rationale: Sprint 11 walkthrough surfaced two CRITICAL leaks ("Attribution in Sprint 08" on dashboard, "Pending — connects in Sprint 05" in settings integrations). Future sprints will inevitably introduce more without a CI gate. The gate is cheap; the embarrassment is expensive.
+
+### Decision 36 — Recommendations engine is deterministic
+
+The AI Insights/Recommendations layer (`packages/core/src/insights-engine.ts`) derives recommendations from existing DB signals (RFM scores, cohort sizes, bandit posteriors, opt-out trends, send-rate, attribution windows, payment status). No new ML models, no LLM calls for recommendation generation. Every recommendation has a stable schema: `id`, `priority` (HIGH/MEDIUM/LOW), `category` (cohort | arm | opt-out | conversation | payment), `signal_metric`, `signal_value`, `threshold`, `merchant_copy` (rendered text), `cta_action` (route + params), `created_at`, `expires_at`, `state` (active | dismissed | acted | snoozed).
+
+Recommendations are evaluated by a scheduled background job (every 6 hours, in vercel.json) and written to a new `insights` table (migration 0011). The table is append-only — state changes write new rows rather than mutating existing ones, preserving full audit history.
+
+Rationale: deterministic recommendations are debuggable (always traceable to a signal + threshold), reproducible (same inputs always yield same outputs), affordable (no LLM tokens per evaluation), and merchant-explainable ("Why was I shown this?" → "Because metric X crossed threshold Y"). LLM-generated recommendations would be opaque, expensive, and impossible to audit at scale. The deterministic constraint also forces clearer product thinking — every recommendation must be defensible as a numeric trigger.
 
 # What to audit
 

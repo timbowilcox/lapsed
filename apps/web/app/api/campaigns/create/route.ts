@@ -29,7 +29,11 @@ export const maxDuration = 60;
 
 export async function POST(req: Request): Promise<NextResponse> {
   const merchant = await getMerchantFromSession();
-  if (!merchant) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  if (!merchant)
+    return NextResponse.json(
+      { error: "Your session has expired. Please refresh and try again." },
+      { status: 401 },
+    );
 
   let raw: unknown;
   try {
@@ -62,16 +66,21 @@ export async function POST(req: Request): Promise<NextResponse> {
     maxRetries: 0,
   });
 
-  const result = await proposeCampaign({
+  let result: Awaited<ReturnType<typeof proposeCampaign>>;
+  try {
+    result = await proposeCampaign({
     serviceClient,
     anthropicClient,
     merchantId: merchant.id,
     groupSlug,
     dailyCapDefault: env.campaignProposalDailyCapDefault,
     holdoutRate: env.holdoutRate,
-    model: env.sonnetModel,
-    source: "manual",
-  });
+      model: env.sonnetModel,
+      source: "manual",
+    });
+  } catch {
+    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+  }
 
   if (!result.ok) {
     if (result.reason === "voice_profile") {
