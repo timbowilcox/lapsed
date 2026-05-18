@@ -62,7 +62,7 @@ export default async function SettingsBillingPage({ searchParams }: PageProps) {
   return (
     <MerchantShell pageTitle="Billing">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Billing</h2>
+        <h1 className="mb-4 text-h1 text-ink-900">Billing</h1>
         <p className="text-meta text-ink-500">
           Your subscription plan and payment management.
         </p>

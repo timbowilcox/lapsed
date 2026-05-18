@@ -7,6 +7,7 @@
 // merchant approves (decision 13).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Button,
   Card,
@@ -258,12 +259,12 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
             heading="No campaigns are waiting for review"
             body="When the agent finishes preparing a campaign for one of your customer groups, it will appear here for your approval. Nothing is sent until you approve it."
             secondaryAction={
-              <a
+              <Link
                 href="/preview/campaigns"
                 className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
               >
                 Preview what campaigns look like
-              </a>
+              </Link>
             }
           />
         </Panel>
