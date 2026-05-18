@@ -191,12 +191,15 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
     [isDemo, announce],
   );
 
-  if (insights.length === 0) return null;
-
+  // The aria-live region is always rendered — even when the list empties — so
+  // the final-card dismissal announcement is observed by screen readers before
+  // the component output changes. If we gated the entire return on
+  // insights.length > 0, the region would unmount before the announcement fires.
   return (
-    <section aria-label="Recommended actions" className="mb-32">
-      {/* Live region so screen readers announce dismissal/snooze actions. */}
+    <>
       <div aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
+      {insights.length === 0 ? null : (
+      <section aria-label="Recommended actions" className="mb-32">
       <div className="mb-16 flex items-center justify-between gap-12">
         <h2 className="text-h2 text-ink-900">For your review</h2>
         <Link
@@ -219,5 +222,7 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
         ))}
       </div>
     </section>
+      )}
+    </>
   );
 }

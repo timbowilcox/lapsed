@@ -39,6 +39,7 @@ const MERCHANT_A: SessionMerchant = {
   shopInitials: "SA",
   plan: "starter",
   planLabel: "Starter · 5k msgs",
+  onboardingState: "completed" as const,
   installedAt: "2026-05-16T09:00:00.000Z",
 };
 
@@ -49,6 +50,7 @@ const MERCHANT_B: SessionMerchant = {
   shopInitials: "SB",
   plan: "growth",
   planLabel: "Growth · 25k msgs",
+  onboardingState: "completed" as const,
   installedAt: "2026-05-16T09:00:00.000Z",
 };
 

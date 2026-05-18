@@ -422,6 +422,7 @@ export type Database = {
           id: string
           installed_at: string
           last_backfill_at: string | null
+          onboarding_state: string
           opt_out_keywords: string[]
           plan: string
           shopify_access_token: string
@@ -439,6 +440,7 @@ export type Database = {
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          onboarding_state?: string
           opt_out_keywords?: string[]
           plan?: string
           shopify_access_token: string
@@ -456,6 +458,7 @@ export type Database = {
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          onboarding_state?: string
           opt_out_keywords?: string[]
           plan?: string
           shopify_access_token?: string

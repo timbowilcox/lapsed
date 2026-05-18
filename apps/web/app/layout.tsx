@@ -21,6 +21,13 @@ const instrumentSerif = Instrument_Serif({
 export const metadata: Metadata = {
   title: "lapsed.",
   description: "Recover the customers you already paid for.",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "32x32" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 // NEXT_PUBLIC_SHOPIFY_API_KEY is the same value as SHOPIFY_API_KEY but

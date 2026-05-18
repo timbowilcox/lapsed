@@ -6,6 +6,7 @@
 // 4. Forecast        — projected next-30-day revenue + customer milestone
 
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { MerchantShell } from "./_components/merchant-shell";
 import { requireMerchant } from "@/app/lib/session";
 import { serverEnv } from "@/app/lib/env";
@@ -45,6 +46,12 @@ export default async function DashboardPage({
   // Await searchParams once to avoid double-resolution.
   const sp = await searchParams;
   const merchant = await requireMerchant({ searchParams: sp });
+
+  // First-run tour: redirect new merchants to the onboarding flow.
+  // "not_started" means the merchant has never opened the app after install.
+  if (merchant.onboardingState === "not_started") {
+    redirect("/app/onboarding");
+  }
 
   const period = parsePeriod(
     Array.isArray(sp.period) ? sp.period[0] : sp.period,

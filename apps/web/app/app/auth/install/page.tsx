@@ -95,8 +95,19 @@ export default function InstallPage() {
           </div>
         </Card>
 
-        <div className="flex flex-col items-center gap-8">
+        <div className="flex flex-col items-center gap-12">
           <InstallButton />
+          <p className="text-meta text-ink-400">
+            Not coming from Shopify Admin?{" "}
+            <a
+              href="https://apps.shopify.com/lapsed"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-ink-700 underline underline-offset-2 hover:text-ink-900 focus-visible:outline-none focus-visible:shadow-focus"
+            >
+              Find lapsed in the Shopify App Store
+            </a>
+          </p>
         </div>
       </main>
     </div>

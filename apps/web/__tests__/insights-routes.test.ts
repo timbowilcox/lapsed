@@ -69,6 +69,7 @@ const MERCHANT: SessionMerchant = {
   shopInitials: "TS",
   plan: "growth",
   planLabel: "Growth",
+  onboardingState: "completed" as const,
   installedAt: "2026-01-01T00:00:00Z",
 };
 

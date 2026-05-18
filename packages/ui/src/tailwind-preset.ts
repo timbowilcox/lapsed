@@ -84,6 +84,7 @@ const preset: Partial<Config> = {
         "28": "28px",
         "32": "32px",
         "40": "40px",
+        "44": "44px",
         "48": "48px",
         "64": "64px",
       },
