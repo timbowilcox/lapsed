@@ -234,13 +234,13 @@ If the foundation is sound: APPROVE, proceed to chunk 7. If gaps remain: ADJUST 
   - **Conversation signals** — "Reply rate has been declining for X weeks"
   - **Payment signals** — "Card on file expires in N days" (when Stripe data flows)
 - Each recommendation has: `id`, `priority`, `category`, `signal_metric`, `signal_value`, `threshold`, `merchant_copy`, `cta_action`, `created_at`, `expires_at`, `state` (active/dismissed/acted/snoozed).
-- New DB table `insights` (migration 0011). Append-only event log; state changes write new rows.
+- New DB table `insights` (migration 0016). Append-only event log; state changes write new rows.
 - Background job that runs every 6 hours, evaluates signals against thresholds, generates new recommendations, expires stale ones.
 - API routes for fetching active recommendations + state-change mutations.
 
 **Acceptance criteria:**
 - `insights-engine.ts` exports a stable interface: `generateRecommendations(merchantId)`, `getActive(merchantId)`, `markActed/Dismissed/Snoozed(id)`
-- Migration 0011 applied, RLS scoped to merchant
+- Migration 0016 applied, RLS scoped to merchant
 - Background job scheduled in vercel.json at 5,11,17,23 UTC (every 6 hours)
 - Tests: each category fires when threshold crossed, each clears when threshold un-crossed, dismissal persists, idempotency on re-evaluation
 - No LLM calls in this engine — verified by code-reviewer (search for any anthropic/openai SDK imports in the file)
@@ -340,14 +340,14 @@ If the foundation is sound: APPROVE, proceed to chunk 7. If gaps remain: ADJUST 
   6. (optional) Settings — "Customize opt-out behavior, agent tone, integrations."
   7. Done — "We'll email you when your first cohort is ready."
 - Skippable, dismissible per-step, completable in <2 minutes.
-- Persists state in `merchants.onboarding_state` (new column, migration 0012).
+- Persists state in `merchants.onboarding_state` (new column, migration 0017).
 - Install page guidance for merchants who land there without `?shop` param: "Find lapsed in the Shopify App Store" link (real URL) + "How to install" expandable section.
 - Brand polish: favicon (lapsed-mark.svg), OG meta tags on marketing pages, Twitter cards, 404 page (helpful, branded), 500 page (apologetic, branded), loading screen on initial app load (lapsed wordmark with spinner).
 
 **Acceptance criteria:**
 - First-run tour fires on first authenticated app load post-install
 - All 5-7 steps reachable, skippable, dismissible
-- State persists via `merchants.onboarding_state` enum (`not_started`, `in_progress`, `completed`, `skipped`)
+- State persists via `merchants.onboarding_state` enum (`not_started`, `in_progress`, `completed`, `skipped`) (migration 0017)
 - Install page shows "Find lapsed in the Shopify App Store" link with real URL
 - Favicon set on all routes
 - OG meta tags + Twitter cards on marketing pages
@@ -443,7 +443,7 @@ Same as prior sprints, plus the new ones:
 
 ### Hard stops requiring human approval
 
-- Migration changes beyond what chunks 8 (insights) and 12 (onboarding_state) specify
+- Migration changes beyond what chunks 8 (insights, migration 0016) and 12 (onboarding_state, migration 0017) specify
 - Architectural decision changes to the 36-decision list
 - Out-of-scope work (Sprint 12 items, v2 items)
 - New external dependencies (no new SDKs without explicit approval)
