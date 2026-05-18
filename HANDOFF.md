@@ -201,6 +201,8 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 - HIGH (campaigns p.98): "No 'Suggested campaigns' surface" → recommended actions surface on dashboard
 - HIGH (campaigns p.99): "No template library" → 6-template library on campaign creation page
 
+**Spin Up workflow change during final remediation:** The SuggestedCampaigns "Spin up" button was rewired from `POST /api/campaigns/create` (synchronous Anthropic call, redirect to approval queue) to `GET /app/campaigns/new?groupSlug=...` (open wizard pre-filled with the recommended group). This (a) honors Tenet 2 by removing the unsolicited Anthropic call on click, (b) made the insights E2E achievable without an Anthropic mock, and (c) added two clicks of friction to the AI-suggested-campaign path. The friction trade-off is worth revisiting in Sprint 12 if telemetry shows merchants abandoning at the wizard step.
+
 ---
 
 ### Criterion 8: AI Insights/Recommendations engine
@@ -324,6 +326,22 @@ The E2E test infrastructure fix for the `scoring_runs` FK constraint failure in 
 **Deferred — `ink-400` token in design system (systemic)**
 
 The `ink-400` token is used in 50+ places as "de-emphasised secondary text". Many of these are correctly below the WCAG threshold (11px, 12px at weight 400-500 where the threshold is 4.5:1 for any text below 18pt regular / 14pt bold). A full remediation requires (a) auditing which uses are on cream vs. white backgrounds, (b) deciding which are "meaningful text" vs. "decorative", and (c) either removing the token from the system or adding a `prose-dim` semantic alias that forces ink-500 for accessibility-required secondary text contexts. This is Sprint 12 design-system work.
+
+---
+
+## Known Pre-Existing Failures
+
+These are carry-forward bugs, not design choices. Unlike the Deliberate Deviations above (which are deliberate scope decisions), the items here are defects that pre-date Sprint 11 and remain unfixed because they fall outside the sprint's scope.
+
+**`packages/db/__tests__/rls.test.ts` — 2 tests fail with PostgreSQL error 42501**
+
+The two cases under "RLS — storefront_snapshots (Sprint 05, deny all authenticated)" fail with `42501 permission denied for table storefront_snapshots` instead of the expected RLS row-filtered empty result.
+
+- **Root cause:** Sprint 05 introduced the `storefront_snapshots` table without granting `SELECT` to the `authenticated` role. The RLS test was written expecting row-level filtering (query succeeds, returns zero rows for a non-owning merchant); the live database instead denies at the table-grant level.
+- **Production impact:** this is a real bug, not just a test artifact — an authenticated merchant querying `storefront_snapshots` through PostgREST receives a hard `42501` error rather than an empty result set.
+- **Why not remediated in Sprint 11:** no Sprint 11 acceptance criterion or `WALKTHROUGH-FINDINGS.md` finding references this table; fixing it is outside the UX-coherence scope of this sprint.
+- **Recommendation:** apply the one-line fix — `GRANT SELECT ON public.storefront_snapshots TO authenticated;` — either as an immediate hotfix outside Sprint 11, or folded into Sprint 12 alongside the operator-dashboard work. If the intended posture is genuinely table-level deny rather than RLS row-filtering, update `rls.test.ts` to assert the `42501` outcome instead.
+- **Status:** these 2 failures have been present throughout Sprint 11 — noted as pre-existing in the Chunk 6 audit and in subsequent chunk audits. They are not a regression introduced by any Sprint 11 chunk.
 
 ---
 
