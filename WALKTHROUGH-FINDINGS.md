@@ -3,7 +3,7 @@
 **Walkthrough date:** 18 May 2026
 **Type:** Founder-as-merchant pre-Sprint-11 walkthrough
 **Method:** Used lapsed.ai through the merchant lens after Sprint 09 production deploy. Pretended to be a brand-new merchant who had never seen the product. Captured everything that felt off.
-**Status:** ACTIVE — partial coverage. Still to walk through: campaigns list + detail, conversations list + detail, attribution per-campaign + rollup views, mobile responsiveness pass at 375px, marketing site full pass.
+**Status:** ACTIVE — empty states fully walked across all core screens. Populated states (campaigns with active proposals, conversation threads, attribution results) still pending — will walk during Sprint 11 when demo mode lands or via Shopify dev store sample data. Mobile responsiveness pass at 375px and marketing site full pass also still pending.
 **Purpose:** Input to SPRINT-11.md (UX coherence + onboarding polish sprint). Every finding here becomes a Sprint 11 acceptance criterion or is explicitly deferred to Sprint 12 / v2.
 
 ---
@@ -92,19 +92,30 @@ The walkthrough validates the core thesis of Sprint 11: per-chunk auditors appro
 - **[MEDIUM]** Sidebar nav items show counts (Lapsed customers 2,847, Campaigns 3, Conversations 4) but these are demo counts. When a real merchant has actual numbers, these become the authoritative counts. Decide and document: counts are real-data only.
 - **[LOW]** No breadcrumbs anywhere. Deep pages (campaign detail, conversation detail, attribution detail) will need breadcrumbs for orientation. Capture for Sprint 11.
 
-### Campaigns (still to walk fully)
+### Campaigns — app.lapsed.ai/app/campaigns
 
-- **[CRITICAL]** No discoverable way to create a new campaign. The primary product action — the thing the merchant pays $299+/month to do — has no surface. Either a "Create campaign" button in the page header, a "Suggested campaigns" surface that lets the merchant spin one up in a click, or a guided flow.
-- **[HIGH]** No "suggested campaigns" surface. The AI knows which cohorts are dormant, which message patterns work historically, and which arms have converged. Surfacing 2-4 proactive recommendations as one-click-to-implement cards is high-leverage onboarding.
-- _Still to walk: campaigns list view, campaign detail / approval flow, draft state, paused state._
+- **[CRITICAL]** No discoverable way to create a new campaign. The primary product action — the thing the merchant pays $299+/month to do — has no surface. The page is positioned entirely as agent-driven: "The agent drafts a campaign for each scored customer group. Review the proposals below and approve, edit, or reject them." That's fine as a default mode, but leaves no manual override for cases like "I want to launch a winback for my Mother's Day cohort right now." Need a "Create campaign" button AND a "Suggested campaigns" surface AND a template library.
+- **[HIGH]** No "Suggested campaigns" surface. The AI knows which cohorts are dormant, which message patterns work historically, and which arms have converged. Surfacing 2–4 proactive recommendations as one-click-to-implement cards is high-leverage onboarding AND a top differentiator from cheaper alternatives.
+- **[HIGH]** No template library. Premium SaaS pattern: proven campaign patterns (60-day winback, VIP recovery, replenishment, post-holiday re-engagement) that a merchant can adopt with one click and minimal customization.
+- **[MEDIUM]** Sidebar nav says "Campaigns" but page heading says "Campaign review". Pattern repeats on Attribution ("Attribution" vs "Revenue restored"). Either align the nav to merchant-facing names (Campaign review, Revenue restored) or treat the sidebar item as the section and route to multiple sub-pages. Currently each sidebar entry maps to one page, so the duality reads as inconsistent labelling.
+- **[LOW — POSITIVE]** Empty state copy is well-pitched: "No campaigns are waiting for review. When the agent finishes preparing a campaign for one of your customer groups, it will appear here for your approval." Keep this tone.
+- **[LOW — POSITIVE]** Page subtitle ("The agent drafts a campaign for each scored customer group. Review the proposals below and approve, edit, or reject them. Nothing is sent until you approve.") explains the model clearly and builds trust with the closing "Nothing is sent until you approve." Premium pattern; replicate where actions are gated by merchant approval.
+- _Still to walk: populated state — campaigns list with active proposals, campaign detail / approval flow, draft state, paused state. Will walk when demo mode lands or sample data flows through dev store._
 
-### Conversations (not yet walked)
+### Conversations — app.lapsed.ai/app/conversations
 
-- _Still to walk: list view, conversation detail, AI-drafted-reply review, sentiment surface._
+- **[LOW — POSITIVE]** Empty state copy is well-pitched: "Threads appear here once an approved campaign sends its first message." Keep.
+- **[LOW — POSITIVE]** Page subtitle ("Every two-way SMS thread the agent is running — one thread per customer, across all their campaigns.") clearly explains the model: per-customer threads, not per-campaign. Premium pattern; replicate the "one X per Y, across all their Z" structure where it applies.
+- **[MEDIUM]** Like the dashboard empty-state pattern, there's no bridge to action. Merchant sees "no conversations yet" and has no next step. Add a "Preview sample conversations" link to demo mode (or any contextual next-action CTA) so the empty state guides the merchant forward.
+- _Still to walk: populated state — list view with active threads, conversation detail, AI-drafted-reply review, sentiment surface, opt-out drill. Will walk when demo mode lands or sample data flows through dev store._
 
-### Attribution (not yet walked)
+### Attribution — app.lapsed.ai/app/attribution
 
-- _Still to walk: per-campaign attribution view, merchant rollup, holdout vs treatment comparison, methodology explainer._
+- **[LOW — POSITIVE]** Empty state copy is the best of the three core pages: "No attribution results yet. Figures appear here once a campaign's attribution window closes and the nightly batch has run." Explains both what will appear AND when. Premium pattern. Replicate this when/then structure to other empty states.
+- **[LOW — POSITIVE]** Page heading "Revenue restored" is excellent — confident, merchant-facing framing. Subtitle explains the methodology in plain language ("Incremental revenue from campaign-driven conversations, measured against each campaign's matched holdout group and reconciled against Shopify orders."). Premium pattern; demonstrates the math defensibility without jargon.
+- **[MEDIUM]** Filter tabs (Last 30 days / Last 90 days / All time) are interactive even when there's no data to filter. They invite a click that does nothing. Either hide the tabs in empty state OR visibly disable them with explanation ("Filters become available once attribution results are recorded").
+- **[MEDIUM]** Sidebar nav says "Attribution" but page heading says "Revenue restored" — see Campaigns finding on nav/page-heading inconsistency. Either align or accept and document the pattern.
+- _Still to walk: populated state — per-campaign attribution view, merchant rollup, holdout vs treatment comparison, methodology explainer surfaces, CFO-shareable export. Will walk when demo mode lands or sample data flows through dev store._
 
 ### Mobile responsiveness (not yet walked)
 
@@ -346,14 +357,14 @@ Capture for Sprint 11 to ensure nothing good regresses:
 
 To capture on the next walkthrough session before Sprint 11 spec is finalised:
 
-1. **Campaigns flow** — full walkthrough of create, approve, monitor, complete
-2. **Conversations** — list, thread detail, AI-drafted-reply review
-3. **Attribution** — per-campaign + rollup views, methodology surfaces
+1. **Campaigns flow (populated)** — campaign detail / approval flow, draft state, paused state
+2. **Conversations (populated)** — thread detail, AI-drafted-reply review
+3. **Attribution (populated)** — per-campaign view with results, merchant rollup, methodology surfaces
 4. **Mobile responsiveness** — every screen at 375px width
 5. **Keyboard navigation** — full app traversal using only Tab/Shift+Tab/Enter/Esc
 6. **Marketing site full pass** — every public page on lapsed.ai
-7. **Error states** — what happens on Shopify sync failure, Stripe payment failure, Twilio send failure, Sonnet API outage
-8. **Notification scenarios** — campaign launched, opt-out spike, payment failed (currently no surface for these)
+7. **Error states** — Shopify sync failure, Stripe payment failure, Twilio send failure, Sonnet API outage
+8. **Notification scenarios** — campaign launched, opt-out spike, payment failed
 
 Resume the walkthrough when fresh. Save the rest of the day's findings for the next session.
 
