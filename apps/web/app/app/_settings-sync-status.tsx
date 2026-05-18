@@ -22,9 +22,16 @@ export async function SettingsSyncStatus({ merchantId }: { merchantId: string })
         <div className="text-label text-ink-700">Last synced</div>
         <div className="mt-2 text-meta text-ink-500">{lastSyncedLabel}</div>
       </div>
-      <Button variant="secondary" disabled>
-        Re-sync
-      </Button>
+      <div className="flex flex-col items-end gap-4">
+        <Button variant="secondary" disabled aria-describedby="resync-note">
+          Re-sync
+        </Button>
+        {!summary.last_synced_at && (
+          <p id="resync-note" className="text-mini text-ink-400">
+            Available after your first nightly sync at 03:00 UTC.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

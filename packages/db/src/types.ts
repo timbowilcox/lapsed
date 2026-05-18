@@ -417,10 +417,12 @@ export type Database = {
       }
       merchants: {
         Row: {
+          agent_draft_defaults: string[]
           created_at: string
           id: string
           installed_at: string
           last_backfill_at: string | null
+          opt_out_keywords: string[]
           plan: string
           shopify_access_token: string
           shopify_scope: string
@@ -432,10 +434,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agent_draft_defaults?: string[]
           created_at?: string
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          opt_out_keywords?: string[]
           plan?: string
           shopify_access_token: string
           shopify_scope: string
@@ -447,10 +451,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agent_draft_defaults?: string[]
           created_at?: string
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          opt_out_keywords?: string[]
           plan?: string
           shopify_access_token?: string
           shopify_scope?: string

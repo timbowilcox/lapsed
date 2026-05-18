@@ -1588,3 +1588,52 @@ export async function getMerchantAttributionRollup(
     })),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Opt-out keyword configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OptOutConfig {
+  optOutKeywords: string[];
+  agentDraftDefaults: string[];
+}
+
+export async function getMerchantOptOutConfig(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<OptOutConfig> {
+  const { data, error } = await serviceClient
+    .from("merchants")
+    .select("opt_out_keywords, agent_draft_defaults")
+    .eq("id", merchantId)
+    .single();
+  if (error) throw error;
+  return {
+    optOutKeywords: data.opt_out_keywords ?? [],
+    agentDraftDefaults: data.agent_draft_defaults ?? [],
+  };
+}
+
+export async function updateMerchantOptOutKeywords(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  keywords: string[],
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("merchants")
+    .update({ opt_out_keywords: keywords })
+    .eq("id", merchantId);
+  if (error) throw error;
+}
+
+export async function updateMerchantAgentDraftDefaults(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  keywords: string[],
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("merchants")
+    .update({ agent_draft_defaults: keywords })
+    .eq("id", merchantId);
+  if (error) throw error;
+}

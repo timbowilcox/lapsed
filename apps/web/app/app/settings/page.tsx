@@ -11,6 +11,7 @@ import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
 import { SettingsSyncStatus, SettingsSyncStatusSkeleton } from "../_settings-sync-status";
 import { BrandVoiceSettings } from "./_brand-voice-settings";
+import { OptOutKeywordsSettings } from "./_opt-out-keywords-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export default async function SettingsPage({ searchParams }: PageProps) {
   return (
     <MerchantShell pageTitle="Settings">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Settings</h2>
+        <h1 className="mb-4 text-h1 text-ink-900">Settings</h1>
         <p className="text-meta text-ink-500">
           Shop details, brand voice, opt-out keywords and integration status.
         </p>
@@ -61,18 +62,8 @@ export default async function SettingsPage({ searchParams }: PageProps) {
         <Panel>
           <PanelHeader title="Opt-out keywords" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-24">
-              <p className="text-meta text-ink-500">
-                Any inbound SMS matching these (case-insensitive) opts the customer out
-                immediately. STOP and STOPALL are reserved by Twilio.
-              </p>
-              <div className="flex flex-wrap gap-8">
-                <Tag tone="stalled">STOP</Tag>
-                <Tag tone="stalled">STOPALL</Tag>
-              </div>
-              <p className="mt-8 text-mini text-ink-500">
-                Additional opt-out keywords can be configured here once messaging is active.
-              </p>
+            <div className="p-24">
+              <OptOutKeywordsSettings />
             </div>
           </PanelBody>
         </Panel>

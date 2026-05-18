@@ -47,7 +47,7 @@ export function EmptyState({ icon, heading, body, cta, secondaryAction, classNam
           {icon}
         </div>
       )}
-      <p role="heading" aria-level={3} className="text-h3 text-ink-900">{heading}</p>
+      <h3 className="text-h3 text-ink-900">{heading}</h3>
       <p className="mt-8 max-w-sm text-meta text-ink-500">{body}</p>
       {cta && <div className="mt-20">{cta}</div>}
       {secondaryAction && <div className="mt-12">{secondaryAction}</div>}
