@@ -17,23 +17,23 @@ export default function DemoAttributionPage() {
 
       <div className="mb-16 grid grid-cols-3 gap-12">
         <div className="rounded-lg border border-border bg-cream-50 px-24 py-20">
-          <div className="mb-4 text-label text-ink-500">Total restored · last 30 days</div>
+          <div className="mb-4 text-label text-ink-500">Incremental revenue · last 30 days</div>
+          <div className="text-display tabular-nums text-ink-900">
+            ${formatCount(attribution.incrementalRevenue)}
+          </div>
+          <div className="mt-4 text-mini text-ink-500">
+            {attribution.incrementalityPct}% of gross · 95% CI ${formatCount(attribution.ciLow)}–$
+            {formatCount(attribution.ciHigh)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-cream-50 px-24 py-20">
+          <div className="mb-4 text-label text-ink-500">Gross restored</div>
           <div className="text-display tabular-nums text-ink-900">
             ${formatCount(attribution.totalRestoredRevenue)}
           </div>
           <div className="mt-4 text-mini text-ink-500">
             <span className="text-success-500">↑ {attribution.vsPreviousPeriodPct}%</span> vs
             prior period
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-cream-50 px-24 py-20">
-          <div className="mb-4 text-label text-ink-500">Incremental revenue</div>
-          <div className="text-display tabular-nums text-ink-900">
-            ${formatCount(attribution.incrementalRevenue)}
-          </div>
-          <div className="mt-4 text-mini text-ink-500">
-            {attribution.incrementalityPct}% incrementality · ${formatCount(attribution.ciLow)}–$
-            {formatCount(attribution.ciHigh)} 95% CI
           </div>
         </div>
         <div className="rounded-lg border border-border bg-cream-50 px-24 py-20">
