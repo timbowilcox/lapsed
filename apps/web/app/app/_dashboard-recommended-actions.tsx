@@ -8,7 +8,7 @@
 //
 // Demo mode: accepts demoInsights prop; when provided, skips the API fetch.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Tag } from "@lapsed/ui";
 import type { InsightRow } from "@lapsed/db";
@@ -46,7 +46,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 function categoryLabel(cat: string): string {
-  return CATEGORY_LABEL[cat] ?? cat;
+  return CATEGORY_LABEL[cat] ?? "Other";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ function ActionCard({
           {categoryLabel(insight.category)}
         </Tag>
         {insight.priority === "HIGH" && (
-          <span className="text-mini font-medium text-danger-600">Needs attention</span>
+          <span className="text-mini font-medium text-ink-500">High priority</span>
         )}
       </div>
 
@@ -132,11 +132,19 @@ interface Props {
 
 export function DashboardRecommendedActions({ initialInsights, demoInsights }: Props) {
   const isDemo = !!demoInsights;
+  // Show at most 3 cards — caller is responsible for priority sort before
+  // passing. Demo fixtures already carry priority; live path sorted in page.tsx.
   const seed: ActionInsight[] = isDemo
-    ? demoInsights.slice(0, 5).map(toActionInsight)
-    : (initialInsights ?? []).slice(0, 5).map(toActionInsight);
+    ? demoInsights.slice(0, 3).map(toActionInsight)
+    : (initialInsights ?? []).slice(0, 3).map(toActionInsight);
 
   const mountedRef = useRef(true);
+  // Keep mountedRef current so async callbacks don't set state after unmount.
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [insights, setInsights] = useState<ActionInsight[]>(seed);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
@@ -169,12 +177,15 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
   return (
     <section aria-label="Recommended actions" className="mb-32">
       <div className="mb-16 flex items-center justify-between gap-12">
-        <h2 className="text-h2 text-ink-900">What needs your attention</h2>
-        <span className="text-meta text-ink-400">
-          {insights.length} recommendation{insights.length !== 1 ? "s" : ""}
-        </span>
+        <h2 className="text-h2 text-ink-900">For your review</h2>
+        <Link
+          href="/app/insights"
+          className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-600 focus-visible:outline-none focus-visible:shadow-focus"
+        >
+          See all recommendations →
+        </Link>
       </div>
-      <div className="grid grid-cols-1 gap-12 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-12">
         {insights.map((insight) => (
           <ActionCard
             key={insight.id}

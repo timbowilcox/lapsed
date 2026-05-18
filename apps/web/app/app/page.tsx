@@ -2,7 +2,7 @@
 //
 // 1. Headline outcome — incremental revenue, counterfactual, 95% CI, period toggle
 // 2. Active state   — lifecycle pipeline + approved campaign health rows
-// 3. Recommended actions — top 5 insights from the insights engine
+// 3. Recommended actions — top 3 insights from the insights engine (by priority)
 // 4. Forecast        — projected next-30-day revenue + customer milestone
 
 import { Suspense } from "react";
@@ -34,15 +34,17 @@ export const dynamic = "force-dynamic";
 
 type RawSearchParams = Record<string, string | string[] | undefined>;
 
+// Priority order for sorting insights before slicing to top 3.
+const INSIGHT_PRIORITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+
 export default async function DashboardPage({
   searchParams,
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  const [merchant, sp] = await Promise.all([
-    requireMerchant({ searchParams: await searchParams }),
-    searchParams,
-  ]);
+  // Await searchParams once to avoid double-resolution.
+  const sp = await searchParams;
+  const merchant = await requireMerchant({ searchParams: sp });
 
   const period = parsePeriod(
     Array.isArray(sp.period) ? sp.period[0] : sp.period,
@@ -67,21 +69,41 @@ export default async function DashboardPage({
       getLatestScoringRun(serviceClient, merchant.id).catch(() => null),
     ]);
 
-  const periodStats = computePeriodStats(rollup.campaigns, period);
-  const forecast = computeForecast(rollup.campaigns);
+  const now = new Date();
+  const periodStats = computePeriodStats(rollup.campaigns, period, now);
+  const forecast = computeForecast(rollup.campaigns, now);
 
-  // Build by-day chart data from window-close dates (one dot per campaign close).
+  // Build by-day chart data scoped to the active period so the sparkline
+  // matches the headline number — not an all-time view.
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const periodCutoff =
+    period === "all"
+      ? null
+      : new Date(now.getTime() - (period === "30" ? 30 : 90) * msPerDay);
+
   const byDay = rollup.campaigns
-    .filter((c) => c.incrementalRevenueCents > 0)
+    .filter(
+      (c) =>
+        c.incrementalRevenueCents > 0 &&
+        (periodCutoff === null || new Date(c.windowCloseDate) >= periodCutoff),
+    )
     .map((c) => ({
       date: c.windowCloseDate,
       value: Math.round(c.incrementalRevenueCents / 100),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  // Sort insights by priority (HIGH first) before passing to section 3.
+  const sortedInsights = [...activeInsights].sort(
+    (a, b) =>
+      (INSIGHT_PRIORITY_ORDER[a.priority] ?? 3) -
+      (INSIGHT_PRIORITY_ORDER[b.priority] ?? 3),
+  );
+
   const campaignHealthRows = deriveCampaignHealthRows(
     approvedCampaigns,
     groupLabel,
+    now,
   );
 
   return (
@@ -99,9 +121,9 @@ export default async function DashboardPage({
         campaigns={campaignHealthRows}
       />
 
-      {/* Section 3 — Recommended actions (client component, SSR-hydrated) */}
+      {/* Section 3 — Recommended actions (client component, SSR-hydrated, top 3 by priority) */}
       <Suspense fallback={null}>
-        <DashboardRecommendedActions initialInsights={activeInsights} />
+        <DashboardRecommendedActions initialInsights={sortedInsights} />
       </Suspense>
 
       {/* Section 4 — Forecast */}

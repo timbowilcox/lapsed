@@ -1628,6 +1628,11 @@ export async function getLifecyclePipelineCounts(
     ),
   );
   const [newR, engagedR, atRiskR, lapsedR, wonBackR, churnedR] = results;
+  // Propagate the first sub-query error — avoids silently returning zeroes
+  // when the DB is unavailable or the table doesn't exist yet.
+  for (const r of results) {
+    if (r.error) throw r.error;
+  }
   return {
     new: newR.count ?? 0,
     engaged: engagedR.count ?? 0,

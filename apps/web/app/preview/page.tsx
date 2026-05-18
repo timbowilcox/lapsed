@@ -53,7 +53,7 @@ export default function DemoPage() {
       name: c.name,
       daysRunning: c.launchedAt
         ? Math.floor(
-            (new Date("2026-05-18").getTime() - new Date(c.launchedAt).getTime()) /
+            (Date.now() - new Date(c.launchedAt).getTime()) /
               (24 * 60 * 60 * 1000),
           )
         : 0,
@@ -64,7 +64,8 @@ export default function DemoPage() {
   // ── Section 4: Forecast ───────────────────────────────────────────────────
 
   const forecast: ForecastStats = {
-    projectedNextMonthCents: Math.round(attribution.incrementalRevenue * 1.12) * 100,
+    // Flat carry-forward matching the live computeForecast methodology (no growth adjustment).
+    projectedNextMonthCents: attribution.incrementalRevenue * 100,
     hasData: true,
   };
 

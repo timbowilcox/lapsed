@@ -82,9 +82,9 @@ interface DashboardHeadlineProps {
 }
 
 const METHODOLOGY_TEXT =
-  "Incremental revenue uses a 10% control group per campaign with symmetric intent-to-treat methodology. " +
-  "Restored revenue = campaign group revenue − control group expected baseline, reconciled against Shopify orders within the attribution window. " +
-  "The 95% CI is derived from Welch's t-test across campaign and control groups.";
+  "Incremental revenue uses a 10% comparison group per campaign. " +
+  "Restored revenue = campaign group revenue − comparison group expected baseline, reconciled against Shopify orders within the attribution window. " +
+  "The 95% CI is derived from a two-sample statistical comparison across campaign and comparison groups.";
 
 export function DashboardHeadline({ stats, period, byDay }: DashboardHeadlineProps) {
   if (!stats.hasData) {
@@ -94,7 +94,7 @@ export function DashboardHeadline({ stats, period, byDay }: DashboardHeadlinePro
           <div className="mb-4 text-label text-ink-500">Restored revenue</div>
           <EmptyState
             heading="No attribution results yet"
-            body="Your first restored revenue figure appears once a campaign's attribution window closes — typically 14 days after launch. The control group comparison runs nightly."
+            body="Your first restored revenue figure appears once a campaign's attribution window closes — typically 14 days after launch. The comparison group analysis runs nightly."
             secondaryAction={
               <Link
                 href="/preview"
@@ -146,7 +146,7 @@ export function DashboardHeadline({ stats, period, byDay }: DashboardHeadlinePro
           <span className="flex flex-wrap items-center gap-x-12 gap-y-4">
             <span>
               Revenue your customers would not have spent without lapsed.ai{" "}
-              <span className="text-ink-400">(control group adjusted)</span>
+              <span className="text-ink-400">(comparison group adjusted)</span>
             </span>
             {hasCi && (
               <span className="text-ink-400">

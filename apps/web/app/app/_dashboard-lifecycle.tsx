@@ -94,15 +94,7 @@ function CampaignHealthTable({ campaigns }: { campaigns: CampaignHealthRow[] }) 
           <tr className="border-b border-border text-left text-ink-400">
             <th className="pb-8 pr-16 font-medium">Campaign</th>
             <th className="pb-8 pr-16 font-medium tabular-nums">Days running</th>
-            <th className="pb-8 pr-16 font-medium tabular-nums">Variants</th>
-            <th className="pb-8 font-medium">
-              <Link
-                href="/app/campaigns"
-                className="text-ink-400 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
-              >
-                View all
-              </Link>
-            </th>
+            <th className="pb-8 font-medium tabular-nums">Variants</th>
           </tr>
         </thead>
         <tbody>
@@ -112,16 +104,7 @@ function CampaignHealthTable({ campaigns }: { campaigns: CampaignHealthRow[] }) 
               <td className="py-10 pr-16 tabular-nums text-ink-600">
                 {row.daysRunning > 0 ? `${row.daysRunning}d` : "Today"}
               </td>
-              <td className="py-10 pr-16 tabular-nums text-ink-600">{row.variantCount}</td>
-              <td className="py-10">
-                <Link
-                  href={`/app/campaigns`}
-                  className="text-mini text-ink-400 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
-                  aria-label={`View ${row.name} campaign`}
-                >
-                  →
-                </Link>
-              </td>
+              <td className="py-10 tabular-nums text-ink-600">{row.variantCount}</td>
             </tr>
           ))}
         </tbody>
@@ -151,7 +134,15 @@ export function DashboardLifecycle({ lifecycleCounts, campaigns }: DashboardLife
 
         {/* Campaign health rows */}
         <div className="rounded-lg border border-border bg-cream-50 p-20">
-          <h3 className="mb-12 text-label font-medium text-ink-700">Active campaigns</h3>
+          <div className="mb-12 flex items-center justify-between gap-8">
+            <h3 className="text-label font-medium text-ink-700">Active campaigns</h3>
+            <Link
+              href="/app/campaigns"
+              className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+            >
+              View all
+            </Link>
+          </div>
           <CampaignHealthTable campaigns={campaigns} />
         </div>
       </div>
