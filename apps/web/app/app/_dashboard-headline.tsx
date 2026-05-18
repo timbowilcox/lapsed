@@ -21,7 +21,7 @@ function MethodologyTooltip({ text }: { text: string }) {
       <button
         type="button"
         aria-label="How is this calculated?"
-        className="inline-flex h-16 w-16 items-center justify-center rounded-full text-ink-400 transition-colors hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+        className="inline-flex h-24 w-24 items-center justify-center rounded-full text-ink-400 transition-colors hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
           <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
@@ -157,8 +157,8 @@ export function DashboardHeadline({ stats, period, byDay }: DashboardHeadlinePro
               <span
                 className={
                   stats.vsPreviousPeriodPct! >= 0
-                    ? "font-medium text-success-600"
-                    : "font-medium text-danger-600"
+                    ? "font-medium text-success-500"
+                    : "font-medium text-danger-700"
                 }
               >
                 {vsText}

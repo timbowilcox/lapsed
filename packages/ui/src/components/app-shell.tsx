@@ -126,7 +126,7 @@ export function AppShell({
               type="button"
               aria-label="Open navigation menu"
               aria-expanded={mobileNavOpen}
-              aria-controls="mobile-nav-sheet"
+              aria-controls={mobileNavOpen ? "mobile-nav-sheet" : undefined}
               onClick={() => setMobileNavOpen(true)}
               className="mr-12 inline-flex h-44 w-44 items-center justify-center rounded-md text-ink-700 transition-colors hover:bg-cream-200 focus-visible:outline-none focus-visible:shadow-focus md:hidden"
             >
@@ -209,7 +209,7 @@ export function AppShell({
             </div>
           </header>
 
-          <div id="main-content" className="flex-1 overflow-y-auto p-16 md:p-32">
+          <div id="main-content" className="flex-1 md:overflow-y-auto p-16 md:p-32">
             <div className="content-container">{children}</div>
           </div>
         </main>

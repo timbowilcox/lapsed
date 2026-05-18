@@ -151,7 +151,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
   return (
     <>
       <div className="flex flex-wrap items-center gap-12 border-b border-border p-16">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search
             strokeWidth={1.75}
             size={16}

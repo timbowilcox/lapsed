@@ -29,9 +29,9 @@ interface Stage {
 const STAGES: Stage[] = [
   { key: "new",      label: "New",        barClass: "bg-lavender-400", countClass: "text-ink-700" },
   { key: "engaged",  label: "Engaged",    barClass: "bg-success-500",  countClass: "text-ink-700" },
-  { key: "at_risk",  label: "At-risk",    barClass: "bg-warning-400",  countClass: "text-ink-700" },
-  { key: "lapsed",   label: "Lapsed",     barClass: "bg-danger-400",   countClass: "text-ink-700" },
-  { key: "won_back", label: "Restored",   barClass: "bg-success-600",  countClass: "text-ink-700" },
+  { key: "at_risk",  label: "At-risk",    barClass: "bg-warning-500",  countClass: "text-ink-700" },
+  { key: "lapsed",   label: "Lapsed",     barClass: "bg-danger-500",   countClass: "text-ink-700" },
+  { key: "won_back", label: "Restored",   barClass: "bg-success-500",  countClass: "text-ink-700" },
   { key: "churned",  label: "Churned",    barClass: "bg-ink-300",      countClass: "text-ink-500" },
 ];
 

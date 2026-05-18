@@ -99,7 +99,7 @@ function ActionCard({
             onClick={() => onSnooze(insight.id)}
             disabled={snoozing || dismissing}
             className="text-mini text-ink-400 underline underline-offset-2 transition-colors hover:text-ink-600 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
-            aria-label="Snooze this recommendation"
+            aria-label={`Snooze for 7 days: ${insight.merchantCopy}`}
           >
             Snooze 7 days
           </button>
@@ -109,7 +109,7 @@ function ActionCard({
             onClick={() => onDismiss(insight.id)}
             disabled={dismissing || snoozing}
             className="text-mini text-ink-400 underline underline-offset-2 transition-colors hover:text-ink-600 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
-            aria-label="Dismiss this recommendation"
+            aria-label={`Dismiss: ${insight.merchantCopy}`}
           >
             Dismiss
           </button>
@@ -148,6 +148,25 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
   const [insights, setInsights] = useState<ActionInsight[]>(seed);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
+  // Separate announcement state avoids the race where the live region clears
+  // before the screen reader has finished speaking the previous message.
+  const [announcement, setAnnouncement] = useState<string>("");
+  const announcementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function announce(message: string) {
+    if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
+    setAnnouncement(message);
+    // Clear after 3 s so stale messages don't re-announce on re-render.
+    announcementTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) setAnnouncement("");
+    }, 3000);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
+    };
+  }, []);
 
   const transition = useCallback(
     async (id: string, action: "dismiss" | "snooze") => {
@@ -155,14 +174,20 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
       setActive(id);
       try {
         if (!isDemo) {
-          await fetch(`/api/insights/${id}?action=${action}`, { method: "POST" });
+          const res = await fetch(`/api/insights/${id}?action=${action}`, { method: "POST" });
+          if (!res.ok) {
+            // Non-2xx — log but still optimistically remove from UI
+            console.warn(`Insight ${action} returned ${res.status}`);
+          }
         }
         if (mountedRef.current) {
+          announce(action === "dismiss" ? "Recommendation dismissed" : "Recommendation snoozed for 7 days");
           setInsights((prev) => prev.filter((i) => i.id !== id));
         }
       } catch {
-        // non-critical — optimistically remove
+        // Network failure — optimistically remove
         if (mountedRef.current) {
+          announce(action === "dismiss" ? "Recommendation dismissed" : "Recommendation snoozed for 7 days");
           setInsights((prev) => prev.filter((i) => i.id !== id));
         }
       } finally {
@@ -177,13 +202,7 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
   return (
     <section aria-label="Recommended actions" className="mb-32">
       {/* Live region so screen readers announce dismissal/snooze actions. */}
-      <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {dismissingId || snoozingId
-          ? dismissingId
-            ? "Recommendation dismissed"
-            : "Recommendation snoozed for 7 days"
-          : ""}
-      </div>
+      <div aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
       <div className="mb-16 flex items-center justify-between gap-12">
         <h2 className="text-h2 text-ink-900">For your review</h2>
         <Link

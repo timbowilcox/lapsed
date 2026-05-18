@@ -22,7 +22,9 @@ const preset: Partial<Config> = {
         ink: {
           900: "#0A0A0B",
           700: "#2E2C2A",
+          600: "#48453F",
           500: "#5F5C57",
+          400: "#79766F",
           300: "#94918A",
         },
         success: {

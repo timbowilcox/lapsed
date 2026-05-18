@@ -37,10 +37,11 @@ export const SheetContent = forwardRef<
         )}
         {...props}
       >
+        <DialogPrimitive.Title className="sr-only">Navigation menu</DialogPrimitive.Title>
         {children}
         <DialogPrimitive.Close
           aria-label="Close menu"
-          className="absolute right-12 top-12 inline-flex h-32 w-32 items-center justify-center rounded-sm text-ink-900 hover:bg-white/20"
+          className="absolute right-12 top-12 inline-flex h-44 w-44 items-center justify-center rounded-sm text-ink-900 hover:bg-white/20 focus-visible:outline-none focus-visible:shadow-focus"
         >
           <X strokeWidth={1.75} size={18} />
         </DialogPrimitive.Close>

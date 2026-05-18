@@ -17,6 +17,7 @@ export const HeroMetric = forwardRef<HTMLDivElement, HeroMetricProps>(function H
   return (
     <section
       ref={ref}
+      aria-label={label}
       className={cn(
         "grid grid-cols-1 items-center gap-20 rounded-lg border border-border bg-cream-50 px-16 py-20 sm:grid-cols-[1fr_auto] sm:gap-32 sm:px-32 sm:py-28",
         className,
