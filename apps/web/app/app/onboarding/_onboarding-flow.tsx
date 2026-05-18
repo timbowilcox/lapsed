@@ -74,17 +74,26 @@ const STEPS: StepDef[] = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Progress indicator
+//
+// Uses role="progressbar" — the correct semantic for a visual position
+// indicator. The dots are aria-hidden (decorative); position is conveyed
+// via aria-valuenow + aria-valuemax and the "Step N of 5" text in the card.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function StepDots({ total, current }: { total: number; current: number }) {
   return (
-    <div className="flex items-center gap-6" role="tablist" aria-label="Onboarding progress">
+    <div
+      className="flex items-center gap-6"
+      role="progressbar"
+      aria-valuenow={current + 1}
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-label={`Step ${current + 1} of ${total}`}
+    >
       {Array.from({ length: total }).map((_, i) => (
         <span
           key={i}
-          role="tab"
-          aria-selected={i === current}
-          aria-label={`Step ${i + 1}${i < current ? " (completed)" : i === current ? " (current)" : ""}`}
+          aria-hidden="true"
           className={`transition-all ${
             i < current
               ? "h-8 w-8 rounded-pill bg-success-500"
@@ -107,6 +116,9 @@ export function OnboardingFlow() {
   const [stepIdx, setStepIdx] = useState(0);
   const [transitioning, setTransitioning] = useState(false);
   const mountedRef = useRef(true);
+  // Focus management: focus the step heading when the step changes so
+  // screen readers announce the new step content automatically.
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     // Mark onboarding as in_progress on first render. Fire-and-forget —
@@ -120,6 +132,12 @@ export function OnboardingFlow() {
     });
     return () => { mountedRef.current = false; };
   }, []);
+
+  // Move focus to the new step heading on step transitions. Skip on mount
+  // (stepIdx === 0 is the initial render; no focus steal on page load).
+  useEffect(() => {
+    if (stepIdx > 0) stepHeadingRef.current?.focus();
+  }, [stepIdx]);
 
   // Wraps the terminal state write + navigation. Resets transitioning on
   // failure so the merchant is never permanently locked out of the UI.
@@ -157,7 +175,7 @@ export function OnboardingFlow() {
             type="button"
             onClick={() => void complete("skipped")}
             disabled={transitioning}
-            className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
+            className="text-mini text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
           >
             Skip tour
           </button>
@@ -171,18 +189,27 @@ export function OnboardingFlow() {
 
       {/* Step card */}
       <div className="rounded-xl border border-border bg-cream-50 p-32">
-        {/* Icon */}
-        <div className="mb-20 flex h-56 w-56 items-center justify-center rounded-lg bg-lavender-50 text-lavender-700">
+        {/* Icon — decorative; aria-hidden on the SVG via the wrapper */}
+        <div
+          className="mb-20 flex h-56 w-56 items-center justify-center rounded-lg bg-lavender-50 text-lavender-700"
+          aria-hidden="true"
+        >
           <IconComp strokeWidth={1.75} size={24} />
         </div>
 
-        {/* Step counter */}
-        <div className="mb-8 text-micro uppercase tracking-widest text-ink-400">
+        {/* Step counter — ink-500 for WCAG 1.4.3 (4.5:1 on cream-50) */}
+        <div className="mb-8 text-micro uppercase tracking-widest text-ink-500">
           Step {stepIdx + 1} of {STEPS.length}
         </div>
 
-        {/* Title */}
-        <h2 className="mb-12 text-h2 text-ink-900">{step.title}</h2>
+        {/* Title — receives focus on step transition for screen reader announcement */}
+        <h2
+          ref={stepHeadingRef}
+          tabIndex={-1}
+          className="mb-12 text-h2 text-ink-900 focus-visible:outline-none"
+        >
+          {step.title}
+        </h2>
 
         {/* Body */}
         <p className="mb-20 text-body text-ink-600">{step.body}</p>
@@ -201,7 +228,7 @@ export function OnboardingFlow() {
               type="button"
               onClick={() => setStepIdx((s) => Math.max(0, s - 1))}
               disabled={transitioning}
-              className="text-mini text-ink-400 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
+              className="text-mini text-ink-500 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
             >
               ← Back
             </button>
@@ -225,8 +252,9 @@ export function OnboardingFlow() {
         </div>
       </div>
 
-      {/* Reassurance footer — steps 2+ include a low-weight skip link. */}
-      <p className="mt-16 text-center text-meta text-ink-400">
+      {/* Reassurance footer — steps 2+ include a low-weight skip link.
+          ink-500 for WCAG 1.4.3 compliance on cream-100 background. */}
+      <p className="mt-16 text-center text-meta text-ink-500">
         Nothing sends until you approve a campaign.{" "}
         {stepIdx > 0 && (
           <button

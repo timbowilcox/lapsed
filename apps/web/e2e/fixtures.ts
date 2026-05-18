@@ -99,13 +99,17 @@ export async function removeTestMerchant(): Promise<void> {
   const pg = new PgClient({ connectionString: env.supabaseDbUrl });
   await pg.connect();
   try {
-    // merchant_subscriptions FKs merchants with ON DELETE RESTRICT — clear it
-    // first so removeTestMerchant works whether or not a subscription was seeded.
+    // Delete dependent rows in FK order before removing the merchant.
+    // Each table uses ON DELETE RESTRICT so dependent rows must be cleared first.
+    const merchantSubQuery = `
+      select id from public.merchants where shopify_shop_domain = $1
+    `;
     await pg.query(
-      `delete from public.merchant_subscriptions
-       where merchant_id in (
-         select id from public.merchants where shopify_shop_domain = $1
-       )`,
+      `delete from public.scoring_runs where merchant_id in (${merchantSubQuery})`,
+      [TEST_MERCHANT_SHOP],
+    );
+    await pg.query(
+      `delete from public.merchant_subscriptions where merchant_id in (${merchantSubQuery})`,
       [TEST_MERCHANT_SHOP],
     );
     await pg.query(

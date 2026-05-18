@@ -20,6 +20,7 @@ const routes = [
   { name: "billing-subscribe", path: "/app/billing/subscribe" },
   { name: "billing-success", path: "/app/billing/success" },
   { name: "settings", path: "/app/settings" },
+  { name: "onboarding", path: "/app/onboarding" },
 ];
 
 const previewRoutes = [

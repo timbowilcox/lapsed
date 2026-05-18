@@ -17,12 +17,14 @@ export default function NotFound() {
         >
           Back to homepage
         </Link>
-        <Link
+        <a
           href="https://app.lapsed.ai/preview"
+          target="_blank"
+          rel="noopener noreferrer"
           className="inline-flex items-center rounded-md border border-border bg-cream-100 px-16 py-10 text-body-strong text-ink-900 transition-colors hover:bg-cream-200 focus-visible:outline-none focus-visible:shadow-focus"
         >
           Preview the product
-        </Link>
+        </a>
       </div>
     </div>
   );

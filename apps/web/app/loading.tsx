@@ -5,13 +5,13 @@
 export default function RootLoading() {
   return (
     <div
-      className="flex min-h-screen items-center justify-center bg-cream-100"
-      aria-busy="true"
+      role="status"
       aria-label="Loading"
+      className="flex min-h-screen items-center justify-center bg-cream-100"
     >
       <div className="flex flex-col items-center gap-16">
         {/* Wordmark */}
-        <div className="text-display font-bold tracking-[-0.04em] text-ink-900 opacity-0 motion-safe:animate-reveal">
+        <div className="text-display font-bold tracking-[-0.04em] text-ink-900 opacity-0 motion-safe:animate-reveal motion-reduce:opacity-100">
           lapsed.
         </div>
         {/* Subtle spinner */}
