@@ -48,9 +48,9 @@ export function MerchantShell({
   const session = useMerchant();
   const activeHref = resolveActive(pathname);
 
-  const shopInitials = session?.shopInitials ?? "?";
-  const shopName = session?.shopName ?? "Your store";
-  const planLabel = session?.planLabel;
+  const shopInitials = session?.shopInitials ?? null;
+  const shopName = session?.shopName ?? null;
+  const planLabel = session?.planLabel ?? null;
 
   async function handleSignOut() {
     await fetch("/api/auth/signout", { method: "POST" });

@@ -289,3 +289,65 @@ Address the merchant as "you". The AI agent acts on behalf of the merchant's bra
 | `We've detected 4 lapsed customers` | `4 customers are ready to reactivate` |
 | `We'll notify you when…` | `You'll see results here once…` |
 | `Our agent will reach out…` | `Your agent will reach out…` |
+
+---
+
+## Loading & skeleton pattern
+
+### The rule: skeleton → real content, no flicker
+
+Every async boundary in the app follows one pattern:
+
+1. Show a skeleton with the **exact structural shape** of the final content.
+2. Replace the skeleton with real content once data is ready.
+3. Never show a blank page, a spinner without content shape, or a CLS-inducing appearance of content that shifts layout.
+
+### Skeleton primitives (`packages/ui/src/components/skeleton.tsx`)
+
+```tsx
+import { Skeleton } from "@lapsed/ui";
+
+// Base: any shape
+<Skeleton className="h-[200px] w-full" />
+
+// Text line(s)
+<Skeleton.Text />              // single line at ~60% width
+<Skeleton.Text lines={3} />   // 3 lines, last one at 40%
+
+// List row (avatar + two text lines)
+<Skeleton.Row />
+
+// Card (label + value + sub-line)
+<Skeleton.Card />
+```
+
+All skeleton elements use `bg-cream-300` as the fill and `motion-safe:animate-pulse` for the shimmer. Do not use `bg-ink-100` or `bg-cream-200` — those tokens are for content, not skeleton fills.
+
+### `useFirstRender()` hook (`packages/ui/src/hooks/use-first-render.ts`)
+
+```tsx
+import { useFirstRender } from "@lapsed/ui";
+
+function MyComponent() {
+  const isFirst = useFirstRender();
+  if (isFirst) return <Skeleton.Card />;  // SSR + hydration pass
+  return <RealContent />;
+}
+```
+
+Use this when a client component needs to render different content on the server pass vs. after mounting, to avoid hydration mismatches.
+
+### `loading.tsx` convention
+
+Every route segment in `apps/web/app/app/*` must have a `loading.tsx` that matches the structural shape of the page. Next.js App Router shows the nearest `loading.tsx` automatically during server-component fetch. Shape the skeleton to match the page's grid/panel layout so the transition from skeleton to content has zero layout shift.
+
+### Focus ring token
+
+The `--focus-ring` CSS variable uses a two-layer box-shadow:
+```css
+--focus-ring: 0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9;
+```
+- Inner 2px ring: `cream-50` (creates visual gap between element and ring)
+- Outer 2px ring: `lavender-700` (#6B52C9, 5.4:1 contrast on cream-50, meets WCAG 2.4.11)
+
+All interactive elements use `focus-visible:shadow-focus` — never bare `focus:` which also fires on mouse clicks.

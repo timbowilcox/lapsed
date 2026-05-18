@@ -30,10 +30,10 @@ export interface AppShellProps {
   activeHref: string;
   /** Kept for backward-compat; no longer rendered in the topbar. */
   pageTitle: string;
-  shopInitials: string;
-  shopName: string;
-  planLabel?: string;
-  userInitials: string;
+  shopInitials?: string | null;
+  shopName?: string | null;
+  planLabel?: string | null;
+  userInitials?: string | null;
   hasNotifications?: boolean;
   onSignOut?: () => void;
   children: ReactNode;
@@ -138,7 +138,7 @@ export function AppShell({
                   aria-label="Account menu"
                   className="relative ml-4 inline-flex h-32 w-32 items-center justify-center rounded-pill bg-ink-900 text-[12px] font-semibold text-cream-50 transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focus"
                 >
-                  {userInitials.slice(0, 2).toUpperCase()}
+                  {userInitials?.slice(0, 2).toUpperCase() ?? ""}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>

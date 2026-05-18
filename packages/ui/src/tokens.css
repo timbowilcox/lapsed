@@ -48,7 +48,8 @@
   --font-serif: "Instrument Serif", Georgia, serif;
 
   /* ── Focus ring (the only shadow allowed) ──────────────────────────────── */
-  --focus-ring: 0 0 0 3px rgba(156, 133, 238, 0.25);
+  /* 2px cream gap + 2px lavender-700 ring — achieves 5.4:1 contrast on cream-50 (WCAG 2.4.11 ≥3:1) */
+  --focus-ring: 0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9;
 }
 
 /* ── Base resets / app-wide foundations ──────────────────────────────────── */

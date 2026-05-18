@@ -20,6 +20,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  Skeleton,
   formatDate,
 } from "@lapsed/ui";
 import type { VoiceProfile } from "@lapsed/core";
@@ -221,11 +222,8 @@ export function BrandVoiceSettings() {
 
   if (loading) {
     return (
-      <div className="p-24">
-        <div
-          className="h-160 w-full rounded-lg bg-cream-200 motion-safe:animate-pulse"
-          aria-label="Loading brand voice"
-        />
+      <div className="p-24" aria-busy="true" aria-label="Loading brand voice">
+        <Skeleton.Card />
       </div>
     );
   }
