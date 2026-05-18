@@ -77,9 +77,6 @@ function ActionCard({
         <Tag tone={insight.priority === "HIGH" ? "active" : "stalled"}>
           {categoryLabel(insight.category)}
         </Tag>
-        {insight.priority === "HIGH" && (
-          <span className="text-mini font-medium text-ink-500">High priority</span>
-        )}
       </div>
 
       {/* Copy */}
@@ -139,33 +136,31 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
     : (initialInsights ?? []).slice(0, 3).map(toActionInsight);
 
   const mountedRef = useRef(true);
-  // Keep mountedRef current so async callbacks don't set state after unmount.
+  const announcementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Single cleanup effect — ensures both guards run together on unmount
+  // so there's no inter-effect ordering dependency.
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
     };
   }, []);
+
   const [insights, setInsights] = useState<ActionInsight[]>(seed);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
   // Separate announcement state avoids the race where the live region clears
   // before the screen reader has finished speaking the previous message.
   const [announcement, setAnnouncement] = useState<string>("");
-  const announcementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function announce(message: string) {
+  const announce = useCallback((message: string) => {
     if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
     setAnnouncement(message);
     // Clear after 3 s so stale messages don't re-announce on re-render.
     announcementTimerRef.current = setTimeout(() => {
       if (mountedRef.current) setAnnouncement("");
     }, 3000);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
-    };
   }, []);
 
   const transition = useCallback(
@@ -176,8 +171,7 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
         if (!isDemo) {
           const res = await fetch(`/api/insights/${id}?action=${action}`, { method: "POST" });
           if (!res.ok) {
-            // Non-2xx — log but still optimistically remove from UI
-            console.warn(`Insight ${action} returned ${res.status}`);
+            // Non-2xx — still optimistically remove from UI (non-critical path)
           }
         }
         if (mountedRef.current) {
@@ -194,7 +188,7 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
         if (mountedRef.current) setActive(null);
       }
     },
-    [isDemo],
+    [isDemo, announce],
   );
 
   if (insights.length === 0) return null;

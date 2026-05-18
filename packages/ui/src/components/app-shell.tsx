@@ -126,7 +126,7 @@ export function AppShell({
               type="button"
               aria-label="Open navigation menu"
               aria-expanded={mobileNavOpen}
-              aria-controls={mobileNavOpen ? "mobile-nav-sheet" : undefined}
+              aria-controls="mobile-nav-sheet"
               onClick={() => setMobileNavOpen(true)}
               className="mr-12 inline-flex h-44 w-44 items-center justify-center rounded-md text-ink-700 transition-colors hover:bg-cream-200 focus-visible:outline-none focus-visible:shadow-focus md:hidden"
             >

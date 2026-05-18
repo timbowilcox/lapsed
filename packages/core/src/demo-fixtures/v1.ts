@@ -700,7 +700,7 @@ export const v1: DemoFixtures = {
       signalValue: 124,
       threshold: 10,
       merchantCopy:
-        "124 regular customers are approaching the lapsed threshold — acting now prevents them from slipping into the harder-to-recover dormant segment.",
+        "124 regular customers are approaching the lapsed threshold — acting now prevents them from slipping into the harder-to-recover dormant group.",
       ctaAction: { route: "/app/campaigns/new", params: { groupSlug: "at_risk_regulars" } },
       state: "active",
       createdAt: "2026-05-18T05:00:00Z",

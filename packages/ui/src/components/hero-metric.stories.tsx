@@ -43,7 +43,7 @@ const chart = (
 /** Dashboard / Attribution — full width with pulse dot and mini chart */
 export const WithChart: Story = {
   args: {
-    label: "Recovered revenue · last 30 days",
+    label: "Restored revenue · last 30 days",
     pulse: true,
     currency: "$",
     value: "47,283",

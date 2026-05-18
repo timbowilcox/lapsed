@@ -21,7 +21,9 @@
   /* ── Ink (text + primary buttons) ──────────────────────────────────────── */
   --ink-900: #0A0A0B;
   --ink-700: #2E2C2A;
+  --ink-600: #48453F;
   --ink-500: #5F5C57;
+  --ink-400: #79766F;
   --ink-300: #94918A;
 
   /* ── Status (semantic only — never decorative) ─────────────────────────── */

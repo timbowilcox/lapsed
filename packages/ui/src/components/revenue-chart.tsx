@@ -9,9 +9,15 @@ import { formatCurrency } from "../lib/format";
  * Initialises synchronously to avoid a flash of animation.
  */
 function useReducedMotion(): boolean {
-  // Always false on the server / first render to match SSR output.
-  // Updated to the real preference in a client-side effect.
-  const [reduced, setReduced] = useState(false);
+  // Lazy initialiser reads the real preference on the client from the first
+  // render; returns false on the server (typeof window === "undefined") so
+  // SSR output matches the client's initial render for non-reduced-motion
+  // users. Users with reduce: true still get one server-false render but the
+  // animation starts disabled on hydration — the useEffect handles dynamic
+  // changes (e.g. OS setting toggled at runtime).
+  const [reduced, setReduced] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReduced(mq.matches);
