@@ -13,6 +13,7 @@ const routes = [
   { name: "dashboard", path: "/app" },
   { name: "lapsed-customers", path: "/app/lapsed" },
   { name: "campaigns", path: "/app/campaigns" },
+  { name: "campaigns-new", path: "/app/campaigns/new" },
   { name: "conversations", path: "/app/conversations" },
   { name: "attribution", path: "/app/attribution" },
   { name: "billing-settings", path: "/app/settings/billing" },
