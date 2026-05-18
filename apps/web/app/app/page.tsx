@@ -6,7 +6,6 @@ import {
   PanelHeader,
   PanelBody,
   EmptyState,
-  Button,
 } from "@lapsed/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -69,12 +68,7 @@ export default async function DashboardPage({
           <PanelBody>
             <EmptyState
               heading="No campaigns yet"
-              body="Your first campaign appears here once the agent prepares one for your approval. Approve it to start reaching lapsed customers."
-              cta={
-                <Button asChild variant="primary" size="sm">
-                  <Link href="/app/campaigns/new">Create your first campaign</Link>
-                </Button>
-              }
+              body="Your first campaign appears here once the agent prepares one for your approval. The agent analyses your scored customer groups and proposes campaigns — nothing is sent until you approve it."
               secondaryAction={
                 <Link
                   href="/preview/campaigns"

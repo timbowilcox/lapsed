@@ -239,7 +239,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
     return (
       <Panel>
         <p className="p-24 text-body text-ink-700" role="alert">
-          We couldn&apos;t load your campaigns. Please refresh the page.
+          Campaigns couldn&apos;t be loaded. Please refresh the page.
         </p>
       </Panel>
     );
@@ -257,11 +257,6 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
           <EmptyState
             heading="No campaigns are waiting for review"
             body="When the agent finishes preparing a campaign for one of your customer groups, it will appear here for your approval. Nothing is sent until you approve it."
-            cta={
-              <Button asChild variant="primary" size="sm">
-                <a href="/app/campaigns/new">Create your first campaign</a>
-              </Button>
-            }
             secondaryAction={
               <a
                 href="/preview/campaigns"
