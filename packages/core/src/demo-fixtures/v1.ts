@@ -341,7 +341,7 @@ export const v1: DemoFixtures = {
       timeline: [
         { at: "2026-04-30T23:00:00Z", label: "Campaign launched · 289 messages queued" },
         { at: "2026-05-01T09:14:00Z", label: "First restoration — $248 attributed to Priya L." },
-        { at: "2026-05-08T14:22:00Z", label: "Arm B outperforming Arm A — 9.1% vs 6.8% conversion" },
+        { at: "2026-05-08T14:22:00Z", label: "Message variant B outperforming variant A — 9.1% vs 6.8% conversion" },
         { at: "2026-05-18T11:00:00Z", label: "24 restored orders · $19,840 to date" },
       ],
     },
@@ -417,7 +417,7 @@ export const v1: DemoFixtures = {
         {
           id: "msg_001a",
           role: "ai",
-          body: "Hi Emma — it's been a while since we've seen you at Bedrock. We'd love to welcome you back with 15% off your next order. Reply YES to claim, or STOP to opt out.",
+          body: "Hi Emma — it's been a while. We have 15% off for returning customers this week. Reply YES to apply it to your next order, or STOP to unsubscribe.",
           sentAt: "2026-04-19T09:00:00Z",
         },
         {
@@ -429,7 +429,7 @@ export const v1: DemoFixtures = {
         {
           id: "msg_001c",
           role: "ai",
-          body: "Wonderful! Your 15% discount code is VIPBACK15 — valid for 7 days. I'd recommend the Vitamin C Serum; it pairs beautifully with your usual retinol routine.",
+          body: "Your 15% discount code is VIPBACK15 — valid for 7 days. The Vitamin C Serum pairs well with your usual retinol routine if you'd like to try it.",
           sentAt: "2026-04-19T09:15:00Z",
         },
         {
@@ -487,7 +487,7 @@ export const v1: DemoFixtures = {
         {
           id: "msg_003a",
           role: "ai",
-          body: "Hi Sophie — it's been almost 6 months. We'd love to welcome you back with 15% off and a complimentary eye cream sample.",
+          body: "Hi Sophie — it's been almost 6 months since your last order. Here's 15% off plus a complimentary eye cream sample to welcome you back.",
           sentAt: "2026-05-11T10:00:00Z",
         },
         {
@@ -519,7 +519,7 @@ export const v1: DemoFixtures = {
         {
           id: "msg_004a",
           role: "ai",
-          body: "Hi Annika — it's been 6 months. We miss you! We'd love to win you back with a free Vitamin C sample on your next order.",
+          body: "Hi Annika — it's been 6 months since your last order. There's a free Vitamin C sample waiting for you on your next purchase.",
           sentAt: "2026-04-02T10:00:00Z",
         },
         {
@@ -614,19 +614,19 @@ export const v1: DemoFixtures = {
       { date: "2026-04-28", recoveredRevenue: 0 },
       { date: "2026-04-29", recoveredRevenue: 1840 },
       { date: "2026-04-30", recoveredRevenue: 1120 },
-      { date: "2026-05-01", recoveredRevenue: 2480 },
+      { date: "2026-05-01", recoveredRevenue: 1480 },
       { date: "2026-05-02", recoveredRevenue: 1640 },
       { date: "2026-05-03", recoveredRevenue: 880 },
-      { date: "2026-05-04", recoveredRevenue: 3200 },
+      { date: "2026-05-04", recoveredRevenue: 2400 },
       { date: "2026-05-05", recoveredRevenue: 1860 },
       { date: "2026-05-06", recoveredRevenue: 920 },
       { date: "2026-05-07", recoveredRevenue: 2140 },
-      { date: "2026-05-08", recoveredRevenue: 3480 },
+      { date: "2026-05-08", recoveredRevenue: 2680 },
       { date: "2026-05-09", recoveredRevenue: 1720 },
-      { date: "2026-05-10", recoveredRevenue: 4120 },
+      { date: "2026-05-10", recoveredRevenue: 3320 },
       { date: "2026-05-11", recoveredRevenue: 2840 },
       { date: "2026-05-12", recoveredRevenue: 1440 },
-      { date: "2026-05-13", recoveredRevenue: 3680 },
+      { date: "2026-05-13", recoveredRevenue: 2688 },
       { date: "2026-05-14", recoveredRevenue: 2160 },
       { date: "2026-05-15", recoveredRevenue: 1920 },
       { date: "2026-05-16", recoveredRevenue: 2880 },

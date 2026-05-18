@@ -22,7 +22,7 @@ export default function DemoLapsedPage() {
     <DemoShell>
       <div className="mb-24 flex items-start justify-between">
         <div>
-          <h2 className="mb-4 text-h1 text-ink-900">Lapsed customers</h2>
+          <h1 className="mb-4 text-h1 text-ink-900">Lapsed customers</h1>
           <p className="text-meta text-ink-500">
             Customers past their typical purchase cadence. Score blends frequency, value and
             recency.
@@ -37,12 +37,12 @@ export default function DemoLapsedPage() {
             <table className="w-full text-body">
               <thead>
                 <tr className="border-b border-border text-left">
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Customer</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Tier</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">LTV</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Days since order</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Score</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Status</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Customer</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Tier</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Total spent</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Days since order</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Score</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Status</th>
                 </tr>
               </thead>
               <tbody>

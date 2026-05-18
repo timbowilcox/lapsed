@@ -11,7 +11,7 @@ export default function DemoAttributionPage() {
         <h1 className="mb-4 text-h1 text-ink-900">Revenue restored</h1>
         <p className="text-meta text-ink-500">
           Incremental revenue from campaign-driven conversations, measured against each
-          campaign&apos;s matched control group and reconciled against Shopify orders.
+          campaign&apos;s matched comparison group and reconciled against Shopify orders.
         </p>
       </div>
 
@@ -65,11 +65,11 @@ export default function DemoAttributionPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border text-left">
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">Campaign</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Restored</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Incremental</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Orders</th>
-                  <th className="px-22 py-12 text-label font-medium text-ink-500">95% CI</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">Campaign</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Restored</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Incremental</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500 tabular-nums">Orders</th>
+                  <th scope="col" className="px-22 py-12 text-label font-medium text-ink-500">95% CI</th>
                 </tr>
               </thead>
               <tbody>

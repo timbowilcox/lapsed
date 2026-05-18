@@ -26,13 +26,13 @@ export default function DemoSettingsPage() {
           <div className="mt-12 flex gap-8">
             <button
               type="button"
-              className="rounded-sm bg-ink-900 px-14 py-8 text-mini font-semibold text-cream-50 transition-colors hover:opacity-80"
+              className="rounded-sm bg-ink-900 px-14 py-8 text-mini font-semibold text-cream-50 transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:shadow-focus"
             >
               Extract brand voice
             </button>
             <button
               type="button"
-              className="rounded-sm border border-cream-300 px-14 py-8 text-mini font-medium text-ink-700 transition-colors hover:bg-cream-200"
+              className="rounded-sm border border-cream-300 px-14 py-8 text-mini font-medium text-ink-700 transition-colors hover:bg-cream-200 focus-visible:outline-none focus-visible:shadow-focus"
             >
               Edit
             </button>
@@ -95,9 +95,8 @@ export default function DemoSettingsPage() {
                   SMS sending activates with your first campaign.
                 </div>
               </div>
-              <span className="inline-flex items-center gap-6 rounded-pill bg-warning-100 px-10 py-4 text-mini font-medium text-warning-500">
-                <span className="h-6 w-6 rounded-pill bg-warning-500" aria-hidden="true" />
-                Pending
+              <span className="inline-flex items-center rounded-pill bg-cream-200 px-10 py-4 text-mini font-medium text-ink-500">
+                Not yet active
               </span>
             </div>
           </div>

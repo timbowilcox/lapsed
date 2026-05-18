@@ -7,7 +7,6 @@ import {
   Tag,
   Card,
 } from "@lapsed/ui";
-import { merchant as fixtureMerchant } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
 import { SettingsSyncStatus, SettingsSyncStatusSkeleton } from "../_settings-sync-status";
@@ -68,12 +67,12 @@ export default async function SettingsPage({ searchParams }: PageProps) {
                 immediately. STOP and STOPALL are reserved by Twilio.
               </p>
               <div className="flex flex-wrap gap-8">
-                {fixtureMerchant.optOutKeywords.map((k) => (
-                  <Tag key={k} tone="stalled">
-                    {k}
-                  </Tag>
-                ))}
+                <Tag tone="stalled">STOP</Tag>
+                <Tag tone="stalled">STOPALL</Tag>
               </div>
+              <p className="mt-8 text-mini text-ink-500">
+                Additional opt-out keywords can be configured here once messaging is active.
+              </p>
             </div>
           </PanelBody>
         </Panel>
@@ -94,14 +93,14 @@ export default async function SettingsPage({ searchParams }: PageProps) {
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Twilio</div>
-                  <div className="text-mini text-ink-500">Pending — connects in Sprint 05</div>
+                  <div className="text-mini text-ink-500">SMS sending activates with your first campaign.</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Stripe</div>
-                  <div className="text-mini text-ink-500">Pending — connects in Sprint 06</div>
+                  <div className="text-mini text-ink-500">Billing activates when you select a subscription plan.</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>

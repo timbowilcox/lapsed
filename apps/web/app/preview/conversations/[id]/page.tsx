@@ -76,6 +76,8 @@ export default async function DemoConversationDetailPage({ params }: PageProps) 
   );
 }
 
+export const dynamicParams = false;
+
 export async function generateStaticParams() {
   return demoFixtures.conversations.map((c) => ({ id: c.id }));
 }

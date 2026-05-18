@@ -27,7 +27,7 @@ export const HeroMetric = forwardRef<HTMLDivElement, HeroMetricProps>(function H
         <div className="mb-8 flex items-center gap-8 text-label text-ink-500">
           {pulse && (
             <span className="relative inline-flex h-7 w-7" aria-hidden="true">
-              <span className="absolute inline-flex h-full w-full rounded-pill bg-success-500 opacity-30 animate-pulse" />
+              <span className="absolute inline-flex h-full w-full rounded-pill bg-success-500 opacity-30 motion-safe:animate-pulse" />
               <span className="relative inline-flex h-7 w-7 rounded-pill bg-success-500" />
             </span>
           )}
