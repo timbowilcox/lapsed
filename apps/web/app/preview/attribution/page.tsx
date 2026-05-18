@@ -37,7 +37,7 @@ export default function DemoAttributionPage() {
           </div>
         </div>
         <div className="rounded-lg border border-border bg-cream-50 px-24 py-20">
-          <div className="mb-4 text-label text-ink-500">Restored orders</div>
+          <div className="mb-4 text-label text-ink-500">Recovered orders</div>
           <div className="text-display tabular-nums text-ink-900">
             {attribution.totalRestoredOrders}
           </div>
