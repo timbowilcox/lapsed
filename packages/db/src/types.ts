@@ -1642,6 +1642,62 @@ export type Database = {
           },
         ]
       }
+      insights: {
+        Row: {
+          category: string
+          created_at: string
+          cta_action: Json
+          expires_at: string | null
+          id: string
+          insight_key: string
+          merchant_copy: string
+          merchant_id: string
+          priority: string
+          signal_metric: string
+          signal_value: number
+          state: string
+          threshold: number
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          cta_action: Json
+          expires_at?: string | null
+          id?: string
+          insight_key: string
+          merchant_copy: string
+          merchant_id: string
+          priority: string
+          signal_metric: string
+          signal_value: number
+          state?: string
+          threshold: number
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          cta_action?: Json
+          expires_at?: string | null
+          id?: string
+          insight_key?: string
+          merchant_copy?: string
+          merchant_id?: string
+          priority?: string
+          signal_metric?: string
+          signal_value?: number
+          state?: string
+          threshold?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insights_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       campaign_holdouts: {

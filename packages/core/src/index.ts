@@ -403,6 +403,19 @@ export {
 } from "./generate-reply";
 
 export {
+  generateRecommendations,
+  getActive as getActiveInsights,
+  markActed,
+  markDismissed,
+  markSnoozed,
+  InsightNotFoundError,
+  type GenerateRecommendationsResult,
+  type InsightRow,
+  type InsightPriority,
+  type InsightCategory,
+} from "./insights-engine";
+
+export {
   synthesizeVoice,
   createVoiceClient,
   parseVoiceProfile,

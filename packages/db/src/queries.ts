@@ -1726,3 +1726,194 @@ export async function getCustomerGroupSizes(
     lastCampaignedAt: lastCampaigned.get(slug) ?? null,
   }));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Insights / Recommendations (decision 36)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InsightPriority = "HIGH" | "MEDIUM" | "LOW";
+export type InsightCategory = "cohort" | "arm" | "opt_out" | "conversation" | "payment";
+export type InsightState = "active" | "dismissed" | "acted" | "snoozed";
+
+export interface InsightRow {
+  id: string;
+  merchantId: string;
+  insightKey: string;
+  priority: InsightPriority;
+  category: InsightCategory;
+  signalMetric: string;
+  signalValue: number;
+  threshold: number;
+  merchantCopy: string;
+  ctaAction: { route: string; params?: Record<string, string> };
+  state: InsightState;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export interface InsertInsightInput {
+  merchantId: string;
+  insightKey: string;
+  priority: InsightPriority;
+  category: InsightCategory;
+  signalMetric: string;
+  signalValue: number;
+  threshold: number;
+  merchantCopy: string;
+  ctaAction: { route: string; params?: Record<string, string> };
+  expiresAt: string | null;
+  /** Defaults to 'active'. Pass 'dismissed' | 'acted' | 'snoozed' for state-transition rows. */
+  state?: InsightState;
+}
+
+function rowToInsight(row: {
+  id: string;
+  merchant_id: string;
+  insight_key: string;
+  priority: string;
+  category: string;
+  signal_metric: string;
+  signal_value: number;
+  threshold: number;
+  merchant_copy: string;
+  cta_action: Json;
+  state: string;
+  created_at: string;
+  expires_at: string | null;
+}): InsightRow {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    insightKey: row.insight_key,
+    priority: row.priority as InsightPriority,
+    category: row.category as InsightCategory,
+    signalMetric: row.signal_metric,
+    signalValue: Number(row.signal_value),
+    threshold: Number(row.threshold),
+    merchantCopy: row.merchant_copy,
+    ctaAction: row.cta_action as { route: string; params?: Record<string, string> },
+    state: row.state as InsightState,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+/**
+ * Returns the current active insights for a merchant: the latest row per
+ * insight_key where state='active' and expires_at is in the future (or null).
+ *
+ * Uses DISTINCT ON (merchant_id, insight_key) with ORDER BY created_at DESC
+ * to resolve the most-recent row per key, then filters to state='active' and
+ * not expired.
+ *
+ * This is a raw SQL path because Supabase PostgREST doesn't expose DISTINCT ON
+ * via the query builder.
+ */
+export async function getActiveInsights(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  now?: Date,
+): Promise<InsightRow[]> {
+  const nowIso = (now ?? new Date()).toISOString();
+  // Supabase doesn't expose DISTINCT ON via query builder; use rpc or a
+  // two-query approach. We fetch all non-expired rows ordered by created_at
+  // desc, then deduplicate in JS — acceptable because per-merchant insight
+  // counts are in the dozens, not thousands.
+  const { data, error } = await client
+    .from("insights")
+    .select(
+      "id, merchant_id, insight_key, priority, category, signal_metric, signal_value, threshold, merchant_copy, cta_action, state, created_at, expires_at",
+    )
+    .eq("merchant_id", merchantId)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  // DISTINCT ON (insight_key): keep only the most-recent row per key.
+  const seen = new Set<string>();
+  const latest: InsightRow[] = [];
+  for (const row of data ?? []) {
+    if (!seen.has(row.insight_key)) {
+      seen.add(row.insight_key);
+      if (row.state === "active") {
+        latest.push(rowToInsight(row));
+      }
+    }
+  }
+  return latest;
+}
+
+/**
+ * Gets a specific insight row by id, scoped to the merchant.
+ * Returns null if the row does not exist or belongs to another merchant
+ * (defense-in-depth beyond RLS).
+ */
+export async function getInsightById(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  id: string,
+): Promise<InsightRow | null> {
+  const { data, error } = await client
+    .from("insights")
+    .select(
+      "id, merchant_id, insight_key, priority, category, signal_metric, signal_value, threshold, merchant_copy, cta_action, state, created_at, expires_at",
+    )
+    .eq("id", id)
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return rowToInsight(data);
+}
+
+/**
+ * Inserts a new insight row and returns the created id.
+ */
+export async function insertInsight(
+  client: LapsedSupabaseClient,
+  input: InsertInsightInput,
+): Promise<string> {
+  const { data, error } = await client
+    .from("insights")
+    .insert({
+      merchant_id: input.merchantId,
+      insight_key: input.insightKey,
+      priority: input.priority,
+      category: input.category,
+      signal_metric: input.signalMetric,
+      signal_value: input.signalValue,
+      threshold: input.threshold,
+      merchant_copy: input.merchantCopy,
+      cta_action: input.ctaAction as Json,
+      state: input.state ?? "active",
+      expires_at: input.expiresAt,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
+/**
+ * Returns true if there is already an active, non-expired insight for this
+ * (merchantId, insightKey) pair — used by generateRecommendations to suppress
+ * duplicate insertions within the 18-hour expiry window.
+ */
+export async function hasActiveInsight(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  insightKey: string,
+  now?: Date,
+): Promise<boolean> {
+  const nowIso = (now ?? new Date()).toISOString();
+  const { data, error } = await client
+    .from("insights")
+    .select("id")
+    .eq("merchant_id", merchantId)
+    .eq("insight_key", insightKey)
+    .eq("state", "active")
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
