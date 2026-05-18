@@ -16,6 +16,7 @@
     "db:types": "pnpm --filter @lapsed/db db:types",
     "db:diagnose": "node scripts/db-diagnose.mjs",
     "grep:pii": "node scripts/grep-pii.mjs",
+    "grep:vocab": "node scripts/grep-vocab.mjs",
     "grep:format-check": "node scripts/grep-format-check.mjs",
     "vercel:env:check": "node scripts/vercel-env-check.mjs",
     "vercel:env:push": "node scripts/push-vercel-env.mjs",

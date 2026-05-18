@@ -73,7 +73,7 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
   );
 
   return (
-    <MerchantShell pageTitle="Campaign bandit">
+    <MerchantShell pageTitle="Campaign variants">
       <div className="mb-24">
         <Link
           href="/app/campaigns/list"
@@ -82,13 +82,12 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
           ← All campaigns
         </Link>
         <h1 className="mb-4 mt-8 text-h1 text-ink-900">
-          {groupLabel(proposal.groupSlug)} — bandit state
+          {groupLabel(proposal.groupSlug)} — variant performance
         </h1>
         <p className="text-meta text-ink-500">
           Version {proposal.versionNumber} · {proposal.variants.length} variants. Each variant
-          is a Thompson-sampling arm with a Beta(α, β) posterior over its response rate. As the
-          campaign runs, responses update the posteriors and the agent samples the arms it
-          believes are strongest.
+          tracks its response rate over time. The agent automatically favours variants that
+          customers are responding to, so better-performing message options are sent more often.
         </p>
       </div>
 
@@ -97,8 +96,8 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
       ) : (
         <Panel>
           <p className="px-16 py-40 text-center text-meta text-ink-500">
-            Bandit arms are initialized when the campaign is approved. This proposal is{" "}
-            {STATUS_PROSE[proposal.status] ?? proposal.status} — no posterior state exists yet.
+            Variant tracking begins when the campaign is approved. This proposal is{" "}
+            {STATUS_PROSE[proposal.status] ?? proposal.status} — no tracking data exists yet.
           </p>
         </Panel>
       )}
@@ -149,7 +148,7 @@ function ArmTable({
                   <ArmStats state={state} />
                 ) : (
                   <TableCell colSpan={STAT_COLUMN_COUNT} className="text-meta text-ink-500">
-                    No posterior state — arm not yet initialized.
+                    No data yet — tracking begins when the first message is sent.
                   </TableCell>
                 )}
               </TableRow>

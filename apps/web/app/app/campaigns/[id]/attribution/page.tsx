@@ -89,7 +89,7 @@ export default async function CampaignAttributionPage({ params, searchParams }: 
           {groupLabel(view.groupSlug)} — attribution
         </h1>
         <p className="text-meta text-ink-500">
-          Revenue and LTV restored by this campaign, measured against its matched holdout group
+          Revenue restored by this campaign, measured against its matched comparison group
           and reconciled against Shopify orders.
         </p>
       </div>
@@ -190,17 +190,17 @@ function ContextRow({
         <div className="mt-4 text-mini text-ink-500">customers contacted</div>
       </Card>
       <Card className="p-20">
-        <div className="text-label text-ink-500">Holdout group</div>
+        <div className="text-label text-ink-500">Comparison group</div>
         <div className="mt-8 text-display text-ink-900 tabular-nums">
           {formatCount(result.holdout_cohort_size)}
         </div>
         <div className="mt-4 text-mini text-ink-500">
-          control group · {holdoutPct}% of the campaign total
+          comparison group · {holdoutPct}% of the campaign total
         </div>
       </Card>
       {showLtv && (
         <Card className="p-20">
-          <div className="text-label text-ink-500">LTV restored</div>
+          <div className="text-label text-ink-500">Value restored</div>
           <div className="mt-8 text-display text-ink-900 tabular-nums">
             {formatCurrency(result.ltv_restored_cents)}
           </div>
@@ -256,7 +256,7 @@ function InsufficientEvidence({ treatment, holdout }: { treatment: number; holdo
       <p className="mt-12 text-meta text-ink-700">
         A defensible incremental figure needs at least 30 customers in each group. This campaign
         currently has {formatCount(treatment)} in the treatment group and {formatCount(holdout)} in
-        the holdout group.
+        the comparison group.
       </p>
       <p className="mt-8 text-mini text-ink-500">
         Raw revenue is recorded but no confidence interval is shown — a number from a group this

@@ -18,10 +18,12 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
   ]);
 
   // Design tenet 4: honest numbers.
-  // "Pending first score" only when scoring has never run — a true unknown.
-  // When scoring has run and zero customers qualify, show the honest zero.
-  const heroValue = latestRun === null ? "Pending first score" : formatCount(readyCount);
-  const satelliteTrend = `${formatCount(summary.total_lapsed_count)} total lapsed`;
+  // "—" when scoring has never run (true unknown); show count once data exists.
+  const heroValue = latestRun === null ? "—" : formatCount(readyCount);
+  const satelliteTrend =
+    latestRun === null
+      ? "Your first scoring run completes within 24 hours of installing"
+      : `${formatCount(summary.total_lapsed_count)} total lapsed`;
 
   return (
     <MetricCard

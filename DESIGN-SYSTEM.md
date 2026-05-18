@@ -234,3 +234,50 @@ Sprint 01 builds a static React route for every page below. Each route renders t
 - All icons either have text labels or `aria-label`
 - All form inputs have associated `<label>`
 - No reliance on color alone to convey status (status always pairs dot + text)
+
+---
+
+## Voice & tone
+
+lapsed.ai speaks plainly and confidently to merchants. The interface is a tool, not a companion. Four rules govern all user-facing copy.
+
+### 1 — Confident future-tense for pending states
+
+When the system is waiting on a process, name the outcome and give a timeframe. Never say "pending" or "loading" without saying what comes next.
+
+| Avoid | Use instead |
+|---|---|
+| `Pending first score` | `Your first scoring run completes within 24 hours of installing` |
+| `No data yet` (alone) | `Figures appear here once a campaign's attribution window closes` |
+| `Connecting…` | `SMS sending activates with your first campaign` |
+
+### 2 — Concrete subjects, not vague reassurance
+
+Say what the number measures. Avoid filler phrases that describe feelings or relationship metaphors.
+
+| Avoid | Use instead |
+|---|---|
+| `We'd love to welcome you back` | `Here's 15% off for returning customers` |
+| `We miss you!` | `There's a free sample waiting for you on your next purchase` |
+| `Wonderful!` | `Your discount code is VIPBACK15 — valid for 7 days` |
+
+### 3 — When/then framing for empty states
+
+Empty states explain the trigger, not just the absence. Tell the merchant what action or event will populate the screen.
+
+Pattern: *"[Content] appears here once [trigger]."*
+
+Examples:
+- `Attribution will appear here once this campaign's 30-day attribution window closes and the nightly batch has run.`
+- `No attribution results yet. Figures appear here once a campaign's attribution window closes and the nightly batch has run.`
+- `No campaigns in this period.` (acceptable for a filtered view — filter removal is the implied action)
+
+### 4 — Merchant-second-person throughout
+
+Address the merchant as "you". The AI agent acts on behalf of the merchant's brand — it is not a separate personality. Never use "we" to describe the lapsed.ai system.
+
+| Avoid | Use instead |
+|---|---|
+| `We've detected 4 lapsed customers` | `4 customers are ready to reactivate` |
+| `We'll notify you when…` | `You'll see results here once…` |
+| `Our agent will reach out…` | `Your agent will reach out…` |

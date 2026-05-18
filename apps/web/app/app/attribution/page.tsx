@@ -101,7 +101,7 @@ export default async function AttributionRollupPage({ searchParams }: PageProps)
         <h1 className="mb-4 text-h1 text-ink-900">Revenue restored</h1>
         <p className="text-meta text-ink-500">
           Incremental revenue from campaign-driven conversations, measured against each
-          campaign&rsquo;s matched holdout group and reconciled against Shopify orders.
+          campaign&rsquo;s matched comparison group and reconciled against Shopify orders.
         </p>
       </div>
 
@@ -269,19 +269,19 @@ function HoldoutCheck({ holdout }: { holdout: HoldoutStat }) {
   const pct = (r: number) => `${(r * 100).toFixed(1)}%`;
   return (
     <Card className="p-24">
-      <div className="text-label text-ink-500">Holdout assignment</div>
+      <div className="text-label text-ink-500">Measurement check</div>
       <div className="mt-8 text-display text-ink-900 tabular-nums">
         {pct(holdout.realisedRate)}
       </div>
       <div className="mt-4 text-mini text-ink-500">
-        realised across {formatCount(holdout.campaignCount)}{" "}
-        {holdout.campaignCount === 1 ? "campaign" : "campaigns"} · configured{" "}
+        observed across {formatCount(holdout.campaignCount)}{" "}
+        {holdout.campaignCount === 1 ? "campaign" : "campaigns"} · target{" "}
         {pct(holdout.configuredRate)}
       </div>
       {holdout.skewed && (
         <p className="mt-12 text-mini text-ink-700">
-          The realised holdout rate diverges from the configured rate by more than 10%. Holdout
-          assignment may be skewed — worth a review.
+          The observed comparison-group assignment diverges from the target by more than 10%.
+          Worth reviewing to ensure measurement accuracy.
         </p>
       )}
     </Card>
