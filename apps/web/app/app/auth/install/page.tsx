@@ -109,6 +109,30 @@ export default function InstallPage() {
             </a>
           </p>
         </div>
+
+        {/* How to install guidance — for visitors arriving without Shopify Admin context */}
+        <details className="mt-16 w-full max-w-[480px] rounded-lg border border-border bg-cream-50">
+          <summary className="cursor-pointer select-none px-20 py-14 text-body-strong text-ink-900 hover:bg-cream-100 focus-visible:outline-none focus-visible:shadow-focus">
+            How to install from the App Store
+          </summary>
+          <div className="border-t border-border px-20 py-16">
+            <ol className="flex flex-col gap-10 text-meta text-ink-700">
+              <li>1. Visit the{" "}
+                <a
+                  href="https://apps.shopify.com/lapsed"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-ink-900 underline underline-offset-2 hover:text-ink-700"
+                >
+                  Shopify App Store listing for lapsed
+                </a>
+              </li>
+              <li>2. Click <strong className="font-medium text-ink-900">Add app</strong> on the listing page</li>
+              <li>3. You&apos;ll be redirected to your Shopify Admin to review permissions</li>
+              <li>4. Click <strong className="font-medium text-ink-900">Install</strong> to grant the required permissions and connect your store</li>
+            </ol>
+          </div>
+        </details>
       </main>
     </div>
   );

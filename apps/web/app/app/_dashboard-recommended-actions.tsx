@@ -199,29 +199,29 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
     <>
       <div aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
       {insights.length === 0 ? null : (
-      <section aria-label="Recommended actions" className="mb-32">
-      <div className="mb-16 flex items-center justify-between gap-12">
-        <h2 className="text-h2 text-ink-900">For your review</h2>
-        <Link
-          href="/app/insights"
-          className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-600 focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          See all recommendations →
-        </Link>
-      </div>
-      <div className="grid grid-cols-1 gap-12">
-        {insights.map((insight) => (
-          <ActionCard
-            key={insight.id}
-            insight={insight}
-            onDismiss={(id) => void transition(id, "dismiss")}
-            onSnooze={(id) => void transition(id, "snooze")}
-            dismissing={dismissingId === insight.id}
-            snoozing={snoozingId === insight.id}
-          />
-        ))}
-      </div>
-    </section>
+        <section aria-label="Recommended actions" className="mb-32">
+          <div className="mb-16 flex items-center justify-between gap-12">
+            <h2 className="text-h2 text-ink-900">For your review</h2>
+            <Link
+              href="/app/insights"
+              className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-600 focus-visible:outline-none focus-visible:shadow-focus"
+            >
+              See all recommendations →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-12">
+            {insights.map((insight) => (
+              <ActionCard
+                key={insight.id}
+                insight={insight}
+                onDismiss={(id) => void transition(id, "dismiss")}
+                onSnooze={(id) => void transition(id, "snooze")}
+                dismissing={dismissingId === insight.id}
+                snoozing={snoozingId === insight.id}
+              />
+            ))}
+          </div>
+        </section>
       )}
     </>
   );

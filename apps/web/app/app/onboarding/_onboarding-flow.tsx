@@ -10,7 +10,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@lapsed/ui";
 import {
-  Check,
   ArrowRight,
   Users,
   Mic,
@@ -40,14 +39,14 @@ const STEPS: StepDef[] = [
     title: "Your store is connected",
     body: "lapsed.ai identifies customers who've stopped buying and wins them back through personalised AI conversations. Here's what happens next.",
     icon: Store,
-    ctaLabel: "Show me",
+    ctaLabel: "Continue",
   },
   {
     key: "customers",
     title: "Your customers, classified",
-    body: "Tonight's scoring run groups your customers by how recently they bought and how likely they are to buy again. Tomorrow morning you'll see them here — grouped by urgency, sorted by win-back potential.",
+    body: "Tonight's scoring run groups your customers by how recently they bought and how likely they are to buy again. Tomorrow morning you'll see them here — grouped by win-back potential.",
     icon: Users,
-    ctaLabel: "Got it",
+    ctaLabel: "Continue",
   },
   {
     key: "voice",
@@ -62,7 +61,7 @@ const STEPS: StepDef[] = [
     title: "Your first campaign",
     body: "Once your customers are classified, lapsed.ai suggests a win-back campaign targeting your highest-potential group. You review and approve before anything sends — nothing goes out automatically.",
     icon: Zap,
-    ctaLabel: "Got it",
+    ctaLabel: "Continue",
   },
   {
     key: "dashboard",
@@ -110,25 +109,36 @@ export function OnboardingFlow() {
   const mountedRef = useRef(true);
 
   useEffect(() => {
-    // Mark onboarding as in_progress on first render.
-    void fetch("/api/onboarding", {
+    // Mark onboarding as in_progress on first render. Fire-and-forget —
+    // the terminal complete() call is the authoritative state write.
+    fetch("/api/onboarding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ state: "in_progress" }),
+    }).catch(() => {
+      // Non-fatal: state will be set correctly when complete() fires.
     });
     return () => { mountedRef.current = false; };
   }, []);
 
+  // Wraps the terminal state write + navigation. Resets transitioning on
+  // failure so the merchant is never permanently locked out of the UI.
   const complete = useCallback(
     async (state: "completed" | "skipped") => {
       if (transitioning) return;
       setTransitioning(true);
-      await fetch("/api/onboarding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state }),
-      });
-      if (mountedRef.current) router.push("/app");
+      try {
+        const res = await fetch("/api/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (mountedRef.current) router.push("/app");
+      } catch {
+        // Network failure or non-2xx — reset so the merchant can retry.
+        if (mountedRef.current) setTransitioning(false);
+      }
     },
     [router, transitioning],
   );
@@ -139,17 +149,19 @@ export function OnboardingFlow() {
 
   return (
     <div className="mx-auto max-w-[600px]">
-      {/* Header */}
+      {/* Header — "Skip tour" only on Step 1 where the decision to engage is being made. */}
       <div className="mb-32 flex items-center justify-between">
-        <div className="text-h1 font-bold tracking-[-0.04em] text-ink-900">lapsed.</div>
-        <button
-          type="button"
-          onClick={() => void complete("skipped")}
-          disabled={transitioning}
-          className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
-        >
-          Skip tour
-        </button>
+        <div className="text-display font-bold tracking-[-0.04em] text-ink-900">lapsed.</div>
+        {stepIdx === 0 && (
+          <button
+            type="button"
+            onClick={() => void complete("skipped")}
+            disabled={transitioning}
+            className="text-mini text-ink-400 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
+          >
+            Skip tour
+          </button>
+        )}
       </div>
 
       {/* Progress dots */}
@@ -197,35 +209,36 @@ export function OnboardingFlow() {
             <span /> /* spacer */
           )}
 
-          <div className="flex items-center gap-8">
-            {/* Completed indicator for prior steps */}
-            {stepIdx > 0 && (
-              <span className="flex items-center gap-4 text-mini text-success-500">
-                <Check strokeWidth={2} size={12} />
-                {stepIdx} of {STEPS.length} done
-              </span>
-            )}
-
-            <Button
-              onClick={() => {
-                if (isLast) {
-                  void complete("completed");
-                } else {
-                  setStepIdx((s) => s + 1);
-                }
-              }}
-              disabled={transitioning}
-            >
-              {step.ctaLabel}
-              {!isLast && <ArrowRight strokeWidth={1.75} size={16} className="ml-4" />}
-            </Button>
-          </div>
+          <Button
+            onClick={() => {
+              if (isLast) {
+                void complete("completed");
+              } else {
+                setStepIdx((s) => s + 1);
+              }
+            }}
+            disabled={transitioning}
+          >
+            {step.ctaLabel}
+            {!isLast && <ArrowRight strokeWidth={1.75} size={16} className="ml-4" />}
+          </Button>
         </div>
       </div>
 
-      {/* Reassurance footer */}
+      {/* Reassurance footer — steps 2+ include a low-weight skip link. */}
       <p className="mt-16 text-center text-meta text-ink-400">
-        Nothing sends until you approve a campaign. You can return to this tour from Settings.
+        Nothing sends until you approve a campaign.{" "}
+        {stepIdx > 0 && (
+          <button
+            type="button"
+            onClick={() => void complete("skipped")}
+            disabled={transitioning}
+            className="underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus disabled:opacity-50"
+          >
+            Skip tour
+          </button>
+        )}{" "}
+        You can return to this tour from Settings.
       </p>
     </div>
   );

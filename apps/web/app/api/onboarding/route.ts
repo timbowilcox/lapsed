@@ -39,9 +39,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const env = serverEnv();
   const client = createServiceClient({ url: env.supabaseUrl, serviceKey: env.supabaseSecretKey });
 
+  // Guard against backward transitions: completed/skipped are terminal states.
+  // A merchant revisiting the tour from Settings should not regress their state
+  // back to in_progress, which would re-trigger the dashboard redirect on next login.
+  if (state === "in_progress") {
+    const { data: current } = await client
+      .from("merchants")
+      .select("onboarding_state")
+      .eq("id", merchant.id)
+      .single();
+    const terminalStates = ["completed", "skipped"] as const;
+    if (terminalStates.includes(current?.onboarding_state as (typeof terminalStates)[number])) {
+      return NextResponse.json({ ok: true, state: current?.onboarding_state });
+    }
+  }
+
   const { error } = await client
     .from("merchants")
-    .update({ onboarding_state: state as string })
+    .update({ onboarding_state: state as TransitionState })
     .eq("id", merchant.id);
 
   if (error) {

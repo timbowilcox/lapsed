@@ -11,7 +11,7 @@ export default function RootLoading() {
     >
       <div className="flex flex-col items-center gap-16">
         {/* Wordmark */}
-        <div className="font-bold tracking-[-0.04em] text-[32px] text-ink-900 opacity-0 motion-safe:animate-reveal">
+        <div className="text-display font-bold tracking-[-0.04em] text-ink-900 opacity-0 motion-safe:animate-reveal">
           lapsed.
         </div>
         {/* Subtle spinner */}

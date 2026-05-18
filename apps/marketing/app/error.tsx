@@ -4,14 +4,17 @@
 
 import Link from "next/link";
 
-export default function RootError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function RootError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-cream-100 px-16 text-center">
-      <div className="mb-8 font-bold tracking-[-0.04em] text-[28px] text-ink-900">lapsed.</div>
+      <div className="mb-8 text-display font-bold tracking-[-0.04em] text-ink-900">lapsed.</div>
       <h1 className="mb-8 text-h1 text-ink-900">Something went wrong</h1>
       <p className="mb-24 max-w-[420px] text-body text-ink-500">
         An unexpected error occurred loading the page.
       </p>
+      {error.digest && (
+        <p className="mb-16 text-mini text-ink-300">Error ID: {error.digest}</p>
+      )}
       <div className="flex flex-wrap items-center justify-center gap-12">
         <button
           type="button"
