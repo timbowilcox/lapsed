@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  EmptyState,
   formatCount,
   formatDate,
 } from "@lapsed/ui";
@@ -253,13 +254,23 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
           </p>
         )}
         <Panel>
-          <div className="flex flex-col items-center justify-center py-64 text-center">
-            <p className="text-body-strong text-ink-900">No campaigns are waiting for review.</p>
-            <p className="mt-8 max-w-md text-meta text-ink-500">
-              When the agent finishes preparing a campaign for one of your customer groups, it
-              will appear here for your approval.
-            </p>
-          </div>
+          <EmptyState
+            heading="No campaigns are waiting for review"
+            body="When the agent finishes preparing a campaign for one of your customer groups, it will appear here for your approval. Nothing is sent until you approve it."
+            cta={
+              <Button asChild variant="primary" size="sm">
+                <a href="/app/campaigns/new">Create your first campaign</a>
+              </Button>
+            }
+            secondaryAction={
+              <a
+                href="/preview/campaigns"
+                className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+              >
+                Preview what campaigns look like
+              </a>
+            }
+          />
         </Panel>
       </>
     );

@@ -292,6 +292,60 @@ Address the merchant as "you". The AI agent acts on behalf of the merchant's bra
 
 ---
 
+## Empty state pattern
+
+### The rule: when/then framing, next-action CTA
+
+Every empty state follows the same structure:
+
+1. **Heading** — what's absent, phrased as a noun ("No campaigns yet", not "You haven't created any campaigns")
+2. **Body** — when/then language explaining the trigger: *"X appears here once Y has happened."* Include a timeframe where applicable.
+3. **Primary CTA** — the action that directly triggers the empty state to fill (optional — only where a merchant action can cause the change)
+4. **Secondary action** — usually a link to the demo preview so merchants can see what populated content looks like
+
+Never show just "No data" alone. Always explain what the merchant will see and when.
+
+### EmptyState component (`packages/ui/src/components/empty-state.tsx`)
+
+```tsx
+import { EmptyState } from "@lapsed/ui";
+
+<EmptyState
+  heading="No campaigns yet"
+  body="Your first campaign appears here once the agent prepares one for your approval. Approve it to start reaching lapsed customers."
+  cta={
+    <Button asChild variant="primary" size="sm">
+      <Link href="/app/campaigns/new">Create your first campaign</Link>
+    </Button>
+  }
+  secondaryAction={
+    <Link href="/preview/campaigns" className="text-meta text-ink-500 underline ...">
+      Preview what campaigns look like
+    </Link>
+  }
+/>
+```
+
+Props:
+- `icon?` — optional Lucide icon, rendered in a `bg-cream-200` circle
+- `heading` — short noun phrase, ink-900
+- `body` — when/then explainer, ink-500 at `text-meta` size
+- `cta?` — ReactNode — pass a styled Button/Link from the call site
+- `secondaryAction?` — ReactNode — typically a plain underline link
+- `className?` — applied to the outer container
+
+The component provides layout only. Pass styled CTA elements from the call site rather than accepting raw `href` props — this keeps the component framework-agnostic and allows `asChild` composition with Next.js `Link`.
+
+### Greyed-out column previews
+
+For pages that show tabular data (lapsed customers, campaigns), the empty state includes a greyed-out table preview:
+- Table headers rendered at full opacity
+- 5 placeholder rows with `bg-cream-300` blocks at realistic widths
+- Entire preview wrapped in `opacity-30 select-none` with `aria-hidden="true"`
+- Empty state message + CTA rendered below the preview
+
+---
+
 ## Loading & skeleton pattern
 
 ### The rule: skeleton → real content, no flicker

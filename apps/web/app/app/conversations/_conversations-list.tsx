@@ -24,6 +24,7 @@ import {
   TableCell,
   Tag,
   Avatar,
+  EmptyState,
   formatRelativeTime,
 } from "@lapsed/ui";
 import { Search } from "lucide-react";
@@ -86,12 +87,18 @@ export function ConversationsList({ items }: { items: ConversationListItem[] }) 
   if (items.length === 0) {
     return (
       <Panel>
-        <div className="px-24 py-48 text-center">
-          <p className="text-body text-ink-700">No conversations yet.</p>
-          <p className="mt-4 text-meta text-ink-500">
-            Threads appear here once an approved campaign sends its first message.
-          </p>
-        </div>
+        <EmptyState
+          heading="No conversations yet"
+          body="Threads appear here once an approved campaign sends its first message. Each thread is a two-way conversation between your customers and your agent."
+          secondaryAction={
+            <a
+              href="/preview/conversations"
+              className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+            >
+              Preview sample conversations
+            </a>
+          }
+        />
       </Panel>
     );
   }

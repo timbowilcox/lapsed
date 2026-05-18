@@ -5,6 +5,8 @@ import {
   Panel,
   PanelHeader,
   PanelBody,
+  EmptyState,
+  Button,
 } from "@lapsed/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -65,13 +67,23 @@ export default async function DashboardPage({
             }
           />
           <PanelBody>
-            <div className="flex flex-col items-center gap-8 px-22 py-32 text-center">
-              <p className="text-body text-ink-700">No active campaigns yet.</p>
-              <p className="text-meta text-ink-500">
-                Once the agent prepares a campaign from your scored customer groups, it will appear
-                here for your approval.
-              </p>
-            </div>
+            <EmptyState
+              heading="No campaigns yet"
+              body="Your first campaign appears here once the agent prepares one for your approval. Approve it to start reaching lapsed customers."
+              cta={
+                <Button asChild variant="primary" size="sm">
+                  <Link href="/app/campaigns/new">Create your first campaign</Link>
+                </Button>
+              }
+              secondaryAction={
+                <Link
+                  href="/preview/campaigns"
+                  className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+                >
+                  Preview what campaigns look like
+                </Link>
+              }
+            />
           </PanelBody>
         </Panel>
 
@@ -88,12 +100,18 @@ export default async function DashboardPage({
             }
           />
           <PanelBody>
-            <div className="flex flex-col items-center gap-8 px-22 py-32 text-center">
-              <p className="text-body text-ink-700">No conversations yet.</p>
-              <p className="text-meta text-ink-500">
-                Threads appear here once an approved campaign sends its first message.
-              </p>
-            </div>
+            <EmptyState
+              heading="No conversations yet"
+              body="Threads appear here once an approved campaign sends its first message. Each thread is a two-way conversation between your customers and your agent."
+              secondaryAction={
+                <Link
+                  href="/preview/conversations"
+                  className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+                >
+                  Preview sample conversations
+                </Link>
+              }
+            />
           </PanelBody>
         </Panel>
       </section>
