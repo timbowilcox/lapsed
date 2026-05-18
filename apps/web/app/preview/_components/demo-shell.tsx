@@ -65,7 +65,7 @@ export function DemoShell({ children }: { children: ReactNode }) {
       userInitials={merchant.ownerInitials}
       hasNotifications={false}
     >
-      <div className="-mx-32 -mt-32 mb-32">
+      <div className="-mx-16 -mt-16 mb-16 md:-mx-32 md:-mt-32 md:mb-32">
         <DemoBanner />
       </div>
       {children}

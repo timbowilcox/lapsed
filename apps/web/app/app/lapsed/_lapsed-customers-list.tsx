@@ -150,7 +150,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
 
   return (
     <>
-      <div className="flex items-center gap-12 border-b border-border p-16">
+      <div className="flex flex-wrap items-center gap-12 border-b border-border p-16">
         <div className="relative flex-1">
           <Search
             strokeWidth={1.75}
@@ -220,7 +220,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
           </DropdownMenu>
         )}
 
-        <div className="w-[200px]">
+        <div className="w-full sm:w-[200px]">
           <Select
             value={effectiveSortBy}
             onValueChange={(v) => setSortBy(v as SortBy)}

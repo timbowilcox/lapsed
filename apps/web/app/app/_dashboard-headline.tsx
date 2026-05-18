@@ -123,7 +123,7 @@ export function DashboardHeadline({ stats, period, byDay }: DashboardHeadlinePro
 
   return (
     <section aria-label="Restored revenue" className="mb-32">
-      <div className="mb-12 flex items-center justify-between gap-12">
+      <div className="mb-12 flex flex-wrap items-center justify-between gap-8">
         <div className="flex items-center gap-6">
           <h2 className="text-label text-ink-500">Restored revenue</h2>
           <MethodologyTooltip text={METHODOLOGY_TEXT} />

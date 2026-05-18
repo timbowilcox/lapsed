@@ -110,6 +110,21 @@ button {
   border-radius: var(--radius-sm);
 }
 
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+/* Honour user's motion preference globally for CSS transitions/animations.
+   Recharts animations are handled separately in RevenueChart via
+   isAnimationActive={false} when the media query matches. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ── Layout primitives ────────────────────────────────────────────────────── */
 
 /* content-container: standard page content width. Every page's root element

@@ -32,7 +32,7 @@ export const SheetContent = forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-[248px] bg-lavender-400 p-24 data-[state=open]:animate-reveal",
+          "fixed inset-y-0 left-0 z-50 w-[248px] bg-lavender-400 p-24 data-[state=open]:motion-safe:animate-reveal",
           className,
         )}
         {...props}

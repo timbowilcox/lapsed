@@ -176,6 +176,14 @@ export function DashboardRecommendedActions({ initialInsights, demoInsights }: P
 
   return (
     <section aria-label="Recommended actions" className="mb-32">
+      {/* Live region so screen readers announce dismissal/snooze actions. */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {dismissingId || snoozingId
+          ? dismissingId
+            ? "Recommendation dismissed"
+            : "Recommendation snoozed for 7 days"
+          : ""}
+      </div>
       <div className="mb-16 flex items-center justify-between gap-12">
         <h2 className="text-h2 text-ink-900">For your review</h2>
         <Link
