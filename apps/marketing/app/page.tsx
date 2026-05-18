@@ -61,7 +61,7 @@ export default function MarketingPage() {
             </a>
           </Button>
           <Button asChild variant="secondary" size="lg">
-            <a href="/app">Preview the dashboard</a>
+            <a href="/preview">Preview the dashboard</a>
           </Button>
         </div>
       </section>

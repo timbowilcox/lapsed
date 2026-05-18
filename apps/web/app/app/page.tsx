@@ -5,15 +5,10 @@ import {
   Panel,
   PanelHeader,
   PanelBody,
-  CampaignRow,
-  ConversationRow,
-  RevenueChart,
-  formatCount,
 } from "@lapsed/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { MerchantShell } from "./_components/merchant-shell";
-import { campaigns, conversations, attribution } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
 import { DashboardLapsedMetric, DashboardLapsedMetricSkeleton } from "./_dashboard-lapsed-metric";
 
@@ -28,44 +23,21 @@ export default async function DashboardPage({
 }) {
   const merchant = await requireMerchant({ searchParams: await searchParams });
 
-  const totalRevenue = formatCount(attribution.totalRecoveredRevenue);
-  const totalOrders = attribution.totalRecoveredOrders;
-  const liveCampaigns = campaigns.filter((c) => c.status === "live").length;
-  const pausedCampaigns = campaigns.filter((c) => c.status === "paused").length;
-  const activeCampaigns = liveCampaigns + pausedCampaigns;
-  const visibleCampaigns = campaigns.slice(0, 4);
-  const visibleConversations = conversations.slice(0, 4);
-
   return (
     <MerchantShell pageTitle="Dashboard">
       <HeroMetric
-        label="Restored revenue · last 30 days [demo data]"
-        pulse
+        label="Restored revenue · last 30 days"
         currency="$"
-        value={totalRevenue}
-        meta={
-          <>
-            <span className="font-medium text-success-500">
-              ↑ {attribution.vsPreviousPeriodPct}%
-            </span>{" "}
-            vs previous period · {totalOrders} orders
-          </>
-        }
-        chart={
-          <RevenueChart
-            data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
-            range="compact"
-            height={80}
-          />
-        }
+        value="0"
+        meta="Figures appear here once a campaign's attribution window closes."
         className="mb-16"
       />
 
       <section className="mb-32 grid grid-cols-3 gap-12">
         <MetricCard
           label="Active campaigns"
-          value={activeCampaigns.toString()}
-          trend={`${liveCampaigns} live · ${pausedCampaigns} paused [demo data]`}
+          value="0"
+          trend="No active campaigns yet"
           trendDirection="flat"
         />
         <Suspense fallback={<DashboardLapsedMetricSkeleton />}>
@@ -74,7 +46,7 @@ export default async function DashboardPage({
         <MetricCard
           label="Reactivation rate"
           value="—"
-          trend="Attribution in Sprint 08"
+          trend="Available after 30 days of campaign activity"
           trendDirection="flat"
         />
       </section>
@@ -84,30 +56,22 @@ export default async function DashboardPage({
           <PanelHeader
             title="Campaigns"
             action={
-              <div className="flex items-center gap-12">
-                <span className="text-mini text-ink-400">[demo data]</span>
-                <Link
-                  href="/app/campaigns"
-                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-                >
-                  View all <ArrowRight strokeWidth={1.75} size={14} />
-                </Link>
-              </div>
+              <Link
+                href="/app/campaigns"
+                className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
+              >
+                View all <ArrowRight strokeWidth={1.75} size={14} />
+              </Link>
             }
           />
           <PanelBody>
-            {visibleCampaigns.map((c) => (
-              <Link key={c.id} href="/app/campaigns" className="block">
-                <CampaignRow
-                  name={c.name}
-                  meta={c.meta}
-                  status={c.status}
-                  statusLabel={c.statusLabel}
-                  revenue={c.recoveredRevenueDisplay}
-                  revenueLabel={c.status === "draft" ? "pending" : "restored"}
-                />
-              </Link>
-            ))}
+            <div className="flex flex-col items-center gap-8 px-22 py-32 text-center">
+              <p className="text-body text-ink-700">No active campaigns yet.</p>
+              <p className="text-meta text-ink-500">
+                Once the agent prepares a campaign from your scored customer groups, it will appear
+                here for your approval.
+              </p>
+            </div>
           </PanelBody>
         </Panel>
 
@@ -115,35 +79,21 @@ export default async function DashboardPage({
           <PanelHeader
             title="Active conversations"
             action={
-              <div className="flex items-center gap-12">
-                <span className="text-mini text-ink-400">[demo data]</span>
-                <Link
-                  href="/app/conversations"
-                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-                >
-                  View all <ArrowRight strokeWidth={1.75} size={14} />
-                </Link>
-              </div>
+              <Link
+                href="/app/conversations"
+                className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
+              >
+                View all <ArrowRight strokeWidth={1.75} size={14} />
+              </Link>
             }
           />
           <PanelBody>
-            {visibleConversations.map((c) => {
-              const [first, ...rest] = c.customerName.split(" ");
-              const last = rest.at(-1) ?? "";
-              const display = last ? `${first} ${last.charAt(0)}.` : first ?? c.customerName;
-              return (
-                <Link key={c.id} href={`/app/conversations/${c.id}`} className="block">
-                  <ConversationRow
-                    initials={c.initials}
-                    name={display}
-                    time={c.time}
-                    preview={c.preview}
-                    tagTone={c.tagTone}
-                    tagLabel={c.tagLabel}
-                  />
-                </Link>
-              );
-            })}
+            <div className="flex flex-col items-center gap-8 px-22 py-32 text-center">
+              <p className="text-body text-ink-700">No conversations yet.</p>
+              <p className="text-meta text-ink-500">
+                Threads appear here once an approved campaign sends its first message.
+              </p>
+            </div>
           </PanelBody>
         </Panel>
       </section>
