@@ -8,11 +8,11 @@ const badgeVariants = cva(
     variants: {
       tone: {
         neutral: "bg-cream-200 text-ink-700",
-        live: "bg-success-100 text-success-500",
+        live: "bg-success-100 text-ink-900",
         draft: "bg-cream-200 text-ink-700",
         paused: "bg-warning-100 text-warning-500",
         error: "bg-danger-100 text-danger-500",
-        info: "bg-lavender-100 text-lavender-700",
+        info: "bg-lavender-50 text-lavender-700",
       },
     },
     defaultVariants: { tone: "neutral" },

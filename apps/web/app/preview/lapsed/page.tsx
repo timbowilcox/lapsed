@@ -50,7 +50,7 @@ export default function DemoLapsedPage() {
                   <tr key={c.id} className="border-b border-border last:border-b-0 hover:bg-cream-100">
                     <td className="px-22 py-14">
                       <div className="flex items-center gap-10">
-                        <span className="inline-flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-pill bg-lavender-100 text-mini font-semibold text-lavender-700">
+                        <span className="inline-flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-pill bg-lavender-50 text-mini font-semibold text-lavender-700">
                           {c.initials}
                         </span>
                         <div>
@@ -87,7 +87,7 @@ export default function DemoLapsedPage() {
                           c.status === "converted"
                             ? "bg-success-100 text-success-500"
                             : c.status === "reactivating"
-                              ? "bg-lavender-100 text-lavender-700"
+                              ? "bg-lavender-50 text-lavender-700"
                               : c.status === "churned"
                                 ? "bg-danger-100 text-danger-500"
                                 : "bg-cream-200 text-ink-700"

@@ -99,7 +99,7 @@ All numeric values in metrics, tables, conversation timestamps, and revenue disp
 
 ### Instrument Serif rule (hero numbers only)
 
-`font-serif` (Instrument Serif) is used **exactly once per page** — in the `<HeroMetric>` component for the single largest stat on that page (e.g. "Total recovered $47,283" on Dashboard and Attribution, "$799 / mo" on Billing). All other numbers use Geist Sans with `tabular-nums`. Never add `font-serif` ad hoc in app route files; always go through `<HeroMetric>`.
+`font-serif` (Instrument Serif) is used **exactly once per page** — in the `<HeroMetric>` component for the single largest stat on that page (e.g. "Revenue restored $47,283" on Dashboard and Attribution, "$799 / mo" on Billing). All other numbers use Geist Sans with `tabular-nums`. Never add `font-serif` ad hoc in app route files; always go through `<HeroMetric>`.
 
 ---
 
@@ -143,6 +143,14 @@ The merchant app uses a fixed two-pane layout at all viewports ≥1024px.
 | Content max-width | 1280px, centered with 32px gutters | — | — |
 
 Below 1024px the sidebar collapses to a drawer triggered from the topbar. v1 does not optimise for sub-1024 viewports but layout does not break.
+
+### Content container rule
+
+Every page renders inside a `<div class="content-container">` within the AppShell's main content area. This class is defined in `tokens.css` as `width: 100%; max-width: 1280px` and ensures consistent layout grid across all pages. **Never add a per-page `max-w-*` override to an individual page's root element** — use the container class instead. Narrow layouts (auth forms, modals) are exempt but must be documented.
+
+### Contrast token guard
+
+Run `pnpm grep:contrast` locally to check all Vellum `bg-*/text-*` class pairs against WCAG 2.2 AA (4.5:1 for normal text, 3.0:1 for large). The script is advisory (exits 0) but violations are blocking before merge. Verified pairs to date: ink-900/cream-50 (21.0:1), ink-700/cream-50 (13.7:1), lavender-700/lavender-50 (5.1:1), ink-500/cream-50 (5.1:1).
 
 ---
 

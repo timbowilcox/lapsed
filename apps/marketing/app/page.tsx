@@ -42,7 +42,7 @@ export default function MarketingPage() {
       </header>
 
       <section className="mx-auto max-w-[1180px] px-32 py-64 text-center">
-        <div className="inline-flex items-center gap-8 rounded-pill bg-lavender-100 px-12 py-6 text-mini font-semibold uppercase tracking-wide text-lavender-700">
+        <div className="inline-flex items-center gap-8 rounded-pill bg-lavender-50 px-12 py-6 text-mini font-semibold uppercase tracking-wide text-lavender-700">
           <span className="h-7 w-7 rounded-pill bg-lavender-500" aria-hidden="true" />
           For Shopify ecommerce brands
         </div>
@@ -75,7 +75,7 @@ export default function MarketingPage() {
                 key={f.title}
                 className="rounded-lg border border-border bg-cream-50 p-32"
               >
-                <div className="mb-16 flex h-48 w-48 items-center justify-center rounded-md bg-lavender-100 text-lavender-700">
+                <div className="mb-16 flex h-48 w-48 items-center justify-center rounded-md bg-lavender-50 text-lavender-700">
                   <IconComp strokeWidth={1.75} size={22} />
                 </div>
                 <h3 className="mb-8 text-h2 text-ink-900">{f.title}</h3>

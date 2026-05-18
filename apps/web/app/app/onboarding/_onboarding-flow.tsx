@@ -73,7 +73,7 @@ export function OnboardingFlow() {
             <PanelHeader title={step.title} />
             <PanelBody>
               <div className="flex flex-col items-center gap-20 p-32 text-center">
-                <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-lavender-100 text-lavender-700">
+                <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-lavender-50 text-lavender-700">
                   <IconComp strokeWidth={1.75} size={28} />
                 </div>
                 <p className="max-w-[420px] text-body text-ink-700">{step.description}</p>

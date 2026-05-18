@@ -180,7 +180,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
               >
                 Groups
                 {selectedGroups.size > 0 && (
-                  <span className="rounded-pill bg-lavender-200 px-6 py-2 text-micro text-lavender-700">
+                  <span className="rounded-pill bg-lavender-50 px-6 py-2 text-micro text-lavender-700">
                     {selectedGroups.size}
                   </span>
                 )}

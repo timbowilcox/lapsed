@@ -68,7 +68,7 @@ export default async function SettingsBillingPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      <Card className="flex max-w-md flex-col gap-16 p-24">
+      <Card className="flex flex-col gap-16 p-24">
         {hasPlan && plan && status ? (
           <>
             <div className="flex items-start justify-between">

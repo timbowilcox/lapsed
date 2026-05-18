@@ -237,7 +237,7 @@ export function ExtractionProgress({ onComplete }: ExtractionProgressProps) {
                   state === "done"
                     ? "bg-success-100 text-success-500"
                     : state === "active"
-                      ? "bg-lavender-100 text-lavender-700"
+                      ? "bg-lavender-50 text-lavender-700"
                       : state === "error"
                         ? "bg-danger-100 text-danger-500"
                         : "bg-cream-200 text-ink-500"

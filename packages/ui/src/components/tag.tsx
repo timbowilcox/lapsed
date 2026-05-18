@@ -7,8 +7,8 @@ const tagVariants = cva(
   {
     variants: {
       tone: {
-        converted: "bg-success-100 text-success-500",
-        active: "bg-lavender-100 text-lavender-700",
+        converted: "bg-success-100 text-ink-900",
+        active: "bg-lavender-50 text-lavender-700",
         stalled: "bg-cream-200 text-ink-500",
         churned: "bg-danger-100 text-danger-500",
       },

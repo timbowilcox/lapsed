@@ -649,7 +649,7 @@ function RejectConfirm({
         maxLength={500}
         onChange={(e) => onReasonChange(e.target.value)}
         placeholder="A short note — this is kept with the campaign for your records."
-        className="w-full rounded-sm border border-cream-300 bg-cream-50 p-10 text-body text-ink-900 placeholder:text-ink-300 focus-visible:border-lavender-500 focus-visible:outline-none focus-visible:shadow-focus"
+        className="w-full rounded-sm border border-cream-300 bg-cream-50 p-10 text-body text-ink-900 placeholder:text-ink-500 focus-visible:border-lavender-500 focus-visible:outline-none focus-visible:shadow-focus"
       />
       <div className="mt-20 flex items-center justify-end gap-8">
         <Button variant="secondary" onClick={onCancel} disabled={actionPending}>

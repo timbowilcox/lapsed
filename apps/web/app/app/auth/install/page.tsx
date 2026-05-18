@@ -52,7 +52,7 @@ export default function InstallPage() {
 
         <Card className="mb-24 p-32">
           <div className="mb-16 flex items-center gap-12">
-            <div className="flex h-40 w-40 items-center justify-center rounded-md bg-lavender-100 text-lavender-700">
+            <div className="flex h-40 w-40 items-center justify-center rounded-md bg-lavender-50 text-lavender-700">
               <Lock strokeWidth={1.75} size={20} />
             </div>
             <div className="text-h3 text-ink-900">Required permissions</div>
@@ -78,7 +78,7 @@ export default function InstallPage() {
 
         <Card className="mb-32 p-32">
           <div className="mb-16 flex items-center gap-12">
-            <div className="flex h-40 w-40 items-center justify-center rounded-md bg-lavender-100 text-lavender-700">
+            <div className="flex h-40 w-40 items-center justify-center rounded-md bg-lavender-50 text-lavender-700">
               <BarChart3 strokeWidth={1.75} size={20} />
             </div>
             <div className="text-h3 text-ink-900">Optional permissions</div>

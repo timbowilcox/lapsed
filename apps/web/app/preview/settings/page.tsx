@@ -83,7 +83,7 @@ export default function DemoSettingsPage() {
                 <div className="text-body-strong text-ink-900">Shopify</div>
                 <div className="text-mini text-ink-500">{merchant.shopDomain}</div>
               </div>
-              <span className="inline-flex items-center gap-6 rounded-pill bg-success-100 px-10 py-4 text-mini font-medium text-success-500">
+              <span className="inline-flex items-center gap-6 rounded-pill bg-success-100 px-10 py-4 text-mini font-medium text-ink-900">
                 <span className="h-6 w-6 rounded-pill bg-success-500" aria-hidden="true" />
                 Connected
               </span>

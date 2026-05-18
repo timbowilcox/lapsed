@@ -1,4 +1,8 @@
 :root {
+  /* Vellum is light-only. Opt out of the browser applying forced-dark-mode
+     styles to form elements (which would override our button text colors). */
+  color-scheme: light;
+
   /* ── Lavender (brand accent) ───────────────────────────────────────────── */
   --lavender-50: #F5F1FF;
   --lavender-100: #E8DFFC;
@@ -67,6 +71,9 @@ body {
 
 button {
   font-family: inherit;
+  /* Prevent OS/browser dark-mode UA styles from overriding button text color */
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 /* ── Pulse animation (live-revenue dot only) ─────────────────────────────── */
@@ -99,4 +106,15 @@ button {
   outline: none;
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
+}
+
+/* ── Layout primitives ────────────────────────────────────────────────────── */
+
+/* content-container: standard page content width. Every page's root element
+   should use this class so layout grid is consistent across the app.
+   Pages that intentionally constrain to a narrower width (e.g. auth flows)
+   are exempt but must document the deviation. */
+.content-container {
+  width: 100%;
+  max-width: 1280px;
 }

@@ -55,7 +55,7 @@ export function AppShell({
     <div className="grid min-h-screen grid-cols-[248px_1fr]">
       <a
         href="#main-content"
-        className="absolute left-4 top-4 z-50 -translate-y-full rounded-sm bg-ink-900 px-12 py-8 text-cream-50 text-body-strong transition-transform focus:translate-y-0 focus-visible:translate-y-0"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 rounded-sm bg-ink-900 px-12 py-8 text-cream-50 text-body-strong"
       >
         Skip to content
       </a>
@@ -162,7 +162,9 @@ export function AppShell({
           </div>
         </header>
 
-        <div id="main-content" className="flex-1 overflow-y-auto p-32">{children}</div>
+        <div id="main-content" className="flex-1 overflow-y-auto p-32">
+          <div className="content-container">{children}</div>
+        </div>
       </main>
     </div>
   );

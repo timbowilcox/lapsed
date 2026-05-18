@@ -1,6 +1,6 @@
 export default function LapsedDetailLoading() {
   return (
-    <div className="animate-pulse">
+    <div className="motion-safe:animate-pulse">
       <div className="mb-24 flex items-start justify-between gap-16">
         <div className="flex items-center gap-16">
           <div className="h-48 w-48 rounded-full bg-cream-200" />

@@ -31,7 +31,7 @@ export async function SettingsSyncStatus({ merchantId }: { merchantId: string })
 
 export function SettingsSyncStatusSkeleton() {
   return (
-    <div className="animate-pulse flex items-center justify-between rounded-sm border border-border p-12">
+    <div className="motion-safe:animate-pulse flex items-center justify-between rounded-sm border border-border p-12">
       <div className="space-y-4">
         <div className="h-10 w-20 rounded bg-ink-100" />
         <div className="h-10 w-32 rounded bg-ink-100" />
