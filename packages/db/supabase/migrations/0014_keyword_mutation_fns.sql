@@ -1,4 +1,4 @@
--- Atomic keyword add / remove for merchants.opt_out_keywords and
+-- Migration 0014 — atomic keyword add / remove for merchants.opt_out_keywords and
 -- merchants.agent_draft_defaults. Replaces the Node-side read-modify-write
 -- pattern with a single Postgres UPDATE, eliminating the race condition on
 -- concurrent PATCH requests from the same merchant.

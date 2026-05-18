@@ -1,4 +1,4 @@
--- Migration 0011 — merchant opt-out keyword configuration
+-- Migration 0013 — merchant opt-out keyword configuration
 -- Sprint 11 Chunk 6: opt-out keyword editing UI
 --
 -- Two array columns on merchants:

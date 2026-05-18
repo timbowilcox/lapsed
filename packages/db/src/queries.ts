@@ -1643,6 +1643,9 @@ export async function updateMerchantAgentDraftDefaults(
  * keyword arrays. Delegates to `merchant_keyword_append` / `merchant_keyword_remove`
  * Postgres functions (migration 0012) — no read-modify-write race condition.
  *
+ * Calls the `merchant_keyword_append` / `merchant_keyword_remove` Postgres
+ * functions from migration 0014.
+ *
  * Preconditions (enforced by the API route before calling):
  *   - `keyword` is already normalised (uppercase, trimmed, validated)
  *   - reserved keywords are never passed with action "remove"

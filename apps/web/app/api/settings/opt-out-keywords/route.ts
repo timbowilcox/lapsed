@@ -88,7 +88,7 @@ export async function PATCH(req: Request): Promise<NextResponse> {
   const normalised = normalise(keyword);
 
   try {
-    // Atomic single-statement UPDATE via Postgres function (migration 0012).
+    // Atomic single-statement UPDATE via Postgres function (migration 0014).
     await mutateMerchantKeyword(client, merchant.id, list, action, normalised);
     // Re-read for the response (no race: the mutation already committed).
     const updatedConfig = await getMerchantOptOutConfig(client, merchant.id);
