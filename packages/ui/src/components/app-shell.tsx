@@ -154,18 +154,16 @@ export function AppShell({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    aria-label={hasNotifications ? "Notifications (new)" : "Notifications"}
+                    aria-label="Notifications"
                     className="relative inline-flex h-44 w-44 items-center justify-center rounded-md text-ink-700 transition-colors hover:bg-cream-200 focus-visible:outline-none focus-visible:shadow-focus"
                   >
                     <Bell strokeWidth={1.75} size={20} />
                     {hasNotifications && (
-                      <>
-                        <span
-                          className="absolute right-8 top-8 h-8 w-8 rounded-full bg-danger-500 ring-2 ring-cream-100"
-                          aria-hidden="true"
-                        />
-                        <span className="sr-only">You have new notifications</span>
-                      </>
+                      // Subtle ink dot — calm visual indicator, no urgency color.
+                      <span
+                        className="absolute right-8 top-8 h-8 w-8 rounded-full bg-ink-400 ring-2 ring-cream-100"
+                        aria-hidden="true"
+                      />
                     )}
                   </button>
                 </DropdownMenuTrigger>
@@ -173,7 +171,7 @@ export function AppShell({
                   <div className="px-8 py-12 text-center">
                     <p className="text-body-strong text-ink-900">No notifications yet</p>
                     <p className="mt-4 text-meta text-ink-500">
-                      We&apos;ll let you know when campaigns finish or customers reply.
+                      Notifications appear here when campaigns close or customers reply.
                     </p>
                   </div>
                 </DropdownMenuContent>
