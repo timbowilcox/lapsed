@@ -142,7 +142,7 @@ function CampaignCard({ item }: { item: CampaignListItem }) {
   if (item.status === "approved") {
     return (
       <Link
-        href={`/app/campaigns/${item.proposalId}/bandit`}
+        href={`/app/campaigns/${item.proposalId}/bandit`} /* vocab:allow — URL route path, not user-visible text */
         className="block rounded-md border border-border bg-cream-50 p-16 transition-colors hover:bg-cream-100 focus-visible:outline-none focus-visible:shadow-focus"
       >
         {body}

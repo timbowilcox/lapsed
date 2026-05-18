@@ -74,18 +74,28 @@ const RULES = denyList.terms.map((t) => ({
  *   2. Single-quoted string:  '...TERM...'
  *   3. Template literal:      `...TERM...`
  *   4. JSX text node:         >...TERM...<
+ *   5. Bare JSX text in a multi-line node — content on lines between JSX
+ *      opening/closing tags has no delimiters. Detected by absence of JS
+ *      expression characters ({, }, (, ), [, ], =, ;, <, >, :).
  */
 function isInStringContext(line, pattern) {
   const t = pattern.source;
   const flags = pattern.flags.replace("g", "");
-  const contexts = [
+  const trimmed = line.trimStart();
+  // Single-line contexts.
+  const singleLineContexts = [
     new RegExp(`"[^"\\n]*${t}[^"\\n]*"`, flags),
     new RegExp(`'[^'\\n]*${t}[^'\\n]*'`, flags),
     new RegExp("`[^`\\n]*" + t + "[^`\\n]*`", flags),
     // JSX text node: content between a closing > and an opening <
     new RegExp(`>[^<>\\n]*${t}[^<>\\n]*<`, flags),
   ];
-  return contexts.some((re) => re.test(line));
+  if (singleLineContexts.some((re) => re.test(line))) return true;
+  // Bare-text fallback: multi-line JSX text nodes have no delimiters on each
+  // content line. A line with no JS expression characters and a deny-list match
+  // is very likely rendered JSX text content.
+  if (!/[{}()[\]=;<>:]/.test(trimmed) && pattern.test(trimmed)) return true;
+  return false;
 }
 
 /** @type {{ file: string; line: number; rule: string; description: string; text: string }[]} */

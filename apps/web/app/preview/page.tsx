@@ -7,7 +7,7 @@ import { demoFixtures } from "@lapsed/core/demo-fixtures";
 export default function DemoPage() {
   const { merchant, campaigns, conversations, attribution } = demoFixtures;
 
-  const totalRevenueDisplay = formatCount(attribution.totalRestoredRevenue);
+  const totalRevenueDisplay = formatCount(attribution.incrementalRevenue);
   const liveCampaigns = campaigns.filter((c) => c.status === "live").length;
   const pausedCampaigns = campaigns.filter((c) => c.status === "paused").length;
   const activeCampaigns = liveCampaigns + pausedCampaigns;
@@ -17,7 +17,7 @@ export default function DemoPage() {
   return (
     <DemoShell>
       <HeroMetric
-        label="Restored revenue · last 30 days"
+        label="Incremental revenue restored · last 30 days"
         pulse
         currency="$"
         value={totalRevenueDisplay}

@@ -26,8 +26,8 @@ interface PageProps {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The stat columns rendered per arm (everything after the Variant column). The
-// "no posterior state" fallback cell spans exactly these.
-const STAT_COLUMN_COUNT = 6;
+// "no tracking data" fallback cell spans exactly these.
+const STAT_COLUMN_COUNT = 4;
 
 // Prose form of a proposal status for the non-approved empty state — keeps the
 // raw enum out of merchant-facing copy.
@@ -120,11 +120,9 @@ function ArmTable({
         <TableHeader>
           <TableRow>
             <TableHead>Variant</TableHead>
-            <TableHead className="text-right">α</TableHead>
-            <TableHead className="text-right">β</TableHead>
-            <TableHead className="text-right">Mean response rate</TableHead>
-            <TableHead className="text-right">95% credible interval</TableHead>
-            <TableHead className="text-right">Observations</TableHead>
+            <TableHead className="text-right">Response rate</TableHead>
+            <TableHead className="text-right">95% range</TableHead>
+            <TableHead className="text-right">Messages sent</TableHead>
             <TableHead>Last updated</TableHead>
           </TableRow>
         </TableHeader>
@@ -164,8 +162,6 @@ function ArmStats({ state }: { state: BanditArmState }) {
   const stats = posteriorStats(state.alpha, state.beta);
   return (
     <>
-      <TableCell className="text-right">{state.alpha}</TableCell>
-      <TableCell className="text-right">{state.beta}</TableCell>
       <TableCell className="text-right">{pct(stats.mean)}</TableCell>
       <TableCell className="text-right">
         {pct(stats.ciLower)}–{pct(stats.ciUpper)}

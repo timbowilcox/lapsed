@@ -48,7 +48,7 @@ export default async function DemoConversationDetailPage({ params }: PageProps) 
                   }`}
                 >
                   {msg.role === "ai" && (
-                    <div className="mb-4 text-mini font-medium text-ink-500">lapsed.ai agent</div>
+                    <div className="mb-4 text-mini font-medium text-ink-500">Agent</div>
                   )}
                   {msg.role === "merchant" && (
                     <div className="mb-4 text-mini font-medium text-ink-500">You</div>

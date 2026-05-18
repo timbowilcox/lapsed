@@ -39,6 +39,12 @@
       "description": "Internal state label leaked to user copy"
     },
     {
+      "name": "bandit",
+      "pattern": "\\bbandit\\b",
+      "flags": "i",
+      "description": "Internal ML term — use 'variant' in user-facing copy"
+    },
+    {
       "name": "rfm",
       "pattern": "\\bRFM\\b",
       "description": "Internal scoring acronym — not merchant vocabulary"

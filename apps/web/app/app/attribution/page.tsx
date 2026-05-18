@@ -118,7 +118,7 @@ export default async function AttributionRollupPage({ searchParams }: PageProps)
               aria-current={active ? "page" : undefined}
               className={`rounded-sm px-12 py-6 text-meta transition-colors focus-visible:outline-none focus-visible:shadow-focus ${
                 active
-                  ? "bg-lavender-100 text-lavender-700"
+                  ? "bg-lavender-50 text-lavender-700"
                   : "text-ink-500 hover:text-ink-900"
               }`}
             >

@@ -37,7 +37,7 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
 
 export function DashboardLapsedMetricSkeleton() {
   return (
-    <div className="animate-pulse rounded-md border border-border bg-cream-50 p-20">
+    <div className="motion-safe:animate-pulse rounded-md border border-border bg-cream-50 p-20">
       <div className="mb-12 h-10 w-24 rounded bg-ink-100" />
       <div className="mb-8 h-24 w-20 rounded bg-ink-100" />
       <div className="h-10 w-32 rounded bg-ink-100" />

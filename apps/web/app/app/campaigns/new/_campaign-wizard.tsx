@@ -195,8 +195,8 @@ export function CampaignWizard() {
                   <div className="mt-4 whitespace-pre-wrap text-body text-ink-900">{message}</div>
                 </Card>
                 <p className="text-meta text-ink-500">
-                  Sprint 01 is design-only — launching is not wired up. In Sprint 03–05 this
-                  button starts the campaign.
+                  Submitting creates a campaign proposal for your review. Nothing is sent until
+                  you approve it from the Campaigns page.
                 </p>
               </div>
             )}
@@ -216,7 +216,7 @@ export function CampaignWizard() {
             onClick={() => setStepIdx((i) => Math.min(steps.length - 1, i + 1))}
             disabled={isLast}
           >
-            {isLast ? "Launch (mock)" : "Continue"}
+            {isLast ? "Submit for review" : "Continue"}
             {!isLast && <ArrowRight strokeWidth={1.75} size={16} />}
           </Button>
         </div>
