@@ -25,9 +25,9 @@ interface RouteCheck {
 }
 
 const routes: RouteCheck[] = [
-  { name: "01-root-redirect", path: "/", expect: "Recovered revenue · last 30 days" },
+  { name: "01-root-redirect", path: "/", expect: "Restored revenue · last 30 days" },
   { name: "02-install", path: "/app/auth/install", expect: "Install lapsed on your Shopify store" },
-  { name: "03-dashboard", path: "/app", expect: "Recovered revenue · last 30 days" },
+  { name: "03-dashboard", path: "/app", expect: "Restored revenue · last 30 days" },
   { name: "04-lapsed-list", path: "/app/lapsed", expect: "Lapsed customers" },
   { name: "05-lapsed-detail", path: "/app/lapsed/lap_001", expect: "Jess Reilly" },
   { name: "06-campaigns", path: "/app/campaigns", expect: "Manage your active, draft and paused" },
@@ -39,10 +39,10 @@ const routes: RouteCheck[] = [
     expect: "Two-way threads from active campaigns",
   },
   { name: "10-conversation-detail", path: "/app/conversations/conv_001", expect: "Jess Reilly" },
-  { name: "11-attribution", path: "/app/attribution", expect: "Recovered revenue" },
+  { name: "11-attribution", path: "/app/attribution", expect: "Restored revenue" },
   { name: "12-billing", path: "/app/billing", expect: "Manage your subscription" },
   { name: "13-settings", path: "/app/settings", expect: "Brand voice" },
-  { name: "14-onboarding", path: "/app/onboarding", expect: "Welcome to lapsed." },
+  { name: "14-onboarding", path: "/app/onboarding", expect: "Your store is connected" },
 ];
 
 for (const route of routes) {

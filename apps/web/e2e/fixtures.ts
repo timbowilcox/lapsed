@@ -43,12 +43,13 @@ export async function seedTestMerchant(): Promise<void> {
     const ciphertext = encryptToken("shpat_seed_token", key);
     await pg.query(
       `insert into public.merchants
-         (shopify_shop_domain, shopify_access_token, shopify_scope, plan)
-       values ($1, $2, 'read_orders', 'growth')
+         (shopify_shop_domain, shopify_access_token, shopify_scope, plan, onboarding_state)
+       values ($1, $2, 'read_orders', 'growth', 'completed')
        on conflict (shopify_shop_domain) do update
          set shopify_access_token = excluded.shopify_access_token,
              shopify_scope = excluded.shopify_scope,
              plan = excluded.plan,
+             onboarding_state = 'completed',
              uninstalled_at = null`,
       [TEST_MERCHANT_SHOP, ciphertext],
     );
