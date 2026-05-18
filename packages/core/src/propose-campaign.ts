@@ -63,6 +63,8 @@ export interface ProposeCampaignInput {
   model?: string;
   /** Override for unit tests; defaults to () => new Date(). */
   now?: () => Date;
+  /** Origin of this proposal — 'manual' for merchant-created, 'agent' for AI-generated. */
+  source?: "agent" | "manual";
 }
 
 export type ProposeCampaignResult =
@@ -104,6 +106,7 @@ export async function proposeCampaign(
         merchant_id: input.merchantId,
         group_slug: input.groupSlug,
         model_version: model,
+        source: input.source ?? "agent",
         status: "proposed",
       })
       .select("id")

@@ -1665,3 +1665,64 @@ export async function mutateMerchantKeyword(
   });
   if (error) throw error;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer group sizes (for campaign creation wizard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CustomerGroupSize {
+  slug: string;
+  customerCount: number;
+  lastCampaignedAt: string | null;
+}
+
+/**
+ * Returns customer counts per group slug and the most-recent campaign date for
+ * each group. Six parallel count queries — one per known group slug — plus one
+ * query for last-campaigned dates.
+ *
+ * Used by the campaign creation wizard to populate the group picker.
+ */
+export async function getCustomerGroupSizes(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  groupSlugs: readonly string[],
+): Promise<CustomerGroupSize[]> {
+  // Count customers in each group in parallel.
+  const countResults = await Promise.all(
+    groupSlugs.map((slug) =>
+      serviceClient
+        .from("customer_inferred_state")
+        .select("shopify_customer_gid", { count: "exact", head: true })
+        .eq("merchant_id", merchantId)
+        .contains("group_memberships", [slug])
+        .then(({ count, error }) => {
+          if (error) throw error;
+          return { slug, count: count ?? 0 };
+        }),
+    ),
+  );
+
+  // Most-recent proposal per group slug — one query, filter in JS.
+  const { data: proposalRows, error: propErr } = await serviceClient
+    .from("campaign_proposals")
+    .select("group_slug, generated_at")
+    .eq("merchant_id", merchantId)
+    .in("group_slug", groupSlugs as string[])
+    .order("generated_at", { ascending: false });
+  if (propErr) throw propErr;
+
+  // Keep the most-recent generated_at per slug.
+  const lastCampaigned = new Map<string, string>();
+  for (const row of proposalRows ?? []) {
+    if (!lastCampaigned.has(row.group_slug)) {
+      lastCampaigned.set(row.group_slug, row.generated_at);
+    }
+  }
+
+  return countResults.map(({ slug, count }) => ({
+    slug,
+    customerCount: count,
+    lastCampaignedAt: lastCampaigned.get(slug) ?? null,
+  }));
+}

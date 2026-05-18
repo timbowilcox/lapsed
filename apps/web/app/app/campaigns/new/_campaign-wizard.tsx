@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -14,8 +15,25 @@ import {
   SelectItem,
   SelectValue,
   StatusDot,
+  formatCount,
+  formatDate,
 } from "@lapsed/ui";
 import { ArrowRight, ArrowLeft, Check } from "lucide-react";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GroupOption {
+  slug: string;
+  label: string;
+  customerCount: number;
+  lastCampaignedAt: string | null;
+}
+
+interface Props {
+  groups: GroupOption[];
+}
 
 type StepKey = "audience" | "offer" | "message" | "review";
 
@@ -23,26 +41,82 @@ const steps: Array<{ key: StepKey; label: string; description: string }> = [
   { key: "audience", label: "Group", description: "Who receives this campaign" },
   { key: "offer", label: "Offer", description: "Discount, free shipping or sample" },
   { key: "message", label: "Message", description: "Opening line and tone guidance" },
-  { key: "review", label: "Review", description: "Confirm and launch" },
+  { key: "review", label: "Review", description: "Confirm and create" },
 ];
 
-export function CampaignWizard() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function groupMeta(groups: GroupOption[], slug: string): GroupOption | undefined {
+  return groups.find((g) => g.slug === slug);
+}
+
+function offerSummary(offerType: string, discountValue: string): string {
+  if (offerType === "discount") return `$${discountValue} off`;
+  if (offerType === "shipping") return "Free shipping";
+  return "Free sample";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function CampaignWizard({ groups }: Props) {
+  const router = useRouter();
   const [stepIdx, setStepIdx] = useState(0);
-  const [audience, setAudience] = useState("60d");
+  const [audience, setAudience] = useState(groups[0]?.slug ?? "");
   const [offerType, setOfferType] = useState("discount");
   const [discountValue, setDiscountValue] = useState("20");
   const [message, setMessage] = useState(
-    "Hi {{first_name}} — Bondi Goods here. Quick check-in — want a one-tap link with {{offer}}?",
+    "Hi {{first_name}} — we noticed it's been a while. Here's something to make it easy to come back: {{offer}}.",
   );
   const [campaignName, setCampaignName] = useState("New win-back campaign");
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const currentStep = steps[stepIdx];
   if (!currentStep) return null;
   const isFirst = stepIdx === 0;
   const isLast = stepIdx === steps.length - 1;
 
+  const audienceMeta = groupMeta(groups, audience);
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/campaigns/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupSlug: audience }),
+      });
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        setSubmitError(body.error ?? "Something went wrong. Please try again.");
+        return;
+      }
+      router.push("/app/campaigns");
+    } catch {
+      setSubmitError("Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Validate current step before allowing next.
+  function canAdvance(): boolean {
+    if (currentStep.key === "audience") return audience.length > 0;
+    if (currentStep.key === "offer") return discountValue.trim().length > 0;
+    if (currentStep.key === "message") return message.trim().length > 0;
+    return true;
+  }
+
   return (
     <div className="grid grid-cols-[260px_1fr] gap-32">
+      {/* Step nav */}
       <nav aria-label="Wizard steps" className="flex flex-col gap-2">
         {steps.map((step, idx) => {
           const isActive = idx === stepIdx;
@@ -76,6 +150,7 @@ export function CampaignWizard() {
         })}
       </nav>
 
+      {/* Panel */}
       <Panel>
         <PanelHeader
           title={currentStep.label}
@@ -88,30 +163,59 @@ export function CampaignWizard() {
         />
         <PanelBody>
           <div className="p-24">
+            {/* ── Step 1: Group picker ─────────────────────────── */}
             {currentStep.key === "audience" && (
               <div className="flex flex-col gap-16">
-                <label className="flex flex-col gap-6">
-                  <span className="text-label text-ink-700">Group</span>
-                  <Select value={audience} onValueChange={setAudience}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="60d">Lapsed 60 days · 812 customers</SelectItem>
-                      <SelectItem value="90d">Lapsed 90 days · 446 customers</SelectItem>
-                      <SelectItem value="vip">VIP 90+ days · 214 customers</SelectItem>
-                      <SelectItem value="replenish">
-                        Replenishment due · 312 customers
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span className="text-meta text-ink-500">
-                    Only opted-in, SMS-eligible customers will receive messages.
-                  </span>
-                </label>
+                {groups.length === 0 ? (
+                  <p className="text-body text-ink-500">
+                    No customer groups are available yet. Your first scoring run completes within
+                    24 hours of installing — check back then.
+                  </p>
+                ) : (
+                  <fieldset className="flex flex-col gap-8">
+                    <legend className="mb-8 text-label text-ink-700">
+                      Which group should receive this campaign?
+                    </legend>
+                    {groups.map((group) => {
+                      const selected = audience === group.slug;
+                      return (
+                        <label
+                          key={group.slug}
+                          className={`flex cursor-pointer items-start gap-12 rounded-md border p-16 transition-colors ${
+                            selected
+                              ? "border-lavender-500 bg-lavender-50"
+                              : "border-border bg-cream-50 hover:bg-cream-100"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="audience"
+                            value={group.slug}
+                            checked={selected}
+                            onChange={() => setAudience(group.slug)}
+                            className="mt-2 accent-lavender-500"
+                          />
+                          <div className="flex-1">
+                            <div className="text-body-strong text-ink-900">{group.label}</div>
+                            <div className="mt-2 text-mini text-ink-500">
+                              {formatCount(group.customerCount)} customers
+                              {group.lastCampaignedAt
+                                ? ` · last campaigned ${formatDate(group.lastCampaignedAt, "short")}`
+                                : " · never campaigned"}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                )}
+                <p className="text-meta text-ink-500">
+                  Only opted-in, SMS-eligible customers will receive messages.
+                </p>
               </div>
             )}
 
+            {/* ── Step 2: Offer ────────────────────────────────── */}
             {currentStep.key === "offer" && (
               <div className="flex flex-col gap-16">
                 <label className="flex flex-col gap-6">
@@ -127,17 +231,24 @@ export function CampaignWizard() {
                     </SelectContent>
                   </Select>
                 </label>
-                <label className="flex flex-col gap-6">
-                  <span className="text-label text-ink-700">Discount value (USD)</span>
-                  <Input
-                    type="number"
-                    value={discountValue}
-                    onChange={(e) => setDiscountValue(e.target.value)}
-                  />
-                </label>
+                {offerType === "discount" && (
+                  <label className="flex flex-col gap-6">
+                    <span className="text-label text-ink-700">Discount value (USD)</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                    />
+                  </label>
+                )}
+                <p className="text-meta text-ink-500">
+                  The agent will use this as a starting point when designing the campaign variants.
+                </p>
               </div>
             )}
 
+            {/* ── Step 3: Message ──────────────────────────────── */}
             {currentStep.key === "message" && (
               <div className="flex flex-col gap-16">
                 <label className="flex flex-col gap-6">
@@ -148,7 +259,7 @@ export function CampaignWizard() {
                   />
                 </label>
                 <label className="flex flex-col gap-6">
-                  <span className="text-label text-ink-700">Opening message</span>
+                  <span className="text-label text-ink-700">Opening message (optional guidance)</span>
                   <textarea
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -164,40 +275,49 @@ export function CampaignWizard() {
                     <code className="rounded-sm bg-cream-200 px-4 py-1 text-mini">
                       {"{{offer}}"}
                     </code>{" "}
-                    as variables.
+                    as variables. The agent will create three variants based on your brand voice.
                   </span>
                 </label>
               </div>
             )}
 
+            {/* ── Step 4: Review ───────────────────────────────── */}
             {currentStep.key === "review" && (
               <div className="flex flex-col gap-16">
                 <Card className="p-20">
-                  <div className="text-label text-ink-500">Name</div>
+                  <div className="text-label text-ink-500">Campaign name</div>
                   <div className="mt-4 text-body-strong text-ink-900">{campaignName}</div>
                 </Card>
                 <Card className="p-20">
                   <div className="text-label text-ink-500">Group</div>
-                  <div className="mt-4 text-body-strong text-ink-900">{audience}</div>
+                  <div className="mt-4 text-body-strong text-ink-900">
+                    {audienceMeta?.label ?? audience}
+                  </div>
+                  {audienceMeta && (
+                    <div className="mt-2 text-mini text-ink-500">
+                      {formatCount(audienceMeta.customerCount)} customers
+                    </div>
+                  )}
                 </Card>
                 <Card className="p-20">
                   <div className="text-label text-ink-500">Offer</div>
                   <div className="mt-4 text-body-strong text-ink-900">
-                    {offerType === "discount"
-                      ? `$${discountValue} off`
-                      : offerType === "shipping"
-                        ? "Free shipping"
-                        : "Free sample"}
+                    {offerSummary(offerType, discountValue)}
                   </div>
                 </Card>
                 <Card className="p-20">
-                  <div className="text-label text-ink-500">Message</div>
+                  <div className="text-label text-ink-500">Message guidance</div>
                   <div className="mt-4 whitespace-pre-wrap text-body text-ink-900">{message}</div>
                 </Card>
                 <p className="text-meta text-ink-500">
-                  Submitting creates a campaign proposal for your review. Nothing is sent until
-                  you approve it from the Campaigns page.
+                  The agent will design three message variants using your brand voice. The
+                  campaign appears in your review queue — nothing is sent until you approve it.
                 </p>
+                {submitError && (
+                  <p role="alert" className="text-meta text-danger-700">
+                    {submitError}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -211,14 +331,23 @@ export function CampaignWizard() {
           >
             <ArrowLeft strokeWidth={1.75} size={16} /> Back
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => setStepIdx((i) => Math.min(steps.length - 1, i + 1))}
-            disabled={isLast}
-          >
-            {isLast ? "Submit for review" : "Continue"}
-            {!isLast && <ArrowRight strokeWidth={1.75} size={16} />}
-          </Button>
+          {isLast ? (
+            <Button
+              variant="primary"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || groups.length === 0}
+            >
+              {submitting ? "Creating campaign…" : "Create campaign"}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              onClick={() => setStepIdx((i) => Math.min(steps.length - 1, i + 1))}
+              disabled={!canAdvance()}
+            >
+              Continue <ArrowRight strokeWidth={1.75} size={16} />
+            </Button>
+          )}
         </div>
       </Panel>
     </div>

@@ -1,11 +1,10 @@
-// Campaign review — the approval surface (Sprint 06, chunk 9).
+// Campaigns — approval surface + primary create CTA (Sprint 11, chunk 7).
 //
-// Replaces the Sprint 01 fixture-backed campaigns table. The agent has
-// prepared campaign proposals from the merchant's scored customer groups;
-// this surface lets the merchant review each one and approve, edit, or
-// reject it. Approved campaigns are what Sprint 07's conversation engine
-// will run.
+// The agent drafts proposals from scored customer groups; the merchant
+// can also build one manually via the wizard at /app/campaigns/new.
+// Approved campaigns enter the sending pipeline (decision 13).
 
+import Link from "next/link";
 import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
 import { ApprovalSurface } from "./_approval-surface";
@@ -19,12 +18,20 @@ export default async function CampaignsPage({ searchParams }: PageProps) {
 
   return (
     <MerchantShell pageTitle="Campaigns">
-      <div className="mb-24">
-        <h1 className="mb-4 text-h1 text-ink-900">Campaign review</h1>
-        <p className="text-meta text-ink-500">
-          The agent drafts a campaign for each scored customer group. Review the proposals below
-          and approve, edit, or reject them. Nothing is sent until you approve.
-        </p>
+      <div className="mb-24 flex items-start justify-between gap-16">
+        <div>
+          <h1 className="mb-4 text-h1 text-ink-900">Campaigns</h1>
+          <p className="text-meta text-ink-500">
+            Review proposals from the agent or build a campaign yourself. Nothing is sent until
+            you approve.
+          </p>
+        </div>
+        <Link
+          href="/app/campaigns/new"
+          className="inline-flex shrink-0 items-center gap-8 rounded-md bg-ink-900 px-16 py-10 text-label text-cream-50 transition-colors hover:bg-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+        >
+          Create campaign
+        </Link>
       </div>
 
       {/* operatorId records who acted on the proposal; the merchant id is a

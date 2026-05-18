@@ -1375,6 +1375,7 @@ export type Database = {
           model_version: string
           rejected_at: string | null
           rejection_reason: string | null
+          source: string
           status: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id: string | null
           version_number: number
@@ -1391,6 +1392,7 @@ export type Database = {
           model_version: string
           rejected_at?: string | null
           rejection_reason?: string | null
+          source?: string
           status?: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id?: string | null
           version_number?: number
@@ -1407,6 +1409,7 @@ export type Database = {
           model_version?: string
           rejected_at?: string | null
           rejection_reason?: string | null
+          source?: string
           status?: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id?: string | null
           version_number?: number
