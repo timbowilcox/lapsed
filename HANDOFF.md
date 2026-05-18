@@ -46,9 +46,12 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 - Isolation guard: `apps/web/app/app/page.tsx:52-54` — dashboard redirect for `not_started` only; `apps/web/app/preview/page.tsx` calls no auth functions (confirmed by architecture guardian)
 
 **Test evidence:**
-- Test file: `apps/web/e2e/tour.spec.ts:25-46` — `previewRoutes` array covers 7 demo pages
-- Number of test cases: 7 preview route tests
-- Key assertion: `expect(page.getByText(route.expect, { exact: false }).first()).toBeVisible()` — each demo page renders its expected heading/content without auth
+- Test file: `apps/web/e2e/demo-flow.spec.ts:1-58` — 7 preview-route render tests + 1 Install-CTA navigation test (8 cases)
+- Test file: `apps/web/e2e/a11y.spec.ts:26-34` (`previewRoutes` array) + `:55-70` — 7 axe-core scans of the demo routes for critical/serious violations
+- Number of test cases: 8 in `demo-flow.spec.ts` + 7 axe scans in `a11y.spec.ts`
+- Key assertion: `demo-flow.spec.ts` asserts each `/preview` route renders its `<h1>`/distinctive content and the "This is a demo." banner with no session cookie; the CTA test asserts the banner's "Install on Shopify" link navigates to `/app/auth/install` (`expect(page).toHaveURL(/\/app\/auth\/install/)`)
+
+**Correction (final-evaluator remediation):** the previous draft cited `tour.spec.ts:25-46` as holding a `previewRoutes` array — that range actually holds the authenticated `/app` `routes` array. The real `previewRoutes` array lives in `a11y.spec.ts:26-34` (axe scans). The dedicated route-render + Install-CTA E2E now ships as `demo-flow.spec.ts`.
 
 **Walkthrough findings resolved:**
 - CRITICAL (marketing p.45): "No path for prospects to preview the product without installing" → `/preview` route ships public
@@ -180,11 +183,13 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Create button: `apps/web/app/app/campaigns/page.tsx:40-50` — "Create campaign" button in page header
-- Campaign wizard: `apps/web/app/app/campaigns/new/_campaign-wizard.tsx:81-380` — 3-step wizard (Audience → Message → Review); all validation, group selection, message editing
+- Create button: `apps/web/app/app/campaigns/page.tsx:33-38` — campaign-creation link in the page header, labeled "Create manually" (see Note below)
+- Campaign wizard: `apps/web/app/app/campaigns/new/_campaign-wizard.tsx` — 2-step form (Group → Offer) then generate/preview/approve phases; accepts `initialGroupSlug` to pre-select the cohort when arriving from a suggested campaign
 - API: `apps/web/app/api/campaigns/create/route.ts` — POST, auth gate, group validation, proposeCampaign call
-- Suggested campaigns surface: `apps/web/app/app/_dashboard-recommended-actions.tsx:130-228` — top 3 active insights as recommendation cards with dismiss/snooze; "Take action →" CTA links to relevant page
+- Suggested campaigns surface: `apps/web/app/app/campaigns/_suggested-campaigns.tsx` — cohort-category insights rendered as cards above the approval queue; "Spin up this campaign" routes to `/app/campaigns/new?groupSlug=…`
 - Template library: `apps/web/app/app/campaigns/new/_campaign-templates.tsx` — 6 proven campaign templates (60-day winback, VIP recovery, seasonal re-engagement, post-purchase follow-up, replenishment, first-purchase follow-up)
+
+**Note (design-tenet override):** the header button is labeled "Create manually" rather than "Create campaign" to honor Tenet 2 — the agent is the primary campaign author and merchant authoring is a deliberately secondary path. The walkthrough CRITICAL ("no discoverable way to create a new campaign") is resolved: the surface is discoverable; only the label differs from the literal SPRINT.md Chunk 7 wording.
 
 **Test evidence:**
 - Test file: `apps/web/__tests__/campaigns-create-route.test.ts:88-220` — 10 test cases
@@ -203,7 +208,7 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Engine: `packages/core/src/insights-engine.ts:299-362` — `generateRecommendations()` — deterministic, signal-derived, 5 categories: cohort (low RFM conversion rate), arm (converged arm), opt_out (high opt-out spike), conversation (stalled threads), payment (failed billing)
+- Engine: `packages/core/src/insights-engine.ts:299-357` — `generateRecommendations()` — deterministic, signal-derived, 5 categories: cohort (low RFM conversion rate), arm (converged arm), opt_out (high opt-out spike), conversation (stalled threads), payment (failed billing)
 - Decision 36: no LLM calls; every recommendation derives from DB signals with threshold math
 - API routes: `apps/web/app/api/insights/route.ts` (GET active), `apps/web/app/api/insights/[id]/route.ts` (POST dismiss/snooze/act)
 - Background cron: `apps/web/app/api/cron/insights/route.ts` — CRON_SECRET gated, runs every 6 hours (per `vercel.json`)
@@ -245,7 +250,9 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 
 ### Criterion 10: Mobile + accessibility + onboarding polish + HANDOFF
 
-**Self-score:** 3/3
+**Self-score:** 2/3
+
+**Rescore rationale (final-evaluator remediation):** 2 of the 4 E2E tests prescribed by SPRINT.md Chunk 13 ship in this sprint — demo mode flow (`demo-flow.spec.ts`) and AI recommendations (`insights.spec.ts`). The onboarding-tour state-transition E2E and the campaign-creation-flow E2E are deferred to Sprint 12 (see Deliberate Deviations). Mobile, accessibility, onboarding polish, and the brand-polish items are all complete; the score is held at 2/3 solely because E2E coverage is partial.
 
 **Implementation evidence:**
 
@@ -276,9 +283,13 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 - Install guidance: `apps/web/app/app/auth/install/page.tsx:98-134` — App Store link + "How to install" `<details>` expandable
 
 **Test evidence:**
-- Test file: `apps/web/__tests__/onboarding-route.test.ts:1-249` — 14 test cases
-- Number of test cases: 14 (auth gate ×2, input validation ×4, backward-transition guard ×3, happy path ×3, cross-merchant isolation ×1, DB error ×1)
+- Test file: `apps/web/__tests__/onboarding-route.test.ts:1-249` — 14 test cases (auth gate ×2, input validation ×4, backward-transition guard ×3, happy path ×3, cross-merchant isolation ×1, DB error ×1)
 - Key assertion: `expect(updateEqFn).not.toHaveBeenCalled()` when current state is "completed" — backward transition guard prevents DB write; `expect(updateEqFn).toHaveBeenCalledWith("id", MERCHANT_B.id)` — update scoped to session merchant, not request body
+
+*Chunk 13 E2E (2 of 4 prescribed):*
+- `apps/web/e2e/demo-flow.spec.ts` — 8 cases: 7 `/preview` route renders + 1 demo-banner Install-CTA navigation assertion
+- `apps/web/e2e/insights.spec.ts` — 2 cases: a seeded cohort insight surfaces as a suggested-campaign card, and "Spin up" routes to `/app/campaigns/new?groupSlug=lapsed_vips`
+- Deferred: onboarding-tour state-transition E2E and campaign-creation-flow E2E — see Deliberate Deviations
 
 **Walkthrough findings resolved:**
 - HIGH (install page p.46): "No guidance on how to install from App Store" → App Store link + "How to install" expandable section
@@ -296,11 +307,19 @@ The `not_started` redirect exists only in `apps/web/app/app/page.tsx` (the dashb
 
 `ink-400` (#79766F) on `cream-100` (#F8F5EE) gives 4.16:1 which fails WCAG 1.4.3's 4.5:1 requirement. This affects secondary/hint text throughout the codebase wherever `text-ink-400` appears on cream backgrounds (dashboard footnotes, campaign card metadata, conversation timestamps). The Sprint 11 a11y pass fixed all `text-ink-400` instances in the *new* onboarding tour; the systemic audit across existing pages is deferred to Sprint 12's accessibility hardening chunk. Each affected page would need individual review to identify which elements are "decorative" (WCAG exempt) vs. "meaningful text" (requires contrast fix).
 
-**Deferred — E2E tests for onboarding tour state transitions and campaign creation flow (Spec partial)**
+**Deferred — onboarding-tour and campaign-creation E2E tests (2 of 4 Chunk 13 E2E tests)**
 
-The spec acceptance criteria for Chunk 13 included 4 new E2E tests: demo mode flow, first-run onboarding tour, campaign creation flow, and AI recommendations. The tour flow E2E test (`apps/web/e2e/tour.spec.ts`) covers the onboarding route render; however, a full state-transition test (mock `not_started` merchant → verify redirect → advance through steps → verify `completed` state) requires the E2E test fixture to support seeding merchants with `not_started` state and asserting against the API's state. The unit tests in `apps/web/__tests__/onboarding-route.test.ts` cover the API contract; the E2E state-machine test is deferred to Sprint 12.
+SPRINT.md Chunk 13 prescribes 4 new E2E tests: demo mode flow, first-run onboarding tour, campaign creation flow, and AI recommendations. **Two ship in this sprint:**
+- `apps/web/e2e/demo-flow.spec.ts` — demo mode flow (7 `/preview` route renders + Install-CTA navigation)
+- `apps/web/e2e/insights.spec.ts` — AI recommendations (seeded cohort insight → suggested-campaign card → "Spin up" routes to the pre-filled wizard)
 
-The E2E test infrastructure fix for the `scoring_runs` FK constraint failure in `removeTestMerchant()` IS applied in this sprint (see commit `602e741`), which unblocks all 18 axe tests from previously timing out on teardown.
+**Two are deferred to Sprint 12:**
+- *Onboarding-tour state-transition E2E* — a full state-machine test (seed a `not_started` merchant → verify redirect → advance through steps → verify `completed`) needs the E2E fixture to support seeding merchants in a non-`completed` onboarding state and asserting against the API's persisted state. The unit tests in `apps/web/__tests__/onboarding-route.test.ts` (14 cases) cover the API contract in the interim.
+- *Campaign-creation-flow E2E* — exercising the manual wizard end-to-end requires an Anthropic mock in the E2E harness, because `/api/campaigns/create` calls `proposeCampaign` with a live Sonnet client. The route is covered by `apps/web/__tests__/campaigns-create-route.test.ts` (10 cases) in the interim.
+
+Both deferrals are recommended for Sprint 12, alongside the operator-dashboard work — that sprint already touches test-fixture infrastructure, so the fresh-merchant seed helper and the Anthropic E2E mock are cheaper to add there than to retrofit now.
+
+The E2E test infrastructure fix for the `scoring_runs` FK constraint failure in `removeTestMerchant()` IS applied in this sprint (see commit `602e741`); `removeTestMerchant()` now also clears `insights` rows so the insights E2E teardown cannot leave an FK-blocking row behind.
 
 **Deferred — `ink-400` token in design system (systemic)**
 

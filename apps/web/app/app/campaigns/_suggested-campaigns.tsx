@@ -8,7 +8,7 @@
 //   - Merchant-facing reason copy (insight.merchantCopy)
 //   - Expected win-back range (static pattern estimate, not a forecast)
 //   - "Why suggested" tooltip with the signal context
-//   - "Spin up" CTA → POST /api/campaigns/create → approval queue
+//   - "Spin up" CTA → /app/campaigns/new pre-filled with the cohort
 //   - "Dismiss" to suppress the card for this evaluation cycle
 //
 // Demo mode: accepts an optional `demoInsights` prop; when provided, skips
@@ -120,13 +120,11 @@ function SuggestionCard({
   insight,
   onSpinUp,
   onDismiss,
-  spinning,
   dismissing,
 }: {
   insight: SuggestionInsight;
   onSpinUp: (insight: SuggestionInsight) => void;
   onDismiss: (insight: SuggestionInsight) => void;
-  spinning: boolean;
   dismissing: boolean;
 }) {
   const groupSlug = getGroupSlug(insight);
@@ -175,9 +173,9 @@ function SuggestionCard({
         <Button
           className="w-full"
           onClick={() => onSpinUp(insight)}
-          disabled={spinning || dismissing}
+          disabled={dismissing}
         >
-          {spinning ? "Creating campaign…" : "Spin up this campaign"}
+          Spin up this campaign
         </Button>
       </div>
     </Card>
@@ -198,9 +196,7 @@ export function SuggestedCampaigns({ demoInsights }: Props) {
   const mountedRef = useRef(true);
   const [insights, setInsights] = useState<SuggestionInsight[]>([]);
   const [loading, setLoading] = useState(!demoInsights);
-  const [spinningId, setSpinningId] = useState<string | null>(null);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
-  const [spinError, setSpinError] = useState<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -229,32 +225,14 @@ export function SuggestedCampaigns({ demoInsights }: Props) {
     };
   }, [demoInsights]);
 
+  // Spin up → open the campaign wizard with this cohort pre-selected. The
+  // merchant reviews the offer and the generated messages before anything is
+  // created; no proposal exists until they complete the wizard.
   const handleSpinUp = useCallback(
-    async (insight: SuggestionInsight) => {
+    (insight: SuggestionInsight) => {
       const groupSlug = getGroupSlug(insight);
       if (!groupSlug) return;
-      setSpinningId(insight.id);
-      setSpinError(null);
-      try {
-        const res = await fetch("/api/campaigns/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ groupSlug }),
-        });
-        if (!mountedRef.current) return;
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          setSpinError(body.error ?? "Something went wrong. Please try again.");
-          return;
-        }
-        // Campaign created — navigate to campaigns to review the new proposal.
-        router.push("/app/campaigns");
-        router.refresh();
-      } catch {
-        if (mountedRef.current) setSpinError("Something went wrong. Please try again.");
-      } finally {
-        if (mountedRef.current) setSpinningId(null);
-      }
+      router.push(`/app/campaigns/new?groupSlug=${encodeURIComponent(groupSlug)}`);
     },
     [router],
   );
@@ -305,20 +283,13 @@ export function SuggestedCampaigns({ demoInsights }: Props) {
         <span className="text-meta text-ink-500">Based on your current customer data</span>
       </div>
 
-      {spinError && (
-        <p className="mb-12 text-meta text-danger-500" role="alert">
-          {spinError}
-        </p>
-      )}
-
       <div className="grid grid-cols-1 gap-16 md:grid-cols-2">
         {insights.map((insight) => (
           <SuggestionCard
             key={insight.id}
             insight={insight}
-            onSpinUp={(i) => void handleSpinUp(i)}
+            onSpinUp={handleSpinUp}
             onDismiss={(i) => void handleDismiss(i)}
-            spinning={spinningId === insight.id}
             dismissing={dismissingId === insight.id}
           />
         ))}

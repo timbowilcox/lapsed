@@ -35,6 +35,8 @@ export interface GroupOption {
 interface Props {
   groups: GroupOption[];
   merchantId: string;
+  /** Cohort slug to pre-select (set when arriving from a suggested campaign). */
+  initialGroupSlug?: string;
 }
 
 type Phase = "form" | "generating" | "preview" | "approving";
@@ -78,12 +80,16 @@ function toneLabel(tone: string): string {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function CampaignWizard({ groups, merchantId }: Props) {
+export function CampaignWizard({ groups, merchantId, initialGroupSlug }: Props) {
   const router = useRouter();
 
   // Form state
   const [stepIdx, setStepIdx] = useState(0);
-  const [audience, setAudience] = useState(groups[0]?.slug ?? "");
+  const [audience, setAudience] = useState(
+    initialGroupSlug && groups.some((g) => g.slug === initialGroupSlug)
+      ? initialGroupSlug
+      : (groups[0]?.slug ?? ""),
+  );
   const [offerType, setOfferType] = useState("discount");
   const [discountValue, setDiscountValue] = useState("20");
 
