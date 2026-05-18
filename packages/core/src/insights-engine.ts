@@ -114,7 +114,9 @@ async function evaluateCohortSignal(
       signalValue: lapsedVipCount,
       threshold: COHORT_LAPSED_VIP_THRESHOLD,
       merchantCopy: `${lapsedVipCount} dormant VIP customers — a targeted win-back campaign typically recovers 10-15% of this group.`,
-      ctaAction: { route: "/app/campaigns/new" },
+      // groupSlug param enables the "Spin up" CTA on the suggested campaigns surface
+      // to pre-fill the correct group without additional lookup.
+      ctaAction: { route: "/app/campaigns/new", params: { groupSlug: "lapsed_vips" } },
     },
   ];
 }

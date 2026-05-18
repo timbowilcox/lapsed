@@ -145,6 +145,21 @@ export interface DemoBillingSnapshot {
   paymentMethodLast4: string;
 }
 
+export interface DemoInsight {
+  id: string;
+  insightKey: string;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  category: "cohort" | "arm" | "opt_out" | "conversation" | "payment";
+  signalMetric: string;
+  signalValue: number;
+  threshold: number;
+  merchantCopy: string;
+  ctaAction: { route: string; params?: Record<string, string> };
+  state: "active";
+  createdAt: string;
+  expiresAt: string | null;
+}
+
 export interface DemoFixtures {
   version: number;
   merchant: DemoMerchant;
@@ -153,4 +168,5 @@ export interface DemoFixtures {
   conversations: DemoConversation[];
   attribution: DemoAttributionSummary;
   billing: DemoBillingSnapshot;
+  insights: DemoInsight[];
 }

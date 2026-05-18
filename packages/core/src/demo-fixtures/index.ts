@@ -11,6 +11,7 @@ export type {
   ConversationStatus,
   CustomerTier,
   CustomerStatus,
+  DemoInsight,
 } from "./types";
 
 export const CURRENT_DEMO_VERSION = 1;

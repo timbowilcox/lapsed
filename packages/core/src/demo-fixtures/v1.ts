@@ -674,4 +674,37 @@ export const v1: DemoFixtures = {
     renewsAt: "2026-06-12T08:30:00Z",
     paymentMethodLast4: "4242",
   },
+
+  insights: [
+    {
+      id: "demo_ins_001",
+      insightKey: "cohort:lapsed_vip_dormancy",
+      priority: "HIGH",
+      category: "cohort",
+      signalMetric: "lapsed_vip_count",
+      signalValue: 47,
+      threshold: 10,
+      merchantCopy:
+        "47 dormant VIP customers — a targeted win-back campaign typically recovers 10-15% of this group.",
+      ctaAction: { route: "/app/campaigns/new", params: { groupSlug: "lapsed_vips" } },
+      state: "active",
+      createdAt: "2026-05-18T05:00:00Z",
+      expiresAt: "2026-05-18T23:00:00Z",
+    },
+    {
+      id: "demo_ins_002",
+      insightKey: "cohort:at_risk_regulars_dormancy",
+      priority: "MEDIUM",
+      category: "cohort",
+      signalMetric: "at_risk_regular_count",
+      signalValue: 124,
+      threshold: 10,
+      merchantCopy:
+        "124 regular customers are approaching the lapsed threshold — acting now prevents them from slipping into the harder-to-recover dormant segment.",
+      ctaAction: { route: "/app/campaigns/new", params: { groupSlug: "at_risk_regulars" } },
+      state: "active",
+      createdAt: "2026-05-18T05:00:00Z",
+      expiresAt: "2026-05-18T23:00:00Z",
+    },
+  ],
 };
