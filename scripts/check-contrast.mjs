@@ -7,7 +7,10 @@
  * so developers catch them before they reach the Shopify embedded context.
  *
  * Only covers Vellum token pairs — not third-party class combinations.
- * Exits 0 always (warnings only); failures are surfaced via advisory output.
+ * Exits 1 if any pair fails WCAG AA 4.5:1 — this is a CI gate (grep:contrast).
+ * A pair is exempt when its source line is marked `aria-hidden` (decorative —
+ * not exposed to assistive tech, so not a text-contrast subject) or carries an
+ * explicit `contrast-exempt` annotation. Exemptions are per-element, never blanket.
  * Run via: node scripts/check-contrast.mjs
  *
  * Formula: WCAG relative luminance + contrast ratio
@@ -34,6 +37,7 @@ const COLORS = {
   "lavender-400": "#B8A6F4",
   "lavender-500": "#9C85EE",
   "lavender-700": "#6B52C9",
+  "lavender-800": "#5A44A8",
   "success-500": "#2D8A4E",
   "success-100": "#DDF0E2",
   "warning-500": "#C8941E",
@@ -115,6 +119,19 @@ for (const dir of SCOPED_DIRS) {
       const extraBlocks = colorStrings.filter((s) => !seen.has(s));
       const allBlocks = [...classNameBlocks, ...extraBlocks];
       for (const block of allBlocks) {
+        // Exemption: skip a className/string when its source line is marked
+        // `aria-hidden` (decorative element — not exposed to assistive tech,
+        // so its colour is not a WCAG text-contrast subject) or carries an
+        // explicit `contrast-exempt` annotation. Per-element, never blanket.
+        const blockIdx = src.indexOf(block);
+        const exemptStart = blockIdx === -1 ? 0 : src.lastIndexOf("\n", blockIdx) + 1;
+        const exemptEnd =
+          blockIdx === -1 ? src.length : src.indexOf("\n", blockIdx + block.length);
+        const blockLineRegion = src.slice(
+          exemptStart,
+          exemptEnd === -1 ? undefined : exemptEnd,
+        );
+        if (/aria-hidden|contrast-exempt/.test(blockLineRegion)) continue;
         const bgs = [...block.matchAll(BG_RE)].map((m) => m[1]);
         const texts = [...block.matchAll(TEXT_RE)].map((m) => m[1]);
         for (const bg of bgs) {

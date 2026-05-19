@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export interface EmptyStateProps {
-  /** Optional Lucide icon or illustration — rendered in a cream-200 circle. */
+  /**
+   * Optional Lucide icon or illustration — rendered in a decorative cream-200
+   * circle. The circle is aria-hidden: the heading and body carry all meaning,
+   * so the icon is not exposed to assistive tech and is exempt from text
+   * contrast (it is a decorative graphic, not text).
+   */
   icon?: ReactNode;
   /** Primary heading — what's missing. Keep to one short phrase. */
   heading: string;
@@ -43,7 +48,7 @@ export function EmptyState({ icon, heading, body, cta, secondaryAction, classNam
       )}
     >
       {icon && (
-        <div className="mb-16 flex h-40 w-40 items-center justify-center rounded-full bg-cream-200 text-ink-300">
+        <div aria-hidden="true" className="mb-16 flex h-40 w-40 items-center justify-center rounded-full bg-cream-200 text-ink-300">
           {icon}
         </div>
       )}

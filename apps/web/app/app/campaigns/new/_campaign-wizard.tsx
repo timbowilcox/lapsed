@@ -223,7 +223,7 @@ export function CampaignWizard({ groups, merchantId, initialGroupSlug }: Props) 
             return (
               <Card key={v.armId} className="flex flex-col gap-12 p-20">
                 <div className="flex items-center justify-between">
-                  <span className="flex h-24 w-24 items-center justify-center rounded-pill bg-lavender-100 text-mini font-semibold text-lavender-700">
+                  <span className="flex h-24 w-24 items-center justify-center rounded-pill bg-lavender-100 text-mini font-semibold text-lavender-800">
                     {VARIANT_LABELS[i] ?? String(i + 1)}
                   </span>
                   <span className="text-mini text-ink-500">{toneLabel(v.tone)}</span>

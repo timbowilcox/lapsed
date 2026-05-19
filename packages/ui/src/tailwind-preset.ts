@@ -11,6 +11,7 @@ const preset: Partial<Config> = {
           400: "#B8A6F4",
           500: "#9C85EE",
           700: "#6B52C9",
+          800: "#5A44A8",
         },
         cream: {
           50: "#FCFAF5",

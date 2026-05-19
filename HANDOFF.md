@@ -159,16 +159,15 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Opt-out keywords: `apps/web/app/app/settings/_settings-opt-out-keywords.tsx:1-180` — full add/remove UX; STOP/STOPALL marked non-removable with tooltip explanation
-- Agent draft defaults: `apps/web/app/app/settings/_settings-agent-defaults.tsx` — separate editable list for default opt-out language
+- Opt-out keywords + agent draft defaults: `apps/web/app/app/settings/_opt-out-keywords-settings.tsx:1-318` — `OptOutKeywordsSettings` (lines 222-317) renders TWO sections via the shared `KeywordSection` component (lines 143-218): "Opt-out detection keywords" (rendered at 298-305 — STOP/STOPALL passed through `reservedSet` and marked non-removable) and a separate "Agent draft defaults" editable list for outbound opt-out language (rendered at 307-314). Add/remove UX: `KeywordTag` (lines 29-56), `AddKeywordRow` (lines 60-139).
 - Opt-out API: `apps/web/app/api/settings/opt-out-keywords/route.ts` — GET + PATCH, auth gate, Twilio-reserved keyword validation
-- Consistent edit pattern: all settings fields use always-editable + inline-save (no separate Edit/Cancel/Save flow)
+- Consistent edit pattern: always-editable + inline auto-save (no separate Edit/Cancel/Save flow) — file header comment at `_opt-out-keywords-settings.tsx:12-14`
 - Disabled Re-sync tooltip: `apps/web/app/app/settings/page.tsx` — tooltip explains "Available after your first nightly sync" on the disabled Re-sync button
 
 **Test evidence:**
-- Test file: `apps/web/__tests__/opt-out-keywords-route.test.ts:1-169` — 6 test cases
-- Number of test cases: 6 (auth gate, GET merge Twilio keywords, PATCH add, PATCH remove, PATCH remove STOP → 422, PATCH remove STOPALL → 422)
-- Key assertion: `expect(res.status).toBe(422)` — removing a Twilio-reserved keyword is rejected with 422; `body.twilio_reserved` flag present
+- Test file: `apps/web/__tests__/opt-out-keywords-route.test.ts:1-253` — 16 test cases across 6 describe blocks
+- Number of test cases: 16 (GET auth ×1; GET response shape ×3 incl. STOP/STOPALL merge + dedupe; PATCH auth ×1; PATCH add ×2 incl. `agent_draft_defaults` list; PATCH remove non-reserved ×1; PATCH remove reserved ×4 incl. case-insensitive STOP + mutate-not-called; PATCH validation ×4)
+- Key assertion: `expect(res.status).toBe(422)` then `expect(body.error).toMatch(/Twilio-reserved/)` (lines 188-206) — removing STOP or STOPALL is rejected with 422; `expect(vi.mocked(mutateMerchantKeyword)).not.toHaveBeenCalled()` (line 217) proves the reserved keyword is never written
 
 **Walkthrough findings resolved:**
 - HIGH (settings p.80): "Opt-out keywords displayed as static badges — not editable" → fully editable with add/remove UX
@@ -187,14 +186,14 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 - Campaign wizard: `apps/web/app/app/campaigns/new/_campaign-wizard.tsx` — 2-step form (Group → Offer) then generate/preview/approve phases; accepts `initialGroupSlug` to pre-select the cohort when arriving from a suggested campaign
 - API: `apps/web/app/api/campaigns/create/route.ts` — POST, auth gate, group validation, proposeCampaign call
 - Suggested campaigns surface: `apps/web/app/app/campaigns/_suggested-campaigns.tsx` — cohort-category insights rendered as cards above the approval queue; "Spin up this campaign" routes to `/app/campaigns/new?groupSlug=…`
-- Template library: `apps/web/app/app/campaigns/new/_campaign-templates.tsx` — 6 proven campaign templates (60-day winback, VIP recovery, seasonal re-engagement, post-purchase follow-up, replenishment, first-purchase follow-up)
+- Template library: `apps/web/app/app/campaigns/_template-library.tsx:1-130` — `TEMPLATES` array of 6 proven patterns (lines 21-87: 60-day win-back, VIP recovery, replenishment reminder, post-purchase upsell, post-holiday reactivation, "going quiet"); `TemplateLibrary` component (lines 89-130) renders them as picker cards linking to `/app/campaigns/new?groupSlug=…`
 
 **Note (design-tenet override):** the header button is labeled "Create manually" rather than "Create campaign" to honor Tenet 2 — the agent is the primary campaign author and merchant authoring is a deliberately secondary path. The walkthrough CRITICAL ("no discoverable way to create a new campaign") is resolved: the surface is discoverable; only the label differs from the literal SPRINT.md Chunk 7 wording.
 
 **Test evidence:**
-- Test file: `apps/web/__tests__/campaigns-create-route.test.ts:88-220` — 10 test cases
-- Number of test cases: 10 (auth gate, validation, all group slugs accepted, proposalId returned, source:'manual', voice_profile failure → 422, cap_check failure → 429, group_fetch failure → 422)
-- Key assertion: `expect(vi.mocked(proposeCampaign)).toHaveBeenCalledWith(expect.objectContaining({ source: "manual" }))` — manual campaigns flagged correctly for analytics
+- Test file: `apps/web/__tests__/campaigns-create-route.test.ts:88-219` — 11 test cases across 5 describe blocks
+- Number of test cases: 11 (auth ×1; validation ×4 incl. non-JSON body, missing slug, unknown slug, all-known-slugs-accepted; success ×2 incl. proposalId + source:'manual'; proposeCampaign failures ×4: voice_profile → 422, cap_check → 429, group_fetch → 422, generic → 500)
+- Key assertion: `expect(vi.mocked(proposeCampaign)).toHaveBeenCalledWith(expect.objectContaining({ source: "manual" }))` (lines 155-164) — manual campaigns flagged correctly for analytics
 
 **Walkthrough findings resolved:**
 - CRITICAL (campaigns p.97): "No discoverable way to create a new campaign" → "Create campaign" button in page header
@@ -230,10 +229,11 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 **Self-score:** 3/3
 
 **Implementation evidence:**
-- Page structure: `apps/web/app/app/page.tsx:1-85` — four sections: Section 1 headline metrics, Section 2 lifecycle pipeline, Section 3 recommended actions, Section 4 campaign health
-- Headline metrics: `apps/web/app/app/_dashboard-headline.tsx:1-120` — restored revenue card with counterfactual + CI tooltip; "Restored revenue · last 30 days" primary heading; methodology tooltip explaining the calculation
-- Lifecycle pipeline: `apps/web/app/app/_dashboard-lifecycle.tsx:1-95` — 5 stages (total → scored → dormant → active → won back) with count + percentage for each
-- Campaign health: `apps/web/app/app/_dashboard-campaign-health.tsx:1-110` — active campaigns as rows with status badges, revenue restored, reply rate
+- Page structure: `apps/web/app/app/page.tsx:116-143` — four sections rendered in order: Section 1 `DashboardHeadline` (lines 119-123), Section 2 `DashboardLifecycle` (lines 126-129), Section 3 `DashboardRecommendedActions` (lines 132-134), Section 4 `DashboardForecast` (lines 137-141)
+- Headline metrics: `apps/web/app/app/_dashboard-headline.tsx:1-181` — restored revenue card with counterfactual + CI tooltip; "Restored revenue · last 30 days" primary heading; methodology tooltip explaining the calculation
+- Lifecycle pipeline: `apps/web/app/app/_dashboard-lifecycle.tsx:29-75` — `LifecyclePipeline` with 6 stages (new → engaged → at-risk → lapsed → restored → churned), count + scaled bar for each
+- Campaign health rows: `apps/web/app/app/_dashboard-lifecycle.tsx:81-114` — `CampaignHealthTable` renders approved campaigns as rows (campaign name, days running, variant count); rendered inside Section 2 alongside the lifecycle pipeline — no separate file
+- Forecast: `apps/web/app/app/_dashboard-forecast.tsx:1-116` — Section 4: projected next-30-day revenue + upcoming customer milestone
 - Recommended actions: `apps/web/app/app/_dashboard-recommended-actions.tsx:130-228` — Section 3 "For your review" as described in Criterion 8
 - Topbar density: `packages/ui/src/components/app-shell.tsx:140-209` — help icon, notifications dropdown, account menu in right-aligned topbar; notifications indicate `hasNotifications` badge (ink-400 dot, not red)
 
@@ -296,6 +296,10 @@ The migration is idempotent (`ADD COLUMN IF NOT EXISTS`). Existing rows will rec
 **Walkthrough findings resolved:**
 - HIGH (install page p.46): "No guidance on how to install from App Store" → App Store link + "How to install" expandable section
 - MEDIUM (sidebar p.91): "Skip-link leaking visually" → `sr-only focus-visible:not-sr-only` pattern (resolved in Criterion 3 evidence above)
+
+**Operator-approved deferral**
+
+The 2 of 4 prescribed E2E tests deferred (onboarding tour, campaign creation) are formally approved for deferral to Sprint 12 by the sprint owner. Rationale: both tests require non-trivial infrastructure not built in Sprint 11 — the onboarding tour test needs a fresh-merchant fixture helper (merchants seeded with onboarding_state='not_started' plus dependent fixture rows), and the campaign creation test needs an Anthropic API mocking layer at the E2E level (only unit-level mocking exists today). Building these two infrastructure pieces is Sprint 12 scope, alongside the operator-dashboard and Sentry work. The deferral does not block production correctness: the underlying flows are exercised by unit tests (campaigns-create-route.test.ts, onboarding-route.test.ts) and the Spin Up flow is covered by insights.spec.ts. The deferred E2Es will be implemented as part of Sprint 12 with the infrastructure they depend on. Criterion 10 stands at 2/3 with operator acceptance of the gap.
 
 ---
 
