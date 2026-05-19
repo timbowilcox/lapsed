@@ -3,10 +3,9 @@ import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 
 export interface ShopSwitcherProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  shopInitials: string;
-  shopName: string;
-  /** Omit until Sprint 03 wires real plan data. */
-  planLabel?: string;
+  shopInitials?: string | null;
+  shopName?: string | null;
+  planLabel?: string | null;
 }
 
 export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
@@ -14,6 +13,8 @@ export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
     { shopInitials, shopName, planLabel, className, ...props },
     ref,
   ) {
+    const initials = shopInitials?.slice(0, 2).toUpperCase() ?? "";
+    const loading = !shopName;
     return (
       <button
         ref={ref}
@@ -25,10 +26,14 @@ export const ShopSwitcher = forwardRef<HTMLButtonElement, ShopSwitcherProps>(
         {...props}
       >
         <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-sm bg-ink-900 text-mini font-semibold text-cream-50">
-          {shopInitials.slice(0, 2).toUpperCase()}
+          {initials}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-meta font-semibold text-ink-900">{shopName}</div>
+          {loading ? (
+            <div className="h-[12px] w-[70%] rounded bg-cream-300 motion-safe:animate-pulse" aria-hidden="true" />
+          ) : (
+            <div className="truncate text-meta font-semibold text-ink-900">{shopName}</div>
+          )}
           {planLabel && (
             <div className="text-[11px] text-ink-700 opacity-75">{planLabel}</div>
           )}

@@ -1305,20 +1305,24 @@ describe.skipIf(!SUPABASE_AVAILABLE)("RLS — customer_inferred_state (Sprint 04
 // Sprint 05 RLS — storefront_snapshots (service-role only; deny authenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 describe.skipIf(!SUPABASE_AVAILABLE)("RLS — storefront_snapshots (Sprint 05, deny all authenticated)", () => {
+  // Migration 0006 revokes ALL on storefront_snapshots from `authenticated`
+  // (belt-and-braces defense in depth alongside the deny-all RLS policy). The
+  // table-level REVOKE surfaces as a 42501 permission-denied error — not an
+  // RLS-filtered empty result set.
   it("merchant A JWT cannot read storefront_snapshots", async () => {
-    const { data, error } = await (await clientFor(SHOP_A))
+    const { error } = await (await clientFor(SHOP_A))
       .from("storefront_snapshots")
       .select("id");
-    expect(error).toBeNull();
-    expect(data ?? []).toEqual([]);
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe("42501");
   });
 
   it("merchant B JWT cannot read storefront_snapshots", async () => {
-    const { data, error } = await (await clientFor(SHOP_B))
+    const { error } = await (await clientFor(SHOP_B))
       .from("storefront_snapshots")
       .select("id");
-    expect(error).toBeNull();
-    expect(data ?? []).toEqual([]);
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe("42501");
   });
 
   it("merchant A JWT cannot insert into storefront_snapshots", async () => {

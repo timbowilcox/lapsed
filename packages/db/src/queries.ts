@@ -1537,6 +1537,10 @@ export interface MerchantAttributionCampaign {
   treatmentCohortSize: number;
   holdoutCohortSize: number;
   incrementalRevenueCents: number;
+  /** 95% CI lower bound in cents; null when evidence was insufficient. */
+  ciLowCents: number | null;
+  /** 95% CI upper bound in cents; null when evidence was insufficient. */
+  ciHighCents: number | null;
   ltvRestoredCents: number;
   insufficientEvidence: boolean;
 }
@@ -1557,7 +1561,7 @@ export async function getMerchantAttributionRollup(
 ): Promise<MerchantAttributionRollup> {
   const { data: resultRows, error: rErr } = await client
     .from("attribution_results")
-    .select("campaign_id, window_close_date, treatment_cohort_size, holdout_cohort_size, incremental_revenue_cents, ltv_restored_cents, insufficient_evidence")
+    .select("campaign_id, window_close_date, treatment_cohort_size, holdout_cohort_size, incremental_revenue_cents, incremental_ci_low_cents, incremental_ci_high_cents, ltv_restored_cents, insufficient_evidence")
     .eq("merchant_id", merchantId)
     .order("window_close_date", { ascending: false });
   if (rErr) throw rErr;
@@ -1583,8 +1587,387 @@ export async function getMerchantAttributionRollup(
       treatmentCohortSize: r.treatment_cohort_size,
       holdoutCohortSize: r.holdout_cohort_size,
       incrementalRevenueCents: r.incremental_revenue_cents,
+      ciLowCents: r.incremental_ci_low_cents ?? null,
+      ciHighCents: r.incremental_ci_high_cents ?? null,
       ltvRestoredCents: r.ltv_restored_cents,
       insufficientEvidence: r.insufficient_evidence,
     })),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle pipeline counts (dashboard chunk 10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LifecycleStageCounts {
+  new: number;
+  engaged: number;
+  at_risk: number;
+  lapsed: number;
+  won_back: number;
+  churned: number;
+}
+
+/**
+ * Returns per-stage customer counts for the lifecycle pipeline widget.
+ * Six parallel head-only count queries — one per lifecycle_stage enum value.
+ * Returns zeroes when scoring has not yet run (no rows exist).
+ */
+export async function getLifecyclePipelineCounts(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<LifecycleStageCounts> {
+  const stages = ["new", "engaged", "at_risk", "lapsed", "won_back", "churned"] as const;
+  const results = await Promise.all(
+    stages.map((stage) =>
+      client
+        .from("customer_inferred_state")
+        .select("shopify_customer_gid", { count: "exact", head: true })
+        .eq("merchant_id", merchantId)
+        .eq("lifecycle_stage", stage),
+    ),
+  );
+  const [newR, engagedR, atRiskR, lapsedR, wonBackR, churnedR] = results;
+  // Propagate the first sub-query error — avoids silently returning zeroes
+  // when the DB is unavailable or the table doesn't exist yet.
+  for (const r of results) {
+    if (r.error) throw r.error;
+  }
+  return {
+    new: newR.count ?? 0,
+    engaged: engagedR.count ?? 0,
+    at_risk: atRiskR.count ?? 0,
+    lapsed: lapsedR.count ?? 0,
+    won_back: wonBackR.count ?? 0,
+    churned: churnedR.count ?? 0,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Opt-out keyword configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OptOutConfig {
+  optOutKeywords: string[];
+  agentDraftDefaults: string[];
+}
+
+export async function getMerchantOptOutConfig(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+): Promise<OptOutConfig> {
+  const { data, error } = await serviceClient
+    .from("merchants")
+    .select("opt_out_keywords, agent_draft_defaults")
+    .eq("id", merchantId)
+    .single();
+  if (error) throw error;
+  return {
+    optOutKeywords: data.opt_out_keywords ?? [],
+    agentDraftDefaults: data.agent_draft_defaults ?? [],
+  };
+}
+
+export async function updateMerchantOptOutKeywords(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  keywords: string[],
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("merchants")
+    .update({ opt_out_keywords: keywords })
+    .eq("id", merchantId);
+  if (error) throw error;
+}
+
+export async function updateMerchantAgentDraftDefaults(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  keywords: string[],
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("merchants")
+    .update({ agent_draft_defaults: keywords })
+    .eq("id", merchantId);
+  if (error) throw error;
+}
+
+/**
+ * Atomically adds or removes a single keyword from one of the merchant's
+ * keyword arrays. Delegates to `merchant_keyword_append` / `merchant_keyword_remove`
+ * Postgres functions (migration 0012) — no read-modify-write race condition.
+ *
+ * Calls the `merchant_keyword_append` / `merchant_keyword_remove` Postgres
+ * functions from migration 0014.
+ *
+ * Preconditions (enforced by the API route before calling):
+ *   - `keyword` is already normalised (uppercase, trimmed, validated)
+ *   - reserved keywords are never passed with action "remove"
+ */
+export async function mutateMerchantKeyword(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  list: "opt_out_keywords" | "agent_draft_defaults",
+  action: "add" | "remove",
+  keyword: string,
+): Promise<void> {
+  const fnName = action === "add" ? "merchant_keyword_append" : "merchant_keyword_remove";
+  const { error } = await serviceClient.rpc(fnName, {
+    p_merchant_id: merchantId,
+    p_list: list,
+    p_keyword: keyword,
+  });
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer group sizes (for campaign creation wizard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CustomerGroupSize {
+  slug: string;
+  customerCount: number;
+  lastCampaignedAt: string | null;
+}
+
+/**
+ * Returns customer counts per group slug and the most-recent campaign date for
+ * each group. Six parallel count queries — one per known group slug — plus one
+ * query for last-campaigned dates.
+ *
+ * Used by the campaign creation wizard to populate the group picker.
+ */
+export async function getCustomerGroupSizes(
+  serviceClient: LapsedSupabaseClient,
+  merchantId: string,
+  groupSlugs: readonly string[],
+): Promise<CustomerGroupSize[]> {
+  // Count customers in each group in parallel.
+  const countResults = await Promise.all(
+    groupSlugs.map((slug) =>
+      serviceClient
+        .from("customer_inferred_state")
+        .select("shopify_customer_gid", { count: "exact", head: true })
+        .eq("merchant_id", merchantId)
+        .contains("group_memberships", [slug])
+        .then(({ count, error }) => {
+          if (error) throw error;
+          return { slug, count: count ?? 0 };
+        }),
+    ),
+  );
+
+  // Most-recent proposal per group slug — one query, filter in JS.
+  const { data: proposalRows, error: propErr } = await serviceClient
+    .from("campaign_proposals")
+    .select("group_slug, generated_at")
+    .eq("merchant_id", merchantId)
+    .in("group_slug", groupSlugs as string[])
+    .order("generated_at", { ascending: false });
+  if (propErr) throw propErr;
+
+  // Keep the most-recent generated_at per slug.
+  const lastCampaigned = new Map<string, string>();
+  for (const row of proposalRows ?? []) {
+    if (!lastCampaigned.has(row.group_slug)) {
+      lastCampaigned.set(row.group_slug, row.generated_at);
+    }
+  }
+
+  return countResults.map(({ slug, count }) => ({
+    slug,
+    customerCount: count,
+    lastCampaignedAt: lastCampaigned.get(slug) ?? null,
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Insights / Recommendations (decision 36)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InsightPriority = "HIGH" | "MEDIUM" | "LOW";
+export type InsightCategory = "cohort" | "arm" | "opt_out" | "conversation" | "payment";
+export type InsightState = "active" | "dismissed" | "acted" | "snoozed";
+
+export interface InsightRow {
+  id: string;
+  merchantId: string;
+  insightKey: string;
+  priority: InsightPriority;
+  category: InsightCategory;
+  signalMetric: string;
+  signalValue: number;
+  threshold: number;
+  merchantCopy: string;
+  ctaAction: { route: string; params?: Record<string, string> };
+  state: InsightState;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export interface InsertInsightInput {
+  merchantId: string;
+  insightKey: string;
+  priority: InsightPriority;
+  category: InsightCategory;
+  signalMetric: string;
+  signalValue: number;
+  threshold: number;
+  merchantCopy: string;
+  ctaAction: { route: string; params?: Record<string, string> };
+  expiresAt: string | null;
+  /** Defaults to 'active'. Pass 'dismissed' | 'acted' | 'snoozed' for state-transition rows. */
+  state?: InsightState;
+}
+
+function rowToInsight(row: {
+  id: string;
+  merchant_id: string;
+  insight_key: string;
+  priority: string;
+  category: string;
+  signal_metric: string;
+  signal_value: number;
+  threshold: number;
+  merchant_copy: string;
+  cta_action: Json;
+  state: string;
+  created_at: string;
+  expires_at: string | null;
+}): InsightRow {
+  return {
+    id: row.id,
+    merchantId: row.merchant_id,
+    insightKey: row.insight_key,
+    priority: row.priority as InsightPriority,
+    category: row.category as InsightCategory,
+    signalMetric: row.signal_metric,
+    signalValue: Number(row.signal_value),
+    threshold: Number(row.threshold),
+    merchantCopy: row.merchant_copy,
+    ctaAction: row.cta_action as { route: string; params?: Record<string, string> },
+    state: row.state as InsightState,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+/**
+ * Returns the current active insights for a merchant: the latest row per
+ * insight_key where state='active' and expires_at is in the future (or null).
+ *
+ * Uses DISTINCT ON (merchant_id, insight_key) with ORDER BY created_at DESC
+ * to resolve the most-recent row per key, then filters to state='active' and
+ * not expired.
+ *
+ * This is a raw SQL path because Supabase PostgREST doesn't expose DISTINCT ON
+ * via the query builder.
+ */
+export async function getActiveInsights(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  now?: Date,
+): Promise<InsightRow[]> {
+  const nowIso = (now ?? new Date()).toISOString();
+  // Supabase doesn't expose DISTINCT ON via query builder; use rpc or a
+  // two-query approach. We fetch all non-expired rows ordered by created_at
+  // desc, then deduplicate in JS — acceptable because per-merchant insight
+  // counts are in the dozens, not thousands.
+  const { data, error } = await client
+    .from("insights")
+    .select(
+      "id, merchant_id, insight_key, priority, category, signal_metric, signal_value, threshold, merchant_copy, cta_action, state, created_at, expires_at",
+    )
+    .eq("merchant_id", merchantId)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  // DISTINCT ON (insight_key): keep only the most-recent row per key.
+  const seen = new Set<string>();
+  const latest: InsightRow[] = [];
+  for (const row of data ?? []) {
+    if (!seen.has(row.insight_key)) {
+      seen.add(row.insight_key);
+      if (row.state === "active") {
+        latest.push(rowToInsight(row));
+      }
+    }
+  }
+  return latest;
+}
+
+/**
+ * Gets a specific insight row by id, scoped to the merchant.
+ * Returns null if the row does not exist or belongs to another merchant
+ * (defense-in-depth beyond RLS).
+ */
+export async function getInsightById(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  id: string,
+): Promise<InsightRow | null> {
+  const { data, error } = await client
+    .from("insights")
+    .select(
+      "id, merchant_id, insight_key, priority, category, signal_metric, signal_value, threshold, merchant_copy, cta_action, state, created_at, expires_at",
+    )
+    .eq("id", id)
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return rowToInsight(data);
+}
+
+/**
+ * Inserts a new insight row and returns the created id.
+ */
+export async function insertInsight(
+  client: LapsedSupabaseClient,
+  input: InsertInsightInput,
+): Promise<string> {
+  const { data, error } = await client
+    .from("insights")
+    .insert({
+      merchant_id: input.merchantId,
+      insight_key: input.insightKey,
+      priority: input.priority,
+      category: input.category,
+      signal_metric: input.signalMetric,
+      signal_value: input.signalValue,
+      threshold: input.threshold,
+      merchant_copy: input.merchantCopy,
+      cta_action: input.ctaAction as Json,
+      state: input.state ?? "active",
+      expires_at: input.expiresAt,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
+/**
+ * Returns true if there is already an active, non-expired insight for this
+ * (merchantId, insightKey) pair — used by generateRecommendations to suppress
+ * duplicate insertions within the 18-hour expiry window.
+ */
+export async function hasActiveInsight(
+  client: LapsedSupabaseClient,
+  merchantId: string,
+  insightKey: string,
+  now?: Date,
+): Promise<boolean> {
+  const nowIso = (now ?? new Date()).toISOString();
+  const { data, error } = await client
+    .from("insights")
+    .select("id")
+    .eq("merchant_id", merchantId)
+    .eq("insight_key", insightKey)
+    .eq("state", "active")
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
 }

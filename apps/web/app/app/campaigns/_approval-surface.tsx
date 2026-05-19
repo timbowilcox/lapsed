@@ -7,6 +7,7 @@
 // merchant approves (decision 13).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Button,
   Card,
@@ -17,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  EmptyState,
   formatCount,
   formatDate,
 } from "@lapsed/ui";
@@ -238,7 +240,7 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
     return (
       <Panel>
         <p className="p-24 text-body text-ink-700" role="alert">
-          We couldn&apos;t load your campaigns. Please refresh the page.
+          Campaigns couldn&apos;t be loaded. Please refresh the page.
         </p>
       </Panel>
     );
@@ -253,13 +255,18 @@ export function ApprovalSurface({ operatorId }: { operatorId: string }) {
           </p>
         )}
         <Panel>
-          <div className="flex flex-col items-center justify-center py-64 text-center">
-            <p className="text-body-strong text-ink-900">No campaigns are waiting for review.</p>
-            <p className="mt-8 max-w-md text-meta text-ink-500">
-              When the agent finishes preparing a campaign for one of your customer groups, it
-              will appear here for your approval.
-            </p>
-          </div>
+          <EmptyState
+            heading="No campaigns are waiting for review"
+            body="When the agent finishes preparing a campaign for one of your customer groups, it will appear here for your approval. Nothing is sent until you approve it."
+            secondaryAction={
+              <Link
+                href="/preview/campaigns"
+                className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+              >
+                Preview what campaigns look like
+              </Link>
+            }
+          />
         </Panel>
       </>
     );
@@ -649,7 +656,7 @@ function RejectConfirm({
         maxLength={500}
         onChange={(e) => onReasonChange(e.target.value)}
         placeholder="A short note — this is kept with the campaign for your records."
-        className="w-full rounded-sm border border-cream-300 bg-cream-50 p-10 text-body text-ink-900 placeholder:text-ink-300 focus-visible:border-lavender-500 focus-visible:outline-none focus-visible:shadow-focus"
+        className="w-full rounded-sm border border-cream-300 bg-cream-50 p-10 text-body text-ink-900 placeholder:text-ink-500 focus-visible:border-lavender-500 focus-visible:outline-none focus-visible:shadow-focus"
       />
       <div className="mt-20 flex items-center justify-end gap-8">
         <Button variant="secondary" onClick={onCancel} disabled={actionPending}>

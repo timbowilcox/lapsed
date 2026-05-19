@@ -13,7 +13,7 @@ const avatarVariants = cva(
         xl: "w-48 h-48 text-h3",
       },
       tone: {
-        lavender: "bg-lavender-100 text-lavender-700",
+        lavender: "bg-lavender-50 text-lavender-700",
         ink: "bg-ink-900 text-cream-50",
         cream: "bg-cream-200 text-ink-700",
       },

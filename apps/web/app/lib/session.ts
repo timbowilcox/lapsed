@@ -12,6 +12,8 @@ import { serverEnv } from "./env";
 
 type MerchantRow = Database["public"]["Tables"]["merchants"]["Row"];
 
+export type OnboardingState = "not_started" | "in_progress" | "completed" | "skipped";
+
 export interface SessionMerchant {
   id: string;
   shopDomain: string;
@@ -20,6 +22,7 @@ export interface SessionMerchant {
   plan: string;
   planLabel: string;
   installedAt: string;
+  onboardingState: OnboardingState;
 }
 
 /**
@@ -54,9 +57,9 @@ export async function getMerchantFromSession(): Promise<SessionMerchant | null> 
   });
   const { data, error } = await admin
     .from("merchants")
-    .select("id, shopify_shop_domain, plan, installed_at, uninstalled_at")
+    .select("id, shopify_shop_domain, plan, installed_at, uninstalled_at, onboarding_state")
     .eq("shopify_shop_domain", verified.shopDomain)
-    .maybeSingle<Pick<MerchantRow, "id" | "shopify_shop_domain" | "plan" | "installed_at" | "uninstalled_at">>();
+    .maybeSingle<Pick<MerchantRow, "id" | "shopify_shop_domain" | "plan" | "installed_at" | "uninstalled_at" | "onboarding_state">>();
 
   if (error || !data) return null;
   if (data.uninstalled_at) return null;
@@ -69,6 +72,7 @@ export async function getMerchantFromSession(): Promise<SessionMerchant | null> 
     plan: data.plan,
     planLabel: planLabelFor(data.plan),
     installedAt: data.installed_at,
+    onboardingState: (data.onboarding_state ?? "not_started") as OnboardingState,
   };
 }
 

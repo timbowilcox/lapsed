@@ -20,7 +20,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import type { LapsedSupabaseClient } from "@lapsed/db";
-import { getActiveVoiceProfile } from "@lapsed/db";
+import { getActiveVoiceProfile, getMerchantOptOutConfig } from "@lapsed/db";
 import { redact } from "./pii-redactor";
 import { detectOptOutKeyword, recordOptOut } from "./opt-out-registry";
 import { classifyReply, OPT_OUT_CONFIDENCE_THRESHOLD } from "./classify-reply";
@@ -208,7 +208,10 @@ export async function handleInboundMessage(
   mark("inbound_recorded");
 
   // ── STOP-keyword fast path (decision 18) — short-circuits before any LLM ───
-  const keyword = detectOptOutKeyword(body);
+  // Fetch merchant-configured extra keywords so custom words (e.g. "OPTOUT")
+  // are honoured. The base set (STOP, STOPALL, …) is baked into detectOptOutKeyword.
+  const merchantConfig = await getMerchantOptOutConfig(deps.serviceClient, merchantId);
+  const keyword = detectOptOutKeyword(body, merchantConfig.optOutKeywords);
   if (keyword) {
     await recordOptOutAndEvent(deps, {
       merchantId,

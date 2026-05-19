@@ -150,8 +150,8 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
 
   return (
     <>
-      <div className="flex items-center gap-12 border-b border-border p-16">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-12 border-b border-border p-16">
+        <div className="relative min-w-0 flex-1">
           <Search
             strokeWidth={1.75}
             size={16}
@@ -180,7 +180,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
               >
                 Groups
                 {selectedGroups.size > 0 && (
-                  <span className="rounded-pill bg-lavender-200 px-6 py-2 text-micro text-lavender-700">
+                  <span className="rounded-pill bg-lavender-50 px-6 py-2 text-micro text-lavender-700">
                     {selectedGroups.size}
                   </span>
                 )}
@@ -220,7 +220,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
           </DropdownMenu>
         )}
 
-        <div className="w-[200px]">
+        <div className="w-full sm:w-[200px]">
           <Select
             value={effectiveSortBy}
             onValueChange={(v) => setSortBy(v as SortBy)}
@@ -229,14 +229,14 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
             <SelectTrigger
               aria-label={
                 selectedGroups.size > 0
-                  ? "Sort: propensity only (clear group filter to change)"
+                  ? "Sort: reorder likelihood only (clear group filter to change)"
                   : "Sort customers"
               }
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="propensity_90d">Highest propensity</SelectItem>
+              <SelectItem value="propensity_90d">Highest reorder likelihood</SelectItem>
               <SelectItem value="last_order_days_ago">Most recent order</SelectItem>
               <SelectItem value="total_ltv_cents">Highest LTV</SelectItem>
             </SelectContent>
@@ -255,7 +255,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
             <TableHead>Lifecycle</TableHead>
             <TableHead>Lifetime value</TableHead>
             <TableHead>Last order</TableHead>
-            <TableHead>Propensity 90d</TableHead>
+            <TableHead>Reorder likelihood (90d)</TableHead>
             <TableHead>Groups / Signal</TableHead>
           </TableRow>
         </TableHeader>
@@ -305,7 +305,7 @@ export function LapsedCustomersList({ customers }: { customers: LapsedCustomerLi
                         aria-valuenow={pct90}
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-label={`${pct90}% propensity to reorder in 90 days`}
+                        aria-label={`${pct90}% likelihood to reorder within 90 days`}
                       >
                         <div
                           className="h-full rounded-pill bg-lavender-400"

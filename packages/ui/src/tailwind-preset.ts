@@ -11,6 +11,7 @@ const preset: Partial<Config> = {
           400: "#B8A6F4",
           500: "#9C85EE",
           700: "#6B52C9",
+          800: "#5A44A8",
         },
         cream: {
           50: "#FCFAF5",
@@ -22,7 +23,9 @@ const preset: Partial<Config> = {
         ink: {
           900: "#0A0A0B",
           700: "#2E2C2A",
+          600: "#48453F",
           500: "#5F5C57",
+          400: "#79766F",
           300: "#94918A",
         },
         success: {
@@ -82,11 +85,12 @@ const preset: Partial<Config> = {
         "28": "28px",
         "32": "32px",
         "40": "40px",
+        "44": "44px",
         "48": "48px",
         "64": "64px",
       },
       boxShadow: {
-        focus: "0 0 0 3px rgba(156, 133, 238, 0.25)",
+        focus: "0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9",
       },
       animation: {
         pulse: "lapsed-pulse 2s infinite",

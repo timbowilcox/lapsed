@@ -32,15 +32,16 @@ export const SheetContent = forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-[248px] bg-lavender-400 p-24 data-[state=open]:animate-reveal",
+          "fixed inset-y-0 left-0 z-50 w-[248px] bg-lavender-400 p-24 data-[state=open]:motion-safe:animate-reveal",
           className,
         )}
         {...props}
       >
+        <DialogPrimitive.Title className="sr-only">Navigation menu</DialogPrimitive.Title>
         {children}
         <DialogPrimitive.Close
           aria-label="Close menu"
-          className="absolute right-12 top-12 inline-flex h-32 w-32 items-center justify-center rounded-sm text-ink-900 hover:bg-white/20"
+          className="absolute right-12 top-12 inline-flex h-44 w-44 items-center justify-center rounded-sm text-ink-900 hover:bg-white/20 focus-visible:outline-none focus-visible:shadow-focus"
         >
           <X strokeWidth={1.75} size={18} />
         </DialogPrimitive.Close>

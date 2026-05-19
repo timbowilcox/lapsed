@@ -1,152 +1,144 @@
+// Dashboard — four-section morning standup pattern (chunk 10).
+//
+// 1. Headline outcome — incremental revenue, counterfactual, 95% CI, period toggle
+// 2. Active state   — lifecycle pipeline + approved campaign health rows
+// 3. Recommended actions — top 3 insights from the insights engine (by priority)
+// 4. Forecast        — projected next-30-day revenue + customer milestone
+
 import { Suspense } from "react";
-import {
-  HeroMetric,
-  MetricCard,
-  Panel,
-  PanelHeader,
-  PanelBody,
-  CampaignRow,
-  ConversationRow,
-  RevenueChart,
-  formatCount,
-} from "@lapsed/ui";
-import { ArrowRight } from "lucide-react";
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { MerchantShell } from "./_components/merchant-shell";
-import { campaigns, conversations, attribution } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
-import { DashboardLapsedMetric, DashboardLapsedMetricSkeleton } from "./_dashboard-lapsed-metric";
+import { serverEnv } from "@/app/lib/env";
+import {
+  createServiceClient,
+  getMerchantAttributionRollup,
+  getLifecyclePipelineCounts,
+  getProposalsByStatus,
+  getActiveInsights,
+  getReadyToReactivateCount,
+  getLatestScoringRun,
+} from "@lapsed/db";
+import { DashboardHeadline } from "./_dashboard-headline";
+import { DashboardLifecycle } from "./_dashboard-lifecycle";
+import { DashboardRecommendedActions } from "./_dashboard-recommended-actions";
+import { DashboardForecast } from "./_dashboard-forecast";
+import {
+  parsePeriod,
+  computePeriodStats,
+  computeForecast,
+  deriveCampaignHealthRows,
+} from "./_dashboard-utils";
+import { groupLabel } from "./campaigns/_labels";
 
 export const dynamic = "force-dynamic";
 
 type RawSearchParams = Record<string, string | string[] | undefined>;
+
+// Priority order for sorting insights before slicing to top 3.
+const INSIGHT_PRIORITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
 export default async function DashboardPage({
   searchParams,
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  const merchant = await requireMerchant({ searchParams: await searchParams });
+  // Await searchParams once to avoid double-resolution.
+  const sp = await searchParams;
+  const merchant = await requireMerchant({ searchParams: sp });
 
-  const totalRevenue = formatCount(attribution.totalRecoveredRevenue);
-  const totalOrders = attribution.totalRecoveredOrders;
-  const liveCampaigns = campaigns.filter((c) => c.status === "live").length;
-  const pausedCampaigns = campaigns.filter((c) => c.status === "paused").length;
-  const activeCampaigns = liveCampaigns + pausedCampaigns;
-  const visibleCampaigns = campaigns.slice(0, 4);
-  const visibleConversations = conversations.slice(0, 4);
+  // First-run tour: redirect new merchants to the onboarding flow.
+  // "not_started" means the merchant has never opened the app after install.
+  if (merchant.onboardingState === "not_started") {
+    redirect("/app/onboarding");
+  }
+
+  const period = parsePeriod(
+    Array.isArray(sp.period) ? sp.period[0] : sp.period,
+  );
+
+  const env = serverEnv();
+  const serviceClient = createServiceClient({
+    url: env.supabaseUrl,
+    serviceKey: env.supabaseSecretKey,
+  });
+
+  // Parallel data fetch — all independent.
+  const [rollup, lifecycleCounts, approvedCampaigns, activeInsights, readyCount, latestRun] =
+    await Promise.all([
+      getMerchantAttributionRollup(serviceClient, merchant.id).catch(() => ({ campaigns: [] })),
+      getLifecyclePipelineCounts(serviceClient, merchant.id).catch(() => ({
+        new: 0, engaged: 0, at_risk: 0, lapsed: 0, won_back: 0, churned: 0,
+      })),
+      getProposalsByStatus(serviceClient, merchant.id, "approved").catch(() => []),
+      getActiveInsights(serviceClient, merchant.id).catch(() => []),
+      getReadyToReactivateCount(serviceClient, merchant.id, env.propensityReadyThreshold).catch(() => 0),
+      getLatestScoringRun(serviceClient, merchant.id).catch(() => null),
+    ]);
+
+  const now = new Date();
+  const periodStats = computePeriodStats(rollup.campaigns, period, now);
+  const forecast = computeForecast(rollup.campaigns, now);
+
+  // Build by-day chart data scoped to the active period so the sparkline
+  // matches the headline number — not an all-time view.
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const periodCutoff =
+    period === "all"
+      ? null
+      : new Date(now.getTime() - (period === "30" ? 30 : 90) * msPerDay);
+
+  const byDay = rollup.campaigns
+    .filter(
+      (c) =>
+        c.incrementalRevenueCents > 0 &&
+        (periodCutoff === null || new Date(c.windowCloseDate) >= periodCutoff),
+    )
+    .map((c) => ({
+      date: c.windowCloseDate,
+      value: Math.round(c.incrementalRevenueCents / 100),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Sort insights by priority (HIGH first) before passing to section 3.
+  const sortedInsights = [...activeInsights].sort(
+    (a, b) =>
+      (INSIGHT_PRIORITY_ORDER[a.priority] ?? 3) -
+      (INSIGHT_PRIORITY_ORDER[b.priority] ?? 3),
+  );
+
+  const campaignHealthRows = deriveCampaignHealthRows(
+    approvedCampaigns,
+    groupLabel,
+    now,
+  );
 
   return (
     <MerchantShell pageTitle="Dashboard">
-      <HeroMetric
-        label="Restored revenue · last 30 days [demo data]"
-        pulse
-        currency="$"
-        value={totalRevenue}
-        meta={
-          <>
-            <span className="font-medium text-success-500">
-              ↑ {attribution.vsPreviousPeriodPct}%
-            </span>{" "}
-            vs previous period · {totalOrders} orders
-          </>
-        }
-        chart={
-          <RevenueChart
-            data={attribution.byDay.map((d) => ({ date: d.date, value: d.recoveredRevenue }))}
-            range="compact"
-            height={80}
-          />
-        }
-        className="mb-16"
+      {/* Section 1 — Headline outcome */}
+      <DashboardHeadline
+        stats={periodStats}
+        period={period}
+        byDay={byDay}
       />
 
-      <section className="mb-32 grid grid-cols-3 gap-12">
-        <MetricCard
-          label="Active campaigns"
-          value={activeCampaigns.toString()}
-          trend={`${liveCampaigns} live · ${pausedCampaigns} paused [demo data]`}
-          trendDirection="flat"
-        />
-        <Suspense fallback={<DashboardLapsedMetricSkeleton />}>
-          <DashboardLapsedMetric merchantId={merchant.id} />
-        </Suspense>
-        <MetricCard
-          label="Reactivation rate"
-          value="—"
-          trend="Attribution in Sprint 08"
-          trendDirection="flat"
-        />
-      </section>
+      {/* Section 2 — Active state */}
+      <DashboardLifecycle
+        lifecycleCounts={lifecycleCounts}
+        campaigns={campaignHealthRows}
+      />
 
-      <section className="grid grid-cols-[1.4fr_1fr] gap-16">
-        <Panel>
-          <PanelHeader
-            title="Campaigns"
-            action={
-              <div className="flex items-center gap-12">
-                <span className="text-mini text-ink-400">[demo data]</span>
-                <Link
-                  href="/app/campaigns"
-                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-                >
-                  View all <ArrowRight strokeWidth={1.75} size={14} />
-                </Link>
-              </div>
-            }
-          />
-          <PanelBody>
-            {visibleCampaigns.map((c) => (
-              <Link key={c.id} href="/app/campaigns" className="block">
-                <CampaignRow
-                  name={c.name}
-                  meta={c.meta}
-                  status={c.status}
-                  statusLabel={c.statusLabel}
-                  revenue={c.recoveredRevenueDisplay}
-                  revenueLabel={c.status === "draft" ? "pending" : "restored"}
-                />
-              </Link>
-            ))}
-          </PanelBody>
-        </Panel>
+      {/* Section 3 — Recommended actions (client component, SSR-hydrated, top 3 by priority) */}
+      <Suspense fallback={null}>
+        <DashboardRecommendedActions initialInsights={sortedInsights} />
+      </Suspense>
 
-        <Panel>
-          <PanelHeader
-            title="Active conversations"
-            action={
-              <div className="flex items-center gap-12">
-                <span className="text-mini text-ink-400">[demo data]</span>
-                <Link
-                  href="/app/conversations"
-                  className="inline-flex items-center gap-4 text-meta font-medium text-ink-500 hover:text-ink-900"
-                >
-                  View all <ArrowRight strokeWidth={1.75} size={14} />
-                </Link>
-              </div>
-            }
-          />
-          <PanelBody>
-            {visibleConversations.map((c) => {
-              const [first, ...rest] = c.customerName.split(" ");
-              const last = rest.at(-1) ?? "";
-              const display = last ? `${first} ${last.charAt(0)}.` : first ?? c.customerName;
-              return (
-                <Link key={c.id} href={`/app/conversations/${c.id}`} className="block">
-                  <ConversationRow
-                    initials={c.initials}
-                    name={display}
-                    time={c.time}
-                    preview={c.preview}
-                    tagTone={c.tagTone}
-                    tagLabel={c.tagLabel}
-                  />
-                </Link>
-              );
-            })}
-          </PanelBody>
-        </Panel>
-      </section>
+      {/* Section 4 — Forecast */}
+      <DashboardForecast
+        forecast={forecast}
+        lapsedCount={readyCount}
+        hasScored={latestRun !== null}
+      />
     </MerchantShell>
   );
 }

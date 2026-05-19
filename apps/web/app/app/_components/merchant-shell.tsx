@@ -2,34 +2,16 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode } from "react";
-import { AppShell, formatCount, type SidebarNavSection } from "@lapsed/ui";
-import {
-  merchant as fixtureMerchant,
-  campaigns,
-  conversations,
-} from "@lapsed/fixtures";
+import { AppShell, type SidebarNavSection } from "@lapsed/ui";
 import { useMerchant } from "./merchant-context";
-
-const campaignsCount = campaigns.filter((c) => c.status !== "draft").length;
-const conversationsCount = conversations.filter((c) => c.status === "active").length;
 
 const sections: SidebarNavSection[] = [
   {
     items: [
       { href: "/app", icon: "LayoutDashboard", label: "Dashboard" },
-      {
-        href: "/app/lapsed",
-        icon: "Users",
-        label: "Lapsed customers",
-        count: formatCount(fixtureMerchant.totalLapsedCount),
-      },
-      { href: "/app/campaigns", icon: "Send", label: "Campaigns", count: campaignsCount },
-      {
-        href: "/app/conversations",
-        icon: "MessageCircle",
-        label: "Conversations",
-        count: conversationsCount,
-      },
+      { href: "/app/lapsed", icon: "Users", label: "Lapsed customers" },
+      { href: "/app/campaigns", icon: "Send", label: "Campaigns" },
+      { href: "/app/conversations", icon: "MessageCircle", label: "Conversations" },
       { href: "/app/attribution", icon: "TrendingUp", label: "Attribution" },
     ],
   },
@@ -47,8 +29,6 @@ function resolveActive(pathname: string): string {
   if (pathname.startsWith("/app/campaigns")) return "/app/campaigns";
   if (pathname.startsWith("/app/conversations")) return "/app/conversations";
   if (pathname.startsWith("/app/attribution")) return "/app/attribution";
-  // Billing settings + the subscribe/success checkout pages all highlight the
-  // Billing nav item. This must precede the generic /app/settings check.
   if (pathname.startsWith("/app/settings/billing")) return "/app/settings/billing";
   if (pathname.startsWith("/app/billing")) return "/app/settings/billing";
   if (pathname.startsWith("/app/settings")) return "/app/settings";
@@ -68,9 +48,9 @@ export function MerchantShell({
   const session = useMerchant();
   const activeHref = resolveActive(pathname);
 
-  const shopInitials = session?.shopInitials ?? fixtureMerchant.shopInitials;
-  const shopName = session?.shopName ?? fixtureMerchant.shopName;
-  const planLabel = undefined;
+  const shopInitials = session?.shopInitials ?? null;
+  const shopName = session?.shopName ?? null;
+  const planLabel = session?.planLabel ?? null;
 
   async function handleSignOut() {
     await fetch("/api/auth/signout", { method: "POST" });
@@ -85,8 +65,8 @@ export function MerchantShell({
       shopInitials={shopInitials}
       shopName={shopName}
       planLabel={planLabel}
-      userInitials={fixtureMerchant.ownerInitials}
-      hasNotifications
+      userInitials={shopInitials}
+      hasNotifications={false}
       onSignOut={handleSignOut}
     >
       {children}

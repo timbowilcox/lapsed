@@ -7,10 +7,10 @@ const statusVariants = cva(
   {
     variants: {
       status: {
-        live: "bg-success-100 text-success-500",
+        live: "bg-success-100 text-ink-900",
         draft: "bg-cream-200 text-ink-700",
-        paused: "bg-warning-100 text-warning-500",
-        error: "bg-danger-100 text-danger-500",
+        paused: "bg-warning-100 text-ink-900",
+        error: "bg-danger-100 text-danger-700",
       },
     },
     defaultVariants: { status: "live" },

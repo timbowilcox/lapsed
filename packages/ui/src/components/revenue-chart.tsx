@@ -1,8 +1,32 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState, useEffect } from "react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { formatCurrency } from "../lib/format";
+
+/**
+ * Returns true when the user has requested reduced motion.
+ * Initialises synchronously to avoid a flash of animation.
+ */
+function useReducedMotion(): boolean {
+  // Lazy initialiser reads the real preference on the client from the first
+  // render; returns false on the server (typeof window === "undefined") so
+  // SSR output matches the client's initial render for non-reduced-motion
+  // users. Users with reduce: true still get one server-false render but the
+  // animation starts disabled on hydration — the useEffect handles dynamic
+  // changes (e.g. OS setting toggled at runtime).
+  const [reduced, setReduced] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return reduced;
+}
 
 export interface RevenueChartProps {
   data: Array<{ date: string; value: number }>;
@@ -14,6 +38,7 @@ export function RevenueChart({ data, height = 280, range = "auto" }: RevenueChar
   const uid = useId();
   const gradId = `rev-grad-${uid.replace(/:/g, "")}`;
   const isCompact = range === "compact";
+  const noAnimation = useReducedMotion();
 
   const formattedData = data.map((d) => ({
     date: isCompact
@@ -40,7 +65,7 @@ export function RevenueChart({ data, height = 280, range = "auto" }: RevenueChar
               strokeWidth={2}
               fill={`url(#${gradId})`}
               dot={false}
-              isAnimationActive={false}
+              isAnimationActive={false}  // compact — always off
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -89,6 +114,7 @@ export function RevenueChart({ data, height = 280, range = "auto" }: RevenueChar
             strokeWidth={2}
             fill={`url(#${gradId})`}
             dot={false}
+            isAnimationActive={!noAnimation}
           />
         </AreaChart>
       </ResponsiveContainer>

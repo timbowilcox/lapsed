@@ -43,12 +43,13 @@ export async function seedTestMerchant(): Promise<void> {
     const ciphertext = encryptToken("shpat_seed_token", key);
     await pg.query(
       `insert into public.merchants
-         (shopify_shop_domain, shopify_access_token, shopify_scope, plan)
-       values ($1, $2, 'read_orders', 'growth')
+         (shopify_shop_domain, shopify_access_token, shopify_scope, plan, onboarding_state)
+       values ($1, $2, 'read_orders', 'growth', 'completed')
        on conflict (shopify_shop_domain) do update
          set shopify_access_token = excluded.shopify_access_token,
              shopify_scope = excluded.shopify_scope,
              plan = excluded.plan,
+             onboarding_state = 'completed',
              uninstalled_at = null`,
       [TEST_MERCHANT_SHOP, ciphertext],
     );
@@ -94,18 +95,87 @@ export async function seedTestSubscription(): Promise<void> {
   }
 }
 
+/**
+ * Inserts a single active cohort-category insight row for the test merchant.
+ * Used by the insights E2E to verify a seeded signal surfaces as a suggested
+ * campaign card. The cta_action carries the groupSlug the "Spin up" CTA reads.
+ */
+export async function seedCohortInsight(opts: {
+  insightKey: string;
+  groupSlug: string;
+  merchantCopy: string;
+  signalValue: number;
+}): Promise<void> {
+  const env = loadEnv();
+  const pg = new PgClient({ connectionString: env.supabaseDbUrl });
+  await pg.connect();
+  try {
+    const { rows } = await pg.query<{ id: string }>(
+      `select id from public.merchants where shopify_shop_domain = $1`,
+      [TEST_MERCHANT_SHOP],
+    );
+    const merchantId = rows[0]?.id;
+    if (!merchantId) throw new Error("seedCohortInsight: test merchant not found");
+    await pg.query(
+      `insert into public.insights
+         (merchant_id, insight_key, priority, category, signal_metric,
+          signal_value, threshold, merchant_copy, cta_action, state, expires_at)
+       values ($1, $2, 'HIGH', 'cohort', 'lapsed_vip_count',
+          $3, 10, $4, $5, 'active', now() + interval '18 hours')`,
+      [
+        merchantId,
+        opts.insightKey,
+        opts.signalValue,
+        opts.merchantCopy,
+        JSON.stringify({
+          route: "/app/campaigns/new",
+          params: { groupSlug: opts.groupSlug },
+        }),
+      ],
+    );
+  } finally {
+    await pg.end();
+  }
+}
+
+/** Removes every insight row for the test merchant (E2E teardown). */
+export async function clearInsights(): Promise<void> {
+  const env = loadEnv();
+  const pg = new PgClient({ connectionString: env.supabaseDbUrl });
+  await pg.connect();
+  try {
+    await pg.query(
+      `delete from public.insights
+       where merchant_id in (
+         select id from public.merchants where shopify_shop_domain = $1
+       )`,
+      [TEST_MERCHANT_SHOP],
+    );
+  } finally {
+    await pg.end();
+  }
+}
+
 export async function removeTestMerchant(): Promise<void> {
   const env = loadEnv();
   const pg = new PgClient({ connectionString: env.supabaseDbUrl });
   await pg.connect();
   try {
-    // merchant_subscriptions FKs merchants with ON DELETE RESTRICT — clear it
-    // first so removeTestMerchant works whether or not a subscription was seeded.
+    // Delete dependent rows in FK order before removing the merchant.
+    // Each table uses ON DELETE RESTRICT so dependent rows must be cleared first.
+    const merchantSubQuery = `
+      select id from public.merchants where shopify_shop_domain = $1
+    `;
     await pg.query(
-      `delete from public.merchant_subscriptions
-       where merchant_id in (
-         select id from public.merchants where shopify_shop_domain = $1
-       )`,
+      `delete from public.scoring_runs where merchant_id in (${merchantSubQuery})`,
+      [TEST_MERCHANT_SHOP],
+    );
+    await pg.query(
+      `delete from public.insights where merchant_id in (${merchantSubQuery})`,
+      [TEST_MERCHANT_SHOP],
+    );
+    await pg.query(
+      `delete from public.merchant_subscriptions where merchant_id in (${merchantSubQuery})`,
       [TEST_MERCHANT_SHOP],
     );
     await pg.query(

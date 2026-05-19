@@ -17,8 +17,9 @@ export const HeroMetric = forwardRef<HTMLDivElement, HeroMetricProps>(function H
   return (
     <section
       ref={ref}
+      aria-label={label}
       className={cn(
-        "grid grid-cols-[1fr_auto] items-center gap-32 rounded-lg border border-border bg-cream-50 px-32 py-28",
+        "grid grid-cols-1 items-center gap-20 rounded-lg border border-border bg-cream-50 px-16 py-20 sm:grid-cols-[1fr_auto] sm:gap-32 sm:px-32 sm:py-28",
         className,
       )}
       {...props}
@@ -27,21 +28,21 @@ export const HeroMetric = forwardRef<HTMLDivElement, HeroMetricProps>(function H
         <div className="mb-8 flex items-center gap-8 text-label text-ink-500">
           {pulse && (
             <span className="relative inline-flex h-7 w-7" aria-hidden="true">
-              <span className="absolute inline-flex h-full w-full rounded-pill bg-success-500 opacity-30 animate-pulse" />
+              <span className="absolute inline-flex h-full w-full rounded-pill bg-success-500 opacity-30 motion-safe:animate-pulse" />
               <span className="relative inline-flex h-7 w-7 rounded-pill bg-success-500" />
             </span>
           )}
           {label}
         </div>
-        <div className="mb-6 font-serif text-hero text-ink-900">
+        <div className="mb-6 font-serif text-[40px] leading-tight text-ink-900 sm:text-hero">
           {currency && (
-            <span className="align-top text-[36px] leading-[1.2] text-ink-500">{currency}</span>
+            <span className="align-top text-[28px] leading-[1.2] text-ink-500 sm:text-[36px]">{currency}</span>
           )}
           {value}
         </div>
         {meta && <div className="text-meta text-ink-500">{meta}</div>}
       </div>
-      {chart && <div className="h-80 w-[280px]">{chart}</div>}
+      {chart && <div className="h-80 w-full sm:w-[280px]">{chart}</div>}
     </section>
   );
 });

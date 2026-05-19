@@ -25,6 +25,7 @@ import {
   TableHead,
   TableCell,
   Tag,
+  EmptyState,
   formatCurrency,
   formatCount,
   formatDate,
@@ -101,42 +102,50 @@ export default async function AttributionRollupPage({ searchParams }: PageProps)
         <h1 className="mb-4 text-h1 text-ink-900">Revenue restored</h1>
         <p className="text-meta text-ink-500">
           Incremental revenue from campaign-driven conversations, measured against each
-          campaign&rsquo;s matched holdout group and reconciled against Shopify orders.
+          campaign&rsquo;s matched comparison group and reconciled against Shopify orders.
         </p>
       </div>
 
-      {/* Period selector — a set of navigating links, not an ARIA tablist:
-          each link reloads the route with a new ?period, so aria-current
-          marks the active period without promising tab-widget interaction. */}
-      <nav className="mb-16 flex gap-4" aria-label="Reporting period">
-        {PERIODS.map((p) => {
-          const active = p.id === period;
-          return (
-            <Link
-              key={p.id}
-              href={`/app/attribution?period=${p.id}`}
-              aria-current={active ? "page" : undefined}
-              className={`rounded-sm px-12 py-6 text-meta transition-colors focus-visible:outline-none focus-visible:shadow-focus ${
-                active
-                  ? "bg-lavender-100 text-lavender-700"
-                  : "text-ink-500 hover:text-ink-900"
-              }`}
-            >
-              {p.label}
-            </Link>
-          );
-        })}
-      </nav>
-
       {rollup.campaigns.length === 0 ? (
         <Panel>
-          <p className="px-16 py-40 text-center text-meta text-ink-500">
-            No attribution results yet. Figures appear here once a campaign&rsquo;s attribution
-            window closes and the nightly batch has run.
-          </p>
+          <EmptyState
+            heading="No attribution results yet"
+            body="Figures appear here once a campaign's attribution window closes and the nightly batch has run. Attribution windows are typically 14 days after a campaign sends."
+            secondaryAction={
+              <Link
+                href="/preview/attribution"
+                className="text-meta text-ink-500 underline underline-offset-2 hover:text-ink-700 focus-visible:outline-none focus-visible:shadow-focus"
+              >
+                Preview what attribution looks like
+              </Link>
+            }
+          />
         </Panel>
       ) : (
         <>
+          {/* Period selector — shown only when attribution data exists.
+              A set of navigating links, not an ARIA tablist: each link
+              reloads the route with a new ?period; aria-current marks the
+              active period without promising tab-widget interaction. */}
+          <nav className="mb-16 flex gap-4" aria-label="Reporting period">
+            {PERIODS.map((p) => {
+              const active = p.id === period;
+              return (
+                <Link
+                  key={p.id}
+                  href={`/app/attribution?period=${p.id}`}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-sm px-12 py-6 text-meta transition-colors focus-visible:outline-none focus-visible:shadow-focus ${
+                    active
+                      ? "bg-lavender-50 text-lavender-700"
+                      : "text-ink-500 hover:text-ink-900"
+                  }`}
+                >
+                  {p.label}
+                </Link>
+              );
+            })}
+          </nav>
           <HeroMetric
             label={`Revenue restored · ${periodDef.label.toLowerCase()}`}
             value={formatCurrency(revenueRestoredCents)}
@@ -269,19 +278,19 @@ function HoldoutCheck({ holdout }: { holdout: HoldoutStat }) {
   const pct = (r: number) => `${(r * 100).toFixed(1)}%`;
   return (
     <Card className="p-24">
-      <div className="text-label text-ink-500">Holdout assignment</div>
+      <div className="text-label text-ink-500">Measurement check</div>
       <div className="mt-8 text-display text-ink-900 tabular-nums">
         {pct(holdout.realisedRate)}
       </div>
       <div className="mt-4 text-mini text-ink-500">
-        realised across {formatCount(holdout.campaignCount)}{" "}
-        {holdout.campaignCount === 1 ? "campaign" : "campaigns"} · configured{" "}
+        observed across {formatCount(holdout.campaignCount)}{" "}
+        {holdout.campaignCount === 1 ? "campaign" : "campaigns"} · target{" "}
         {pct(holdout.configuredRate)}
       </div>
       {holdout.skewed && (
         <p className="mt-12 text-mini text-ink-700">
-          The realised holdout rate diverges from the configured rate by more than 10%. Holdout
-          assignment may be skewed — worth a review.
+          The observed comparison-group assignment diverges from the target by more than 10%.
+          Worth reviewing to ensure measurement accuracy.
         </p>
       )}
     </Card>

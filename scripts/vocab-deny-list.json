@@ -1,0 +1,65 @@
+{
+  "terms": [
+    {
+      "name": "sprint_reference",
+      "pattern": "sprint \\d",
+      "flags": "i",
+      "description": "Sprint reference in user-visible copy (e.g. 'Sprint 05')"
+    },
+    {
+      "name": "chunk_reference",
+      "pattern": "chunk \\d",
+      "flags": "i",
+      "description": "Chunk reference in user-visible copy"
+    },
+    {
+      "name": "posterior",
+      "pattern": "\\bposterior\\b",
+      "flags": "i",
+      "description": "Statistical internals — not merchant vocabulary"
+    },
+    {
+      "name": "arm_id",
+      "pattern": "\\barm_id\\b",
+      "description": "Internal code identifier leaked to user copy"
+    },
+    {
+      "name": "merchant_id",
+      "pattern": "\\bmerchant_id\\b",
+      "description": "Internal code identifier leaked to user copy"
+    },
+    {
+      "name": "attribution_results",
+      "pattern": "\\battribution_results\\b",
+      "description": "Internal table name leaked to user copy"
+    },
+    {
+      "name": "bandit_state",
+      "pattern": "\\bbandit_state\\b",
+      "description": "Internal state label leaked to user copy"
+    },
+    {
+      "name": "bandit",
+      "pattern": "\\bbandit\\b",
+      "flags": "i",
+      "description": "Internal ML term — use 'variant' in user-facing copy"
+    },
+    {
+      "name": "rfm",
+      "pattern": "\\bRFM\\b",
+      "description": "Internal scoring acronym — not merchant vocabulary"
+    },
+    {
+      "name": "cohort",
+      "pattern": "\\bcohort\\b",
+      "flags": "i",
+      "description": "Internal segmentation term — use 'group' in user-facing copy"
+    },
+    {
+      "name": "holdout",
+      "pattern": "\\bholdout\\b",
+      "flags": "i",
+      "description": "Internal experimental term — use 'comparison group' in user-facing copy"
+    }
+  ]
+}

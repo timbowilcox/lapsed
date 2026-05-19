@@ -26,7 +26,7 @@ export const ConversationRow = forwardRef<HTMLDivElement, ConversationRowProps>(
         {...props}
       >
         <div
-          className="flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-pill bg-lavender-100 text-[11px] font-semibold uppercase text-lavender-700"
+          className="flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-pill bg-lavender-50 text-[11px] font-semibold uppercase text-lavender-700"
           aria-hidden="true"
         >
           {initials.slice(0, 2).toUpperCase()}

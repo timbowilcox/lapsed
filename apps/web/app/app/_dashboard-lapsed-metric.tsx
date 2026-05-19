@@ -18,10 +18,12 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
   ]);
 
   // Design tenet 4: honest numbers.
-  // "Pending first score" only when scoring has never run — a true unknown.
-  // When scoring has run and zero customers qualify, show the honest zero.
-  const heroValue = latestRun === null ? "Pending first score" : formatCount(readyCount);
-  const satelliteTrend = `${formatCount(summary.total_lapsed_count)} total lapsed`;
+  // "—" when scoring has never run (true unknown); show count once data exists.
+  const heroValue = latestRun === null ? "—" : formatCount(readyCount);
+  const satelliteTrend =
+    latestRun === null
+      ? "Your first scoring run completes within 24 hours of installing"
+      : `${formatCount(summary.total_lapsed_count)} total lapsed`;
 
   return (
     <MetricCard
@@ -35,10 +37,10 @@ export async function DashboardLapsedMetric({ merchantId }: { merchantId: string
 
 export function DashboardLapsedMetricSkeleton() {
   return (
-    <div className="animate-pulse rounded-md border border-border bg-cream-50 p-20">
-      <div className="mb-12 h-10 w-24 rounded bg-ink-100" />
-      <div className="mb-8 h-24 w-20 rounded bg-ink-100" />
-      <div className="h-10 w-32 rounded bg-ink-100" />
+    <div className="motion-safe:animate-pulse rounded-md border border-border bg-cream-50 p-20">
+      <div className="mb-12 h-10 w-24 rounded bg-cream-300" />
+      <div className="mb-8 h-24 w-20 rounded bg-cream-300" />
+      <div className="h-10 w-32 rounded bg-cream-300" />
     </div>
   );
 }

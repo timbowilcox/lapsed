@@ -12,10 +12,36 @@ import type { LapsedSupabaseClient } from "@lapsed/db";
 
 export type FakeRow = Record<string, unknown>;
 
-interface Filter {
-  kind: "eq" | "in" | "contains" | "gte" | "gt" | "lt" | "lte" | "is" | "not_is";
+interface SimpleCondition {
+  kind: string;
   col: string;
   value: unknown;
+}
+
+interface Filter {
+  kind: "eq" | "in" | "contains" | "gte" | "gt" | "lt" | "lte" | "is" | "not_is" | "or";
+  col: string;
+  value: unknown;
+  /** Populated for kind="or": each element is an OR branch. */
+  conditions?: SimpleCondition[];
+}
+
+/**
+ * Parses the PostgREST `.or("col.op.val,col2.op2.val2")` string format into
+ * an array of simple conditions. Values after the second dot are taken literally
+ * (handles ISO 8601 timestamps which contain dots).
+ */
+function parseOrString(query: string): SimpleCondition[] {
+  return query.split(",").map((part) => {
+    const firstDot = part.indexOf(".");
+    const col = part.slice(0, firstDot);
+    const rest = part.slice(firstDot + 1);
+    const secondDot = rest.indexOf(".");
+    const op = rest.slice(0, secondDot);
+    const rawVal = rest.slice(secondDot + 1);
+    const value = rawVal === "null" ? null : rawVal;
+    return { kind: op, col, value };
+  });
 }
 
 function applyDefaults(table: string, input: FakeRow): FakeRow {
@@ -59,26 +85,34 @@ function applyDefaults(table: string, input: FakeRow): FakeRow {
     r.included_in_holdout ??= false;
     r.created_at ??= nowIso;
   }
+  if (table === "insights") {
+    r.state ??= "active";
+    r.created_at ??= nowIso;
+    r.expires_at ??= null;
+  }
   return r;
+}
+
+function applyCondition(row: FakeRow, kind: string, col: string, value: unknown): boolean {
+  const v = row[col];
+  if (kind === "eq") return v === value;
+  if (kind === "in") return (value as unknown[]).includes(v);
+  if (kind === "gte") return (v as string) >= (value as string);
+  if (kind === "gt") return (v as string) > (value as string);
+  if (kind === "lt") return (v as string) < (value as string);
+  if (kind === "lte") return (v as string) <= (value as string);
+  if (kind === "is") return value === null ? v === null || v === undefined : v === value;
+  if (kind === "not_is") return value === null ? v !== null && v !== undefined : v !== value;
+  if (kind === "contains") return Array.isArray(v) && (value as unknown[]).every((x) => v.includes(x));
+  return true;
 }
 
 function matches(row: FakeRow, filters: Filter[]): boolean {
   return filters.every((f) => {
-    const v = row[f.col];
-    if (f.kind === "eq") return v === f.value;
-    if (f.kind === "in") return (f.value as unknown[]).includes(v);
-    if (f.kind === "gte") return (v as string) >= (f.value as string);
-    if (f.kind === "gt") return (v as string) > (f.value as string);
-    if (f.kind === "lt") return (v as string) < (f.value as string);
-    if (f.kind === "lte") return (v as string) <= (f.value as string);
-    if (f.kind === "is") return f.value === null ? v === null || v === undefined : v === f.value;
-    if (f.kind === "not_is") {
-      return f.value === null ? v !== null && v !== undefined : v !== f.value;
+    if (f.kind === "or") {
+      return (f.conditions ?? []).some((c) => applyCondition(row, c.kind, c.col, c.value));
     }
-    if (f.kind === "contains") {
-      return Array.isArray(v) && (f.value as unknown[]).every((x) => v.includes(x));
-    }
-    return true;
+    return applyCondition(row, f.kind, f.col, f.value);
   });
 }
 
@@ -230,6 +264,10 @@ export function makeFakeSupabase(
     };
     builder.is = (col: string, value: unknown) => {
       filters.push({ kind: "is", col, value });
+      return builder;
+    };
+    builder.or = (query: string) => {
+      filters.push({ kind: "or", col: "", value: null, conditions: parseOrString(query) });
       return builder;
     };
     builder.order = (col: string, opts?: { ascending?: boolean }) => {

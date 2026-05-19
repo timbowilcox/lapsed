@@ -305,6 +305,18 @@ describe("proposeCampaign — happy path", () => {
     const tablesTouched = fromMock.mock.calls.map((call) => call[0]);
     expect(tablesTouched).not.toContain("bandit_state");
   });
+
+  it("propagates source: 'manual' to the campaign_proposals insert", async () => {
+    const { client, log } = makeSupabase();
+    await proposeCampaign(runInput(client, mockAnthropic(), { source: "manual" }));
+    expect(log.proposalInserts[0]).toMatchObject({ source: "manual" });
+  });
+
+  it("defaults source to 'agent' when not provided", async () => {
+    const { client, log } = makeSupabase();
+    await proposeCampaign(runInput(client, mockAnthropic()));
+    expect(log.proposalInserts[0]).toMatchObject({ source: "agent" });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

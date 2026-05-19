@@ -34,7 +34,7 @@ export const SidebarItem = forwardRef<HTMLAnchorElement, SidebarItemProps>(funct
         <span
           className={cn(
             "rounded-pill px-7 py-2 text-[11px] font-semibold leading-[1.4]",
-            active ? "bg-lavender-400 text-ink-900" : "bg-lavender-100 text-lavender-700",
+            active ? "bg-lavender-400 text-ink-900" : "bg-lavender-50 text-lavender-700",
           )}
         >
           {count}

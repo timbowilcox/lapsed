@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   Tag,
+  useFirstRender,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -20,6 +21,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  Skeleton,
   formatDate,
 } from "@lapsed/ui";
 import type { VoiceProfile } from "@lapsed/core";
@@ -48,6 +50,7 @@ const PHASE_LABEL: Record<ExtractionPhase, string> = {
 };
 
 export function BrandVoiceSettings() {
+  const isFirstRender = useFirstRender();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [activeProfile, setActiveProfile] = useState<VoiceProfile | null>(null);
@@ -219,13 +222,10 @@ export function BrandVoiceSettings() {
     [loadData],
   );
 
-  if (loading) {
+  if (isFirstRender || loading) {
     return (
-      <div className="p-24">
-        <div
-          className="h-160 w-full rounded-lg bg-cream-200 motion-safe:animate-pulse"
-          aria-label="Loading brand voice"
-        />
+      <div className="p-24" aria-busy="true" aria-label="Loading brand voice">
+        <Skeleton.Card />
       </div>
     );
   }

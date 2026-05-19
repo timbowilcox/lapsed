@@ -99,7 +99,7 @@ All numeric values in metrics, tables, conversation timestamps, and revenue disp
 
 ### Instrument Serif rule (hero numbers only)
 
-`font-serif` (Instrument Serif) is used **exactly once per page** — in the `<HeroMetric>` component for the single largest stat on that page (e.g. "Total recovered $47,283" on Dashboard and Attribution, "$799 / mo" on Billing). All other numbers use Geist Sans with `tabular-nums`. Never add `font-serif` ad hoc in app route files; always go through `<HeroMetric>`.
+`font-serif` (Instrument Serif) is used **exactly once per page** — in the `<HeroMetric>` component for the single largest stat on that page (e.g. "Revenue restored $47,283" on Dashboard and Attribution, "$799 / mo" on Billing). All other numbers use Geist Sans with `tabular-nums`. Never add `font-serif` ad hoc in app route files; always go through `<HeroMetric>`.
 
 ---
 
@@ -143,6 +143,14 @@ The merchant app uses a fixed two-pane layout at all viewports ≥1024px.
 | Content max-width | 1280px, centered with 32px gutters | — | — |
 
 Below 1024px the sidebar collapses to a drawer triggered from the topbar. v1 does not optimise for sub-1024 viewports but layout does not break.
+
+### Content container rule
+
+Every page renders inside a `<div class="content-container">` within the AppShell's main content area. This class is defined in `tokens.css` as `width: 100%; max-width: 1280px` and ensures consistent layout grid across all pages. **Never add a per-page `max-w-*` override to an individual page's root element** — use the container class instead. Narrow layouts (auth forms, modals) are exempt but must be documented.
+
+### Contrast token guard
+
+Run `pnpm grep:contrast` locally to check all Vellum `bg-*/text-*` class pairs against WCAG 2.2 AA (4.5:1 for normal text, 3.0:1 for large). The script is advisory (exits 0) but violations are blocking before merge. Verified pairs to date: ink-900/cream-50 (21.0:1), ink-700/cream-50 (13.7:1), lavender-700/lavender-50 (5.1:1), ink-500/cream-50 (5.1:1).
 
 ---
 
@@ -234,3 +242,166 @@ Sprint 01 builds a static React route for every page below. Each route renders t
 - All icons either have text labels or `aria-label`
 - All form inputs have associated `<label>`
 - No reliance on color alone to convey status (status always pairs dot + text)
+
+---
+
+## Voice & tone
+
+lapsed.ai speaks plainly and confidently to merchants. The interface is a tool, not a companion. Four rules govern all user-facing copy.
+
+### 1 — Confident future-tense for pending states
+
+When the system is waiting on a process, name the outcome and give a timeframe. Never say "pending" or "loading" without saying what comes next.
+
+| Avoid | Use instead |
+|---|---|
+| `Pending first score` | `Your first scoring run completes within 24 hours of installing` |
+| `No data yet` (alone) | `Figures appear here once a campaign's attribution window closes` |
+| `Connecting…` | `SMS sending activates with your first campaign` |
+
+### 2 — Concrete subjects, not vague reassurance
+
+Say what the number measures. Avoid filler phrases that describe feelings or relationship metaphors.
+
+| Avoid | Use instead |
+|---|---|
+| `We'd love to welcome you back` | `Here's 15% off for returning customers` |
+| `We miss you!` | `There's a free sample waiting for you on your next purchase` |
+| `Wonderful!` | `Your discount code is VIPBACK15 — valid for 7 days` |
+
+### 3 — When/then framing for empty states
+
+Empty states explain the trigger, not just the absence. Tell the merchant what action or event will populate the screen.
+
+Pattern: *"[Content] appears here once [trigger]."*
+
+Examples:
+- `Attribution will appear here once this campaign's 30-day attribution window closes and the nightly batch has run.`
+- `No attribution results yet. Figures appear here once a campaign's attribution window closes and the nightly batch has run.`
+- `No campaigns in this period.` (acceptable for a filtered view — filter removal is the implied action)
+
+### 4 — Merchant-second-person throughout
+
+Address the merchant as "you". The AI agent acts on behalf of the merchant's brand — it is not a separate personality. Never use "we" to describe the lapsed.ai system.
+
+| Avoid | Use instead |
+|---|---|
+| `We've detected 4 lapsed customers` | `4 customers are ready to reactivate` |
+| `We'll notify you when…` | `You'll see results here once…` |
+| `Our agent will reach out…` | `Your agent will reach out…` |
+
+---
+
+## Empty state pattern
+
+### The rule: when/then framing, next-action CTA
+
+Every empty state follows the same structure:
+
+1. **Heading** — what's absent, phrased as a noun ("No campaigns yet", not "You haven't created any campaigns")
+2. **Body** — when/then language explaining the trigger: *"X appears here once Y has happened."* Include a timeframe where applicable.
+3. **Primary CTA** — the action that directly triggers the empty state to fill (optional — only where a merchant action can cause the change)
+4. **Secondary action** — usually a link to the demo preview so merchants can see what populated content looks like
+
+Never show just "No data" alone. Always explain what the merchant will see and when.
+
+### EmptyState component (`packages/ui/src/components/empty-state.tsx`)
+
+```tsx
+import { EmptyState } from "@lapsed/ui";
+
+<EmptyState
+  heading="No campaigns yet"
+  body="Your first campaign appears here once the agent prepares one for your approval. Approve it to start reaching lapsed customers."
+  cta={
+    <Button asChild variant="primary" size="sm">
+      <Link href="/app/campaigns/new">Create your first campaign</Link>
+    </Button>
+  }
+  secondaryAction={
+    <Link href="/preview/campaigns" className="text-meta text-ink-500 underline ...">
+      Preview what campaigns look like
+    </Link>
+  }
+/>
+```
+
+Props:
+- `icon?` — optional Lucide icon, rendered in a `bg-cream-200` circle
+- `heading` — short noun phrase, ink-900
+- `body` — when/then explainer, ink-500 at `text-meta` size
+- `cta?` — ReactNode — pass a styled Button/Link from the call site
+- `secondaryAction?` — ReactNode — typically a plain underline link
+- `className?` — applied to the outer container
+
+The component provides layout only. Pass styled CTA elements from the call site rather than accepting raw `href` props — this keeps the component framework-agnostic and allows `asChild` composition with Next.js `Link`.
+
+### Greyed-out column previews
+
+For pages that show tabular data (lapsed customers, campaigns), the empty state includes a greyed-out table preview:
+- Table headers rendered at full opacity
+- 5 placeholder rows with `bg-cream-300` blocks at realistic widths
+- Entire preview wrapped in `opacity-30 select-none` with `aria-hidden="true"`
+- Empty state message + CTA rendered below the preview
+
+---
+
+## Loading & skeleton pattern
+
+### The rule: skeleton → real content, no flicker
+
+Every async boundary in the app follows one pattern:
+
+1. Show a skeleton with the **exact structural shape** of the final content.
+2. Replace the skeleton with real content once data is ready.
+3. Never show a blank page, a spinner without content shape, or a CLS-inducing appearance of content that shifts layout.
+
+### Skeleton primitives (`packages/ui/src/components/skeleton.tsx`)
+
+```tsx
+import { Skeleton } from "@lapsed/ui";
+
+// Base: any shape
+<Skeleton className="h-[200px] w-full" />
+
+// Text line(s)
+<Skeleton.Text />              // single line at ~60% width
+<Skeleton.Text lines={3} />   // 3 lines, last one at 40%
+
+// List row (avatar + two text lines)
+<Skeleton.Row />
+
+// Card (label + value + sub-line)
+<Skeleton.Card />
+```
+
+All skeleton elements use `bg-cream-300` as the fill and `motion-safe:animate-pulse` for the shimmer. Do not use `bg-ink-100` or `bg-cream-200` — those tokens are for content, not skeleton fills.
+
+### `useFirstRender()` hook (`packages/ui/src/hooks/use-first-render.ts`)
+
+```tsx
+import { useFirstRender } from "@lapsed/ui";
+
+function MyComponent() {
+  const isFirst = useFirstRender();
+  if (isFirst) return <Skeleton.Card />;  // SSR + hydration pass
+  return <RealContent />;
+}
+```
+
+Use this when a client component needs to render different content on the server pass vs. after mounting, to avoid hydration mismatches.
+
+### `loading.tsx` convention
+
+Every route segment in `apps/web/app/app/*` must have a `loading.tsx` that matches the structural shape of the page. Next.js App Router shows the nearest `loading.tsx` automatically during server-component fetch. Shape the skeleton to match the page's grid/panel layout so the transition from skeleton to content has zero layout shift.
+
+### Focus ring token
+
+The `--focus-ring` CSS variable uses a two-layer box-shadow:
+```css
+--focus-ring: 0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9;
+```
+- Inner 2px ring: `cream-50` (creates visual gap between element and ring)
+- Outer 2px ring: `lavender-700` (#6B52C9, 5.4:1 contrast on cream-50, meets WCAG 2.4.11)
+
+All interactive elements use `focus-visible:shadow-focus` — never bare `focus:` which also fires on mouse clicks.

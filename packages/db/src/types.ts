@@ -417,10 +417,13 @@ export type Database = {
       }
       merchants: {
         Row: {
+          agent_draft_defaults: string[]
           created_at: string
           id: string
           installed_at: string
           last_backfill_at: string | null
+          onboarding_state: "not_started" | "in_progress" | "completed" | "skipped"
+          opt_out_keywords: string[]
           plan: string
           shopify_access_token: string
           shopify_scope: string
@@ -432,10 +435,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agent_draft_defaults?: string[]
           created_at?: string
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          onboarding_state?: "not_started" | "in_progress" | "completed" | "skipped"
+          opt_out_keywords?: string[]
           plan?: string
           shopify_access_token: string
           shopify_scope: string
@@ -447,10 +453,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agent_draft_defaults?: string[]
           created_at?: string
           id?: string
           installed_at?: string
           last_backfill_at?: string | null
+          onboarding_state?: "not_started" | "in_progress" | "completed" | "skipped"
+          opt_out_keywords?: string[]
           plan?: string
           shopify_access_token?: string
           shopify_scope?: string
@@ -1369,6 +1378,7 @@ export type Database = {
           model_version: string
           rejected_at: string | null
           rejection_reason: string | null
+          source: "agent" | "manual"
           status: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id: string | null
           version_number: number
@@ -1385,6 +1395,7 @@ export type Database = {
           model_version: string
           rejected_at?: string | null
           rejection_reason?: string | null
+          source?: "agent" | "manual"
           status?: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id?: string | null
           version_number?: number
@@ -1401,6 +1412,7 @@ export type Database = {
           model_version?: string
           rejected_at?: string | null
           rejection_reason?: string | null
+          source?: "agent" | "manual"
           status?: Database["public"]["Enums"]["campaign_proposal_status"]
           supersedes_proposal_id?: string | null
           version_number?: number
@@ -1633,6 +1645,62 @@ export type Database = {
           },
         ]
       }
+      insights: {
+        Row: {
+          category: string
+          created_at: string
+          cta_action: Json
+          expires_at: string | null
+          id: string
+          insight_key: string
+          merchant_copy: string
+          merchant_id: string
+          priority: string
+          signal_metric: string
+          signal_value: number
+          state: string
+          threshold: number
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          cta_action: Json
+          expires_at?: string | null
+          id?: string
+          insight_key: string
+          merchant_copy: string
+          merchant_id: string
+          priority: string
+          signal_metric: string
+          signal_value: number
+          state?: string
+          threshold: number
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          cta_action?: Json
+          expires_at?: string | null
+          id?: string
+          insight_key?: string
+          merchant_copy?: string
+          merchant_id?: string
+          priority?: string
+          signal_metric?: string
+          signal_value?: number
+          state?: string
+          threshold?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insights_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       campaign_holdouts: {
@@ -1677,6 +1745,22 @@ export type Database = {
           p_customer_gid: string
           p_amount_cents: number
           p_ordered_at: string
+        }
+        Returns: undefined
+      }
+      merchant_keyword_append: {
+        Args: {
+          p_merchant_id: string
+          p_list: string
+          p_keyword: string
+        }
+        Returns: undefined
+      }
+      merchant_keyword_remove: {
+        Args: {
+          p_merchant_id: string
+          p_list: string
+          p_keyword: string
         }
         Returns: undefined
       }

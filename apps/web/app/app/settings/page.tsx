@@ -7,11 +7,11 @@ import {
   Tag,
   Card,
 } from "@lapsed/ui";
-import { merchant as fixtureMerchant } from "@lapsed/fixtures";
 import { requireMerchant } from "@/app/lib/session";
 import { MerchantShell } from "../_components/merchant-shell";
 import { SettingsSyncStatus, SettingsSyncStatusSkeleton } from "../_settings-sync-status";
 import { BrandVoiceSettings } from "./_brand-voice-settings";
+import { OptOutKeywordsSettings } from "./_opt-out-keywords-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ export default async function SettingsPage({ searchParams }: PageProps) {
   return (
     <MerchantShell pageTitle="Settings">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Settings</h2>
+        <h1 className="mb-4 text-h1 text-ink-900">Settings</h1>
         <p className="text-meta text-ink-500">
           Shop details, brand voice, opt-out keywords and integration status.
         </p>
@@ -62,18 +62,8 @@ export default async function SettingsPage({ searchParams }: PageProps) {
         <Panel>
           <PanelHeader title="Opt-out keywords" />
           <PanelBody>
-            <div className="flex flex-col gap-12 p-24">
-              <p className="text-meta text-ink-500">
-                Any inbound SMS matching these (case-insensitive) opts the customer out
-                immediately. STOP and STOPALL are reserved by Twilio.
-              </p>
-              <div className="flex flex-wrap gap-8">
-                {fixtureMerchant.optOutKeywords.map((k) => (
-                  <Tag key={k} tone="stalled">
-                    {k}
-                  </Tag>
-                ))}
-              </div>
+            <div className="p-24">
+              <OptOutKeywordsSettings />
             </div>
           </PanelBody>
         </Panel>
@@ -94,14 +84,14 @@ export default async function SettingsPage({ searchParams }: PageProps) {
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Twilio</div>
-                  <div className="text-mini text-ink-500">Pending — connects in Sprint 05</div>
+                  <div className="text-mini text-ink-500">SMS sending activates with your first campaign.</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>
               <Card className="flex items-center justify-between p-16">
                 <div>
                   <div className="text-body-strong text-ink-900">Stripe</div>
-                  <div className="text-mini text-ink-500">Pending — connects in Sprint 06</div>
+                  <div className="text-mini text-ink-500">Billing activates when you select a subscription plan.</div>
                 </div>
                 <Tag tone="stalled">Pending</Tag>
               </Card>

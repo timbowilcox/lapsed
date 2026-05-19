@@ -26,8 +26,8 @@ interface PageProps {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The stat columns rendered per arm (everything after the Variant column). The
-// "no posterior state" fallback cell spans exactly these.
-const STAT_COLUMN_COUNT = 6;
+// "no tracking data" fallback cell spans exactly these.
+const STAT_COLUMN_COUNT = 4;
 
 // Prose form of a proposal status for the non-approved empty state — keeps the
 // raw enum out of merchant-facing copy.
@@ -73,7 +73,7 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
   );
 
   return (
-    <MerchantShell pageTitle="Campaign bandit">
+    <MerchantShell pageTitle="Campaign variants">
       <div className="mb-24">
         <Link
           href="/app/campaigns/list"
@@ -82,13 +82,12 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
           ← All campaigns
         </Link>
         <h1 className="mb-4 mt-8 text-h1 text-ink-900">
-          {groupLabel(proposal.groupSlug)} — bandit state
+          {groupLabel(proposal.groupSlug)} — variant performance
         </h1>
         <p className="text-meta text-ink-500">
           Version {proposal.versionNumber} · {proposal.variants.length} variants. Each variant
-          is a Thompson-sampling arm with a Beta(α, β) posterior over its response rate. As the
-          campaign runs, responses update the posteriors and the agent samples the arms it
-          believes are strongest.
+          tracks its response rate over time. The agent automatically favours variants that
+          customers are responding to, so better-performing message options are sent more often.
         </p>
       </div>
 
@@ -97,8 +96,8 @@ export default async function BanditInspectorPage({ params, searchParams }: Page
       ) : (
         <Panel>
           <p className="px-16 py-40 text-center text-meta text-ink-500">
-            Bandit arms are initialized when the campaign is approved. This proposal is{" "}
-            {STATUS_PROSE[proposal.status] ?? proposal.status} — no posterior state exists yet.
+            Variant tracking begins when the campaign is approved. This proposal is{" "}
+            {STATUS_PROSE[proposal.status] ?? proposal.status} — no tracking data exists yet.
           </p>
         </Panel>
       )}
@@ -121,11 +120,9 @@ function ArmTable({
         <TableHeader>
           <TableRow>
             <TableHead>Variant</TableHead>
-            <TableHead className="text-right">α</TableHead>
-            <TableHead className="text-right">β</TableHead>
-            <TableHead className="text-right">Mean response rate</TableHead>
-            <TableHead className="text-right">95% credible interval</TableHead>
-            <TableHead className="text-right">Observations</TableHead>
+            <TableHead className="text-right">Response rate</TableHead>
+            <TableHead className="text-right">95% range</TableHead>
+            <TableHead className="text-right">Messages sent</TableHead>
             <TableHead>Last updated</TableHead>
           </TableRow>
         </TableHeader>
@@ -149,7 +146,7 @@ function ArmTable({
                   <ArmStats state={state} />
                 ) : (
                   <TableCell colSpan={STAT_COLUMN_COUNT} className="text-meta text-ink-500">
-                    No posterior state — arm not yet initialized.
+                    No data yet — tracking begins when the first message is sent.
                   </TableCell>
                 )}
               </TableRow>
@@ -165,8 +162,6 @@ function ArmStats({ state }: { state: BanditArmState }) {
   const stats = posteriorStats(state.alpha, state.beta);
   return (
     <>
-      <TableCell className="text-right">{state.alpha}</TableCell>
-      <TableCell className="text-right">{state.beta}</TableCell>
       <TableCell className="text-right">{pct(stats.mean)}</TableCell>
       <TableCell className="text-right">
         {pct(stats.ciLower)}–{pct(stats.ciUpper)}

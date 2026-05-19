@@ -26,6 +26,7 @@ const MERCHANT: SessionMerchant = {
   shopInitials: "TS",
   plan: "starter",
   planLabel: "Starter",
+  onboardingState: "completed" as const,
   installedAt: "2026-05-16T09:00:00.000Z",
 };
 

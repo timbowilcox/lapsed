@@ -1,4 +1,8 @@
 :root {
+  /* Vellum is light-only. Opt out of the browser applying forced-dark-mode
+     styles to form elements (which would override our button text colors). */
+  color-scheme: light;
+
   /* ── Lavender (brand accent) ───────────────────────────────────────────── */
   --lavender-50: #F5F1FF;
   --lavender-100: #E8DFFC;
@@ -6,6 +10,7 @@
   --lavender-400: #B8A6F4;
   --lavender-500: #9C85EE;
   --lavender-700: #6B52C9;
+  --lavender-800: #5A44A8;
 
   /* ── Cream (surface — warm white system) ───────────────────────────────── */
   --cream-50: #FCFAF5;
@@ -17,7 +22,9 @@
   /* ── Ink (text + primary buttons) ──────────────────────────────────────── */
   --ink-900: #0A0A0B;
   --ink-700: #2E2C2A;
+  --ink-600: #48453F;
   --ink-500: #5F5C57;
+  --ink-400: #79766F;
   --ink-300: #94918A;
 
   /* ── Status (semantic only — never decorative) ─────────────────────────── */
@@ -25,6 +32,7 @@
   --success-100: #DDF0E2;
   --warning-500: #C8941E;
   --warning-100: #F8ECCD;
+  --danger-700: #9A2F2F;
   --danger-500: #C04848;
   --danger-100: #F4DCDC;
 
@@ -44,7 +52,8 @@
   --font-serif: "Instrument Serif", Georgia, serif;
 
   /* ── Focus ring (the only shadow allowed) ──────────────────────────────── */
-  --focus-ring: 0 0 0 3px rgba(156, 133, 238, 0.25);
+  /* 2px cream gap + 2px lavender-700 ring — achieves 5.4:1 contrast on cream-50 (WCAG 2.4.11 ≥3:1) */
+  --focus-ring: 0 0 0 2px #FCFAF5, 0 0 0 4px #6B52C9;
 }
 
 /* ── Base resets / app-wide foundations ──────────────────────────────────── */
@@ -67,6 +76,9 @@ body {
 
 button {
   font-family: inherit;
+  /* Prevent OS/browser dark-mode UA styles from overriding button text color */
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 /* ── Pulse animation (live-revenue dot only) ─────────────────────────────── */
@@ -99,4 +111,32 @@ button {
   outline: none;
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+/* Honour user's motion preference globally for CSS transitions/animations.
+   Recharts animations are handled separately in RevenueChart via
+   isAnimationActive={false} when the media query matches. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Layout primitives ────────────────────────────────────────────────────── */
+
+/* content-container: standard page content width. Every page's root element
+   should use this class so layout grid is consistent across the app.
+   Pages that intentionally constrain to a narrower width (e.g. auth flows)
+   are exempt but must document the deviation. */
+.content-container {
+  width: 100%;
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
 }

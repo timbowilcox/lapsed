@@ -71,5 +71,10 @@ export {
 export { ConversationRow, type ConversationRowProps } from "./components/conversation-row";
 export { RevenueChart, type RevenueChartProps } from "./components/revenue-chart";
 
-// Skeletons
+// Empty state
+export { EmptyState, type EmptyStateProps } from "./components/empty-state";
+
+// Skeletons + loading primitives
+export { Skeleton } from "./components/skeleton";
 export { LapsedCustomersSkeleton } from "./components/skeletons/lapsed-customers-skeleton";
+export { useFirstRender } from "./hooks/use-first-render";

@@ -22,21 +22,32 @@ export async function SettingsSyncStatus({ merchantId }: { merchantId: string })
         <div className="text-label text-ink-700">Last synced</div>
         <div className="mt-2 text-meta text-ink-500">{lastSyncedLabel}</div>
       </div>
-      <Button variant="secondary" disabled>
-        Re-sync
-      </Button>
+      <div className="flex flex-col items-end gap-4">
+        <Button
+          variant="secondary"
+          disabled={!summary.last_synced_at}
+          aria-describedby={!summary.last_synced_at ? "resync-note" : undefined}
+        >
+          Re-sync
+        </Button>
+        {!summary.last_synced_at && (
+          <p id="resync-note" className="text-mini text-ink-400">
+            Available after your first nightly sync at 03:00 UTC.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
 export function SettingsSyncStatusSkeleton() {
   return (
-    <div className="animate-pulse flex items-center justify-between rounded-sm border border-border p-12">
+    <div className="motion-safe:animate-pulse flex items-center justify-between rounded-sm border border-border p-12">
       <div className="space-y-4">
-        <div className="h-10 w-20 rounded bg-ink-100" />
-        <div className="h-10 w-32 rounded bg-ink-100" />
+        <div className="h-10 w-20 rounded bg-cream-300" />
+        <div className="h-10 w-32 rounded bg-cream-300" />
       </div>
-      <div className="h-32 w-[84px] rounded-sm bg-ink-100" />
+      <div className="h-32 w-[84px] rounded-sm bg-cream-300" />
     </div>
   );
 }

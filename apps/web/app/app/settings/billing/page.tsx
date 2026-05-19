@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Card, Button, Badge, formatDate } from "@lapsed/ui";
+import { Card, Button, Badge, EmptyState, formatDate } from "@lapsed/ui";
 import { createServiceClient } from "@lapsed/db";
 import { TIER_PLANS, type SubscriptionTier } from "@lapsed/core";
 import { requireMerchant } from "@/app/lib/session";
@@ -62,13 +62,13 @@ export default async function SettingsBillingPage({ searchParams }: PageProps) {
   return (
     <MerchantShell pageTitle="Billing">
       <div className="mb-24">
-        <h2 className="mb-4 text-h1 text-ink-900">Billing</h2>
+        <h1 className="mb-4 text-h1 text-ink-900">Billing</h1>
         <p className="text-meta text-ink-500">
           Your subscription plan and payment management.
         </p>
       </div>
 
-      <Card className="flex max-w-md flex-col gap-16 p-24">
+      <Card className="flex flex-col gap-16 p-24">
         {hasPlan && plan && status ? (
           <>
             <div className="flex items-start justify-between">
@@ -93,15 +93,25 @@ export default async function SettingsBillingPage({ searchParams }: PageProps) {
           </>
         ) : (
           <>
-            <h3 className="text-body-strong text-ink-900">No active plan</h3>
-            <p className="text-meta text-ink-500">
-              Choose a subscription plan to start running win-back campaigns.
-            </p>
-            <div>
-              <Button asChild variant="primary">
-                <Link href="/app/billing/subscribe">Choose a plan</Link>
-              </Button>
+            {/* Preview of the plan card structure the merchant will see once subscribed */}
+            <div className="mb-16 grid grid-cols-3 gap-12 opacity-40 select-none" aria-hidden="true">
+              {["Starter", "Growth", "Scale"].map((tier) => (
+                <div key={tier} className="rounded-md border border-border p-16">
+                  <div className="mb-8 h-[14px] w-[56px] rounded bg-cream-300" />
+                  <div className="mb-12 h-[28px] w-[80px] rounded bg-cream-300" />
+                  <div className="h-[12px] w-full rounded bg-cream-300" />
+                </div>
+              ))}
             </div>
+            <EmptyState
+              heading="No active plan"
+              body="Choose a plan to start running win-back campaigns. Your plan appears here once you subscribe."
+              cta={
+                <Button asChild variant="primary">
+                  <Link href="/app/billing/subscribe">Choose a plan</Link>
+                </Button>
+              }
+            />
           </>
         )}
       </Card>
